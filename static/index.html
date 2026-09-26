@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quảng cáo Fanpage — Phần mềm Kế toán</title>
+<style>
+  :root {
+    --bg: #f4f6fa; --card: #fff; --text: #1d2433; --muted: #667085; --line: #e3e7ef;
+    --pri: #1877f2; --pri-weak: #e7f0fe; --ok: #1f8a4c; --ok-weak: #e6f5ec;
+    --warn: #b25e00; --warn-weak: #fff3e0; --err: #c62828; --err-weak: #fdecea;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--text); }
+  header { background: var(--card); border-bottom: 1px solid var(--line); padding: 12px 20px;
+           display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+  header h1 { font-size: 17px; margin: 0; }
+  #mode { font-size: 12px; padding: 3px 10px; border-radius: 99px; }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; margin-left: auto; }
+  nav button { background: none; border: 0; padding: 8px 12px; border-radius: 8px; cursor: pointer;
+               font: inherit; color: var(--muted); }
+  nav button.active { background: var(--pri-weak); color: var(--pri); font-weight: 600; }
+  main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
+  section { display: none; } section.active { display: block; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+          padding: 16px 18px; margin-bottom: 16px; }
+  .card h2 { font-size: 15px; margin: 0 0 12px; }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
+  .stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
+  .stat b { display: block; font-size: 26px; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 13px; }
+  .row { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-start; }
+  .col { flex: 1 1 380px; min-width: 0; }
+  label { display: block; font-weight: 600; font-size: 13px; margin: 10px 0 4px; }
+  input, textarea, select { width: 100%; font: inherit; padding: 8px 10px; border: 1px solid var(--line);
+                            border-radius: 8px; background: #fff; color: var(--text); }
+  textarea { min-height: 110px; resize: vertical; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: #fff;
+         padding: 7px 14px; border-radius: 8px; cursor: pointer; font: inherit; color: var(--text); }
+  .btn.pri { background: var(--pri); border-color: var(--pri); color: #fff; }
+  .btn.danger { color: var(--err); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; }
+  .tbl-wrap { overflow-x: auto; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 99px; font-size: 12px; white-space: nowrap; }
+  .p-ok { background: var(--ok-weak); color: var(--ok); }
+  .p-warn { background: var(--warn-weak); color: var(--warn); }
+  .p-err { background: var(--err-weak); color: var(--err); }
+  .p-info { background: var(--pri-weak); color: var(--pri); }
+  .muted { color: var(--muted); } .small { font-size: 12px; }
+  .pre { white-space: pre-wrap; }
+  .tpl { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; cursor: pointer; }
+  .tpl:hover { border-color: var(--pri); }
+  .tpl b { display: block; }
+  .chat { background: #f0f2f5; border-radius: 12px; padding: 12px; min-height: 260px; max-height: 480px; overflow-y: auto; }
+  .bubble { max-width: 80%; padding: 8px 12px; border-radius: 16px; margin: 6px 0; white-space: pre-wrap; }
+  .bubble.me { background: var(--pri); color: #fff; margin-left: auto; }
+  .bubble.bot { background: #fff; }
+  .qr { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+  .qr button { border: 1px solid var(--pri); color: var(--pri); background: #fff; border-radius: 99px;
+               padding: 3px 12px; cursor: pointer; font: inherit; font-size: 13px; }
+  .note { background: var(--warn-weak); border-left: 3px solid var(--warn); padding: 10px 12px; border-radius: 6px; }
+  .feature { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+  .feature .row > div { flex: 1 1 160px; }
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #1d2433; color: #fff;
+           padding: 10px 18px; border-radius: 8px; display: none; z-index: 10; max-width: 90vw; }
+  ol li { margin-bottom: 6px; }
+  code { background: #eef1f6; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📣 Quảng cáo Fanpage</h1>
+  <span id="mode"></span>
+  <nav id="nav">
+    <button data-s="overview" class="active">Tổng quan</button>
+    <button data-s="posts">Bài đăng</button>
+    <button data-s="script">Kịch bản trả lời</button>
+    <button data-s="sim">Thử kịch bản</button>
+    <button data-s="leads">Khách tiềm năng</button>
+    <button data-s="activity">Nhật ký</button>
+    <button data-s="guide">Hướng dẫn</button>
+  </nav>
+</header>
+
+<main>
+<!-- ============================ TỔNG QUAN -->
+<section id="overview" class="active">
+  <div class="grid" id="stats"></div>
+  <div class="card" style="margin-top:16px">
+    <h2>Kết nối Facebook</h2>
+    <div id="conn"></div>
+    <div class="btns"><button class="btn" onclick="checkConn()">Kiểm tra kết nối Fanpage</button></div>
+  </div>
+  <div class="card">
+    <h2>Công cụ này hoạt động thế nào</h2>
+    <ol>
+      <li><b>Đăng bài</b> giới thiệu tính năng lên Fanpage của bạn (đăng ngay hoặc hẹn giờ).</li>
+      <li>Cuối bài có lời mời <i>“Bình luận QUAN TÂM để nhận tài liệu”</i>. Người quan tâm tự bình luận.</li>
+      <li>Bot <b>nhắn riêng</b> cho người vừa bình luận (Private Reply của Meta — 1 tin/bình luận) và trả lời công khai “đã inbox”.</li>
+      <li>Khi họ nhắn lại, bot gửi <b>menu tính năng</b>, báo giá, xin số điện thoại; ai cần người thật thì bot chuyển cho bạn.</li>
+      <li>Mọi người đã tương tác được lưu ở tab <b>Khách tiềm năng</b> để gọi lại / chốt đơn.</li>
+    </ol>
+    <p class="muted small">Bot chỉ trả lời người <b>chủ động</b> tương tác với Fanpage — không thu thập thông tin hay nhắn tin cho người lạ trong nhóm. Đây là cách Meta cho phép và tránh vi phạm quy định về dữ liệu cá nhân, tin nhắn rác.</p>
+  </div>
+</section>
+
+<!-- ============================ BÀI ĐĂNG -->
+<section id="posts">
+  <div class="row">
+    <div class="col">
+      <div class="card">
+        <h2>Soạn bài</h2>
+        <label>Nội dung</label>
+        <textarea id="pMsg" style="min-height:260px"></textarea>
+        <div class="row">
+          <div class="col" style="flex-basis:200px"><label>Link (tùy chọn)</label><input id="pLink" placeholder="https://..."></div>
+          <div class="col" style="flex-basis:200px"><label>Link ảnh (tùy chọn)</label><input id="pImg" placeholder="https://.../anh.jpg"></div>
+        </div>
+        <label>Hẹn giờ đăng</label>
+        <input id="pTime" type="datetime-local">
+        <div class="btns">
+          <button class="btn pri" onclick="savePost('now')">Đăng ngay lên Fanpage</button>
+          <button class="btn" onclick="savePost('schedule')">Hẹn giờ</button>
+          <button class="btn" onclick="savePost('draft')">Lưu nháp</button>
+          <button class="btn" onclick="copyPost()">📋 Sao chép để đăng nhóm</button>
+        </div>
+        <p class="note small" style="margin-top:12px">
+          <b>Đăng vào nhóm:</b> Facebook đã ngừng API đăng bài vào nhóm, nên hãy <b>sao chép</b> và tự đăng —
+          chỉ ở nhóm cho phép quảng cáo hoặc đã được quản trị viên đồng ý. Trong bài nhóm, mời mọi người
+          nhắn tin / bình luận ở <b>Fanpage</b> để bot tiếp nhận.
+        </p>
+      </div>
+    </div>
+    <div class="col" style="flex-basis:300px;max-width:420px">
+      <div class="card">
+        <h2>Mẫu bài theo tính năng</h2>
+        <div id="tpls"></div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Danh sách bài</h2>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>#</th><th>Nội dung</th><th>Trạng thái</th><th>Hẹn giờ / Đã đăng</th><th></th></tr></thead>
+      <tbody id="postRows"></tbody>
+    </table></div>
+  </div>
+</section>
+
+<!-- ============================ KỊCH BẢN -->
+<section id="script">
+  <div class="card">
+    <h2>Khi có người bình luận trên bài Fanpage</h2>
+    <label>Từ khóa kích hoạt (cách nhau bởi dấu phẩy, không cần dấu)</label>
+    <input id="sKeywords">
+    <label style="font-weight:400"><input type="checkbox" id="sReplyAll" style="width:auto"> Nhắn riêng cho <b>mọi</b> bình luận (kể cả không có từ khóa)</label>
+    <label>Tin nhắn riêng gửi người bình luận</label>
+    <textarea id="sPrivate"></textarea>
+    <label>Trả lời công khai dưới bình luận (để trống = không trả lời)</label>
+    <input id="sPublic">
+  </div>
+  <div class="card">
+    <h2>Messenger</h2>
+    <p class="muted small">Biến dùng được: <code>{name}</code> tên người dùng, <code>{product}</code> tên phần mềm, <code>{phone}</code> số điện thoại (chỉ ở tin cảm ơn).</p>
+    <div class="row">
+      <div class="col"><label>Lời chào + menu</label><textarea id="sWelcome"></textarea></div>
+      <div class="col"><label>Không hiểu câu hỏi</label><textarea id="sFallback"></textarea></div>
+    </div>
+    <div class="row">
+      <div class="col"><label>Báo giá</label><textarea id="sPricing"></textarea></div>
+      <div class="col"><label>Dùng thử</label><textarea id="sDemo"></textarea></div>
+    </div>
+    <div class="row">
+      <div class="col"><label>Cảm ơn khi nhận số điện thoại</label><textarea id="sPhone"></textarea></div>
+      <div class="col"><label>Chuyển tư vấn viên</label><textarea id="sHuman"></textarea></div>
+    </div>
+    <div class="row">
+      <div class="col"><label>Khi người dùng gõ “stop / hủy / dừng”</label><textarea id="sOptOut"></textarea></div>
+      <div class="col"><label>Bot im lặng bao nhiêu giờ sau khi chuyển tư vấn viên</label><input id="sPause" type="number" min="1" max="168"></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Tính năng giới thiệu (nút menu Messenger)</h2>
+    <div id="features"></div>
+    <div class="btns"><button class="btn" onclick="addFeature()">+ Thêm tính năng</button></div>
+  </div>
+  <div class="btns">
+    <button class="btn pri" onclick="saveScript()">Lưu kịch bản</button>
+    <button class="btn danger" onclick="resetScript()">Khôi phục mặc định</button>
+  </div>
+</section>
+
+<!-- ============================ THỬ KỊCH BẢN -->
+<section id="sim">
+  <div class="row">
+    <div class="col">
+      <div class="card">
+        <h2>Giả lập Messenger</h2>
+        <div class="chat" id="chat"></div>
+        <div class="row" style="margin-top:10px">
+          <input id="simText" placeholder="Nhập tin như khách hàng, ví dụ: tải hóa đơn thế nào?" style="flex:1"
+                 onkeydown="if(event.key==='Enter')simSend()">
+          <button class="btn pri" onclick="simSend()">Gửi</button>
+        </div>
+        <p class="muted small">Chỉ chạy trên máy bạn, không gửi gì lên Facebook.</p>
+      </div>
+    </div>
+    <div class="col">
+      <div class="card">
+        <h2>Giả lập bình luận</h2>
+        <input id="simComment" placeholder="Ví dụ: quan tâm, xin giá" onkeydown="if(event.key==='Enter')simComment()">
+        <div class="btns"><button class="btn" onclick="simComment()">Thử</button></div>
+        <div id="simCommentOut" style="margin-top:12px"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ KHÁCH TIỀM NĂNG -->
+<section id="leads">
+  <div class="card">
+    <div class="row" style="align-items:center">
+      <h2 style="margin:0;flex:1">Khách tiềm năng</h2>
+      <select id="leadFilter" style="width:auto" onchange="renderLeads()">
+        <option value="">Tất cả</option>
+        <option value="can_goi_lai">Cần gọi lại</option>
+        <option value="dang_tu_van">Đang tư vấn</option>
+        <option value="moi">Mới</option>
+        <option value="da_mua">Đã mua</option>
+        <option value="khong_quan_tam">Không quan tâm</option>
+      </select>
+      <a class="btn" href="/api/leads.csv">⬇ Xuất CSV</a>
+    </div>
+    <div class="tbl-wrap" style="margin-top:12px"><table>
+      <thead><tr><th>Tên / ID</th><th>SĐT</th><th>Nguồn</th><th>Quan tâm</th><th>Tin cuối</th><th>Trạng thái</th><th>Ghi chú</th><th></th></tr></thead>
+      <tbody id="leadRows"></tbody>
+    </table></div>
+  </div>
+</section>
+
+<!-- ============================ NHẬT KÝ -->
+<section id="activity">
+  <div class="card">
+    <h2>Nhật ký hoạt động (200 dòng gần nhất)</h2>
+    <div class="tbl-wrap"><table>
+      <thead><tr><th>Thời gian</th><th>Loại</th><th>Khách</th><th>Nội dung</th></tr></thead>
+      <tbody id="actRows"></tbody>
+    </table></div>
+  </div>
+</section>
+
+<!-- ============================ HƯỚNG DẪN -->
+<section id="guide">
+  <div class="card">
+    <h2>Cài đặt kết nối Fanpage (làm 1 lần)</h2>
+    <ol>
+      <li>Vào <b>developers.facebook.com</b> → <i>My Apps</i> → <i>Create App</i> → loại <b>Business</b>.</li>
+      <li>Thêm sản phẩm <b>Messenger</b> và <b>Webhooks</b>. Kết nối Fanpage của bạn, tạo <b>Page Access Token</b>.</li>
+      <li>Cấp quyền: <code>pages_manage_posts</code>, <code>pages_read_engagement</code>, <code>pages_manage_engagement</code>,
+          <code>pages_messaging</code>, <code>pages_show_list</code>. Muốn chạy cho khách hàng ngoài đội của bạn thì gửi App Review.</li>
+      <li>Mở file <code>.env</code>, điền <code>FB_PAGE_ID</code>, <code>FB_PAGE_ACCESS_TOKEN</code>, <code>FB_APP_SECRET</code>,
+          tự đặt <code>FB_VERIFY_TOKEN</code> (chuỗi bất kỳ) và <code>ADMIN_PASSWORD</code>. Khởi động lại phần mềm.</li>
+      <li>Webhook cần địa chỉ <b>HTTPS công khai</b>: chạy trên VPS có tên miền, hoặc dùng
+          <code>cloudflared tunnel --url http://localhost:8787</code>. Callback URL: <code>https://&lt;địa-chỉ&gt;/webhook</code>,
+          Verify token = <code>FB_VERIFY_TOKEN</code>.</li>
+      <li>Đăng ký trường webhook của Page: <b>messages</b>, <b>messaging_postbacks</b>, <b>feed</b>.</li>
+      <li>Vào tab <b>Tổng quan</b> → <i>Kiểm tra kết nối Fanpage</i>.</li>
+    </ol>
+  </div>
+  <div class="card">
+    <h2>Mẹo để có nhiều khách hơn (hợp lệ)</h2>
+    <ul>
+      <li>Chạy <b>quảng cáo Facebook Ads</b> cho bài đăng, nhắm đối tượng “Kế toán”, “Dịch vụ kế toán”, “MISA”… — người thấy quảng cáo bình luận, bot tự nhắn tin.</li>
+      <li>Dùng mục tiêu quảng cáo <b>Tin nhắn (Click-to-Messenger)</b>: người bấm quảng cáo mở thẳng Messenger và bot trả lời ngay.</li>
+      <li>Tham gia nhóm kế toán với tư cách chuyên gia: trả lời câu hỏi về hóa đơn, tờ khai; chỉ chia sẻ phần mềm khi phù hợp và nhóm cho phép.</li>
+      <li>Làm video ngắn quay màn hình “tải hóa đơn 20 công ty trong 3 phút” — nội dung dạng này được chia sẻ nhiều.</li>
+    </ul>
+  </div>
+</section>
+</main>
+<div id="toast"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = (t) => t ? new Date(t * 1000).toLocaleString('vi-VN') : '';
+const STATUS = { moi: 'Mới', dang_tu_van: 'Đang tư vấn', can_goi_lai: 'Cần gọi lại', da_mua: 'Đã mua', khong_quan_tam: 'Không quan tâm' };
+const POST_STATUS = { draft: ['Nháp','p-info'], scheduled: ['Đã hẹn giờ','p-warn'], posting: ['Đang đăng','p-warn'],
+                      posted: ['Đã đăng','p-ok'], failed: ['Lỗi','p-err'] };
+let SCRIPT = null, LEADS = [];
+
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.style.display = 'block';
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 3500); }
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, { headers: { 'Content-Type': 'application/json' }, ...opts,
+                                body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) { const m = data.detail || r.statusText; toast('⚠ ' + (typeof m === 'string' ? m : JSON.stringify(m))); throw new Error(m); }
+  return data;
+}
+
+document.querySelectorAll('#nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#nav button').forEach(x => x.classList.toggle('active', x === b));
+  document.querySelectorAll('main section').forEach(s => s.classList.toggle('active', s.id === b.dataset.s));
+  ({ overview: loadStatus, posts: loadPosts, script: loadScript, leads: loadLeads, activity: loadActivity })[b.dataset.s]?.();
+});
+
+// ---------------- Tổng quan
+async function loadStatus() {
+  const s = await api('/api/status');
+  $('mode').textContent = s.dry_run ? 'Chế độ chạy thử' : 'Đang kết nối Fanpage';
+  $('mode').className = 'pill ' + (s.dry_run ? 'p-warn' : 'p-ok');
+  const st = s.stats;
+  $('stats').innerHTML = [
+    [st.leads, 'Khách tiềm năng'], [st.leads_7d, 'Khách mới 7 ngày'], [st.can_goi_lai, 'Cần gọi lại'],
+    [st.co_sdt, 'Đã để lại SĐT'], [st.replies_sent, 'Tin bot đã gửi'], [st.posts_posted, 'Bài đã đăng'],
+    [st.posts_scheduled, 'Bài đang hẹn giờ'],
+  ].map(([n, l]) => `<div class="stat"><b>${n}</b><span>${l}</span></div>`).join('');
+  const ok = (v) => v ? '<span class="pill p-ok">Đã có</span>' : '<span class="pill p-err">Thiếu</span>';
+  $('conn').innerHTML = `<table>
+    <tr><td>FB_PAGE_ID</td><td>${s.page_id ? esc(s.page_id) : ok(false)}</td></tr>
+    <tr><td>FB_PAGE_ACCESS_TOKEN</td><td>${ok(s.has_token)}</td></tr>
+    <tr><td>FB_APP_SECRET (xác thực webhook)</td><td>${ok(s.has_app_secret)}</td></tr>
+    <tr><td>FB_VERIFY_TOKEN</td><td>${ok(s.has_verify_token)}</td></tr>
+    <tr><td>Graph API</td><td>${esc(s.graph_version)}</td></tr></table>
+    ${s.dry_run ? '<p class="note small" style="margin-top:10px">Chưa có Page ID/Token → đang <b>chạy thử</b>: mọi lệnh gửi Facebook chỉ được ghi vào Nhật ký. Xem tab <b>Hướng dẫn</b>.</p>' : ''}`;
+}
+async function checkConn() {
+  const p = await api('/api/check-connection', { method: 'POST' });
+  toast(`✅ Kết nối OK: ${p.name} (${p.fan_count ?? '?'} lượt thích)`);
+}
+
+// ---------------- Bài đăng
+async function loadPosts() {
+  if (!$('tpls').children.length) {
+    const tpls = await api('/api/templates');
+    $('tpls').innerHTML = tpls.map((t, i) => `<div class="tpl" data-i="${i}"><b>${esc(t.title)}</b>
+      <span class="muted small">${esc(t.text.slice(0, 90))}…</span></div>`).join('');
+    $('tpls').querySelectorAll('.tpl').forEach(el => el.onclick = () => {
+      const t = tpls[el.dataset.i]; $('pMsg').value = t.text; $('pMsg').dataset.tpl = t.key; });
+    if (!$('pMsg').value) { $('pMsg').value = tpls[0].text; $('pMsg').dataset.tpl = tpls[0].key; }
+  }
+  const posts = await api('/api/posts');
+  $('postRows').innerHTML = posts.map(p => {
+    const [label, cls] = POST_STATUS[p.status] || [p.status, 'p-info'];
+    const canEdit = !['posted', 'posting'].includes(p.status);
+    return `<tr><td>${p.id}</td>
+      <td class="pre" style="max-width:520px">${esc(p.message.slice(0, 220))}${p.message.length > 220 ? '…' : ''}
+        ${p.error ? `<div class="small" style="color:var(--err)">${esc(p.error)}</div>` : ''}</td>
+      <td><span class="pill ${cls}">${label}</span></td>
+      <td class="small">${p.status === 'posted' ? fmt(p.posted_at) + (p.fb_post_id && p.fb_post_id !== 'dry-run' ?
+          `<br><a target="_blank" href="https://facebook.com/${esc(p.fb_post_id)}">Xem bài</a>` : '') : fmt(p.scheduled_at)}</td>
+      <td style="white-space:nowrap">${canEdit ? `<button class="btn" onclick="publishPost(${p.id})">Đăng ngay</button>` : ''}
+        ${p.status === 'scheduled' ? `<button class="btn" onclick="unschedule(${p.id})">Hủy hẹn</button>` : ''}
+        <button class="btn danger" onclick="delPost(${p.id})">Xóa</button></td></tr>`;
+  }).join('') || '<tr><td colspan="5" class="muted">Chưa có bài nào.</td></tr>';
+}
+async function savePost(mode) {
+  const body = { message: $('pMsg').value, link: $('pLink').value.trim(), image_url: $('pImg').value.trim(),
+                 template_key: $('pMsg').dataset.tpl || '' };
+  if (mode === 'now') { if (!confirm('Đăng bài này lên Fanpage ngay?')) return; body.publish_now = true; }
+  if (mode === 'schedule') {
+    if (!$('pTime').value) return toast('Chọn thời gian hẹn giờ');
+    body.scheduled_at = Math.floor(new Date($('pTime').value).getTime() / 1000);
+    if (body.scheduled_at < Date.now() / 1000) return toast('Thời gian hẹn phải ở tương lai');
+  }
+  const p = await api('/api/posts', { method: 'POST', body });
+  toast(p.status === 'posted' ? '✅ Đã đăng' : p.status === 'failed' ? '⚠ Đăng lỗi: ' + p.error :
+        p.status === 'scheduled' ? '⏰ Đã hẹn giờ' : '💾 Đã lưu nháp');
+  loadPosts();
+}
+async function publishPost(id) { if (!confirm('Đăng bài #' + id + ' ngay?')) return;
+  const p = await api(`/api/posts/${id}/publish`, { method: 'POST' });
+  toast(p.status === 'posted' ? '✅ Đã đăng' : '⚠ ' + p.error); loadPosts(); }
+async function unschedule(id) { await api(`/api/posts/${id}`, { method: 'PUT', body: { unschedule: true } }); loadPosts(); }
+async function delPost(id) { if (!confirm('Xóa bài #' + id + ' khỏi danh sách? (không xóa trên Facebook)')) return;
+  await api(`/api/posts/${id}`, { method: 'DELETE' }); loadPosts(); }
+async function copyPost() {
+  try { await navigator.clipboard.writeText($('pMsg').value); toast('📋 Đã sao chép — nhớ chỉ đăng ở nhóm cho phép quảng cáo'); }
+  catch { $('pMsg').select(); toast('Nhấn Ctrl+C để sao chép'); }
+}
+
+// ---------------- Kịch bản
+const SCRIPT_FIELDS = { sPrivate: 'comment_private_reply', sPublic: 'comment_public_reply', sWelcome: 'welcome',
+  sFallback: 'fallback', sPricing: 'pricing', sDemo: 'demo', sPhone: 'phone_thanks', sHuman: 'human_handover',
+  sOptOut: 'opt_out', sPause: 'human_pause_hours' };
+async function loadScript() {
+  SCRIPT = await api('/api/script');
+  for (const [id, k] of Object.entries(SCRIPT_FIELDS)) $(id).value = SCRIPT[k] ?? '';
+  $('sKeywords').value = SCRIPT.comment_keywords.join(', ');
+  $('sReplyAll').checked = !!SCRIPT.reply_all_comments;
+  renderFeatures();
+}
+function renderFeatures() {
+  $('features').innerHTML = SCRIPT.features.map((f, i) => `<div class="feature" data-i="${i}">
+    <div class="row">
+      <div><label>Mã</label><input data-f="key" value="${esc(f.key)}"></div>
+      <div><label>Tên nút (≤ 20 ký tự)</label><input data-f="short" maxlength="20" value="${esc(f.short)}"></div>
+      <div style="flex-basis:260px"><label>Tiêu đề</label><input data-f="title" value="${esc(f.title)}"></div>
+    </div>
+    <label>Từ khóa nhận diện (không dấu, cách nhau dấu phẩy)</label><input data-f="keywords" value="${esc((f.keywords || []).join(', '))}">
+    <label>Nội dung giới thiệu</label><textarea data-f="detail">${esc(f.detail)}</textarea>
+    <div class="btns"><button class="btn danger" onclick="delFeature(${i})">Xóa tính năng</button></div></div>`).join('');
+}
+function collectFeatures() {
+  return [...$('features').querySelectorAll('.feature')].map(el => {
+    const g = (f) => el.querySelector(`[data-f="${f}"]`).value.trim();
+    return { key: g('key'), short: g('short'), title: g('title'), detail: g('detail'),
+             keywords: g('keywords').split(',').map(s => s.trim()).filter(Boolean) };
+  });
+}
+function addFeature() { SCRIPT.features = collectFeatures();
+  SCRIPT.features.push({ key: 'moi_' + Date.now() % 10000, short: 'Tính năng mới', title: '', detail: '', keywords: [] }); renderFeatures(); }
+function delFeature(i) { SCRIPT.features = collectFeatures(); SCRIPT.features.splice(i, 1); renderFeatures(); }
+async function saveScript() {
+  const s = {};
+  for (const [id, k] of Object.entries(SCRIPT_FIELDS)) s[k] = $(id).value;
+  s.human_pause_hours = Number(s.human_pause_hours) || 12;
+  s.comment_keywords = $('sKeywords').value.split(',').map(x => x.trim()).filter(Boolean);
+  s.reply_all_comments = $('sReplyAll').checked;
+  s.features = collectFeatures();
+  SCRIPT = await api('/api/script', { method: 'PUT', body: s });
+  toast('✅ Đã lưu kịch bản');
+}
+async function resetScript() { if (!confirm('Khôi phục toàn bộ kịch bản mặc định?')) return;
+  await api('/api/script/reset', { method: 'POST' }); loadScript(); toast('Đã khôi phục'); }
+
+// ---------------- Thử kịch bản
+function bubble(text, who) { const d = document.createElement('div'); d.className = 'bubble ' + who; d.textContent = text;
+  $('chat').appendChild(d); $('chat').scrollTop = 1e9; }
+async function simSend(text, payload) {
+  text = text ?? $('simText').value.trim(); if (!text && !payload) return;
+  $('simText').value = ''; bubble(text, 'me');
+  const r = await api('/api/simulate', { method: 'POST', body: { kind: 'message', text: payload ? '' : text, payload: payload || '' } });
+  if (!r.text) { bubble('(bot im lặng — người dùng đã hủy nhận tin hoặc đang chờ tư vấn viên)', 'bot'); return; }
+  bubble(r.text, 'bot');
+  if (r.quick_replies.length) {
+    const q = document.createElement('div'); q.className = 'qr';
+    r.quick_replies.forEach(x => { const b = document.createElement('button'); b.textContent = x.title;
+      b.onclick = () => { q.remove(); simSend(x.title, x.payload); }; q.appendChild(b); });
+    $('chat').appendChild(q); $('chat').scrollTop = 1e9;
+  }
+}
+async function simComment() {
+  const r = await api('/api/simulate', { method: 'POST', body: { kind: 'comment', text: $('simComment').value } });
+  $('simCommentOut').innerHTML = r.will_reply
+    ? `<span class="pill p-ok">Bot sẽ nhắn riêng</span><div class="bubble bot" style="max-width:100%;border:1px solid var(--line)">${esc(r.private_reply)}</div>
+       ${r.public_reply ? `<div class="small muted">Trả lời công khai: ${esc(r.public_reply)}</div>` : ''}`
+    : '<span class="pill p-info">Không có từ khóa → bot bỏ qua bình luận này</span>';
+}
+
+// ---------------- Khách tiềm năng
+async function loadLeads() { LEADS = await api('/api/leads'); renderLeads(); }
+function renderLeads() {
+  const f = $('leadFilter').value;
+  const rows = LEADS.filter(l => !f || l.status === f);
+  $('leadRows').innerHTML = rows.map(l => {
+    const paused = l.paused_until > Date.now() / 1000;
+    return `<tr>
+      <td><b>${esc(l.name || '(chưa rõ tên)')}</b><div class="small muted">${esc(l.id)}</div>
+        ${l.opted_out ? '<span class="pill p-err">Đã hủy nhận tin</span>' : ''}
+        ${paused ? '<span class="pill p-warn">Bot tạm dừng</span>' : ''}</td>
+      <td><input value="${esc(l.phone)}" style="width:120px" onchange="updLead('${esc(l.id)}',{phone:this.value})"></td>
+      <td>${l.source === 'comment' ? 'Bình luận' : 'Messenger'}</td>
+      <td class="small">${esc(l.interests.join(', '))}</td>
+      <td class="small" style="max-width:220px">${esc(l.last_text)}<div class="muted">${fmt(l.last_seen)}</div></td>
+      <td><select style="width:auto" onchange="updLead('${esc(l.id)}',{status:this.value})">
+        ${Object.entries(STATUS).map(([k, v]) => `<option value="${k}" ${k === l.status ? 'selected' : ''}>${v}</option>`).join('')}
+      </select></td>
+      <td><input value="${esc(l.note)}" onchange="updLead('${esc(l.id)}',{note:this.value})"></td>
+      <td>${paused ? `<button class="btn" onclick="updLead('${esc(l.id)}',{resume_bot:true},true)">Bật lại bot</button>` : ''}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" class="muted">Chưa có khách nào. Khi có người bình luận / nhắn tin Fanpage, họ sẽ xuất hiện ở đây.</td></tr>';
+}
+async function updLead(id, body, reload) { await api('/api/leads/' + encodeURIComponent(id), { method: 'PUT', body });
+  toast('Đã lưu'); if (reload) loadLeads(); }
+
+// ---------------- Nhật ký
+const KIND = { comment: 'Bình luận', private_reply: 'Nhắn riêng', message_in: 'Tin đến', send: 'Bot gửi', post: 'Đăng bài',
+  handover: 'Chuyển tư vấn', phone: 'Nhận SĐT', error: 'Lỗi', dry_run: 'Chạy thử' };
+async function loadActivity() {
+  const rows = await api('/api/activity');
+  $('actRows').innerHTML = rows.map(a => `<tr><td class="small" style="white-space:nowrap">${fmt(a.created_at)}</td>
+    <td><span class="pill ${a.kind === 'error' ? 'p-err' : 'p-info'}">${KIND[a.kind] || esc(a.kind)}</span></td>
+    <td class="small">${esc(a.lead_id)}</td><td class="small pre">${esc(a.text)}</td></tr>`).join('')
+    || '<tr><td colspan="4" class="muted">Chưa có hoạt động.</td></tr>';
+}
+
+loadStatus();
+</script>
+</body>
+</html>
