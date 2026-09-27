@@ -44,8 +44,13 @@ GRAPH_API_VERSION = os.environ.get("GRAPH_API_VERSION", "v23.0").strip()
 
 HOST = os.environ.get("HOST", "127.0.0.1")
 PORT = int(os.environ.get("PORT", "8787"))
+
+# Mặc định KHÔNG yêu cầu đăng nhập vào bảng điều khiển (chỉ chạy trên máy của
+# bạn, ở 127.0.0.1 - không ai khác truy cập được). Chỉ bật khi phần mềm được
+# mở ra ngoài Internet (vd qua cloudflared tunnel) để tránh người lạ vào được.
+REQUIRE_LOGIN = os.environ.get("DASHBOARD_LOGIN", "").lower() in ("1", "true", "yes")
 ADMIN_USER = os.environ.get("ADMIN_USER", "admin")
-ADMIN_PASSWORD = _admin_password()
+ADMIN_PASSWORD = _admin_password() if REQUIRE_LOGIN else ""
 DB_PATH = Path(os.environ.get("DB_PATH", str(DATA_DIR / "qc.db")))
 
 # Chưa có token → chạy thử: ghi log thay vì gọi Facebook thật.

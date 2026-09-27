@@ -34,9 +34,7 @@ phép, và cũng là cách mang lại khách chất lượng hơn.
 
 1. Cài Python 3.10+ (Windows: tick **“Add Python to PATH”**).
 2. **Windows:** bấm đúp `start.bat`. **Mac/Linux:** `./start.sh`.
-3. Trình duyệt mở `http://127.0.0.1:8787`, đăng nhập bằng tài khoản `admin` và mật khẩu
-   `ADMIN_PASSWORD` trong `.env`. Nếu để trống, mật khẩu được tự sinh, in ra cửa sổ đen và lưu ở
-   `data/.admin_password`.
+3. Trình duyệt mở `http://127.0.0.1:8787` — mặc định **không cần đăng nhập** (chỉ chạy trên máy bạn).
 
 Chưa khai báo Page ID/Token thì phần mềm chạy ở **chế độ thử**: mọi lệnh gửi lên Facebook chỉ được ghi
 vào tab *Nhật ký*. Bạn có thể dùng tab *Thử kịch bản* để chỉnh nội dung trước.
@@ -50,7 +48,7 @@ vào tab *Nhật ký*. Bạn có thể dùng tab *Thử kịch bản* để ch�
    `pages_messaging`, `pages_show_list`. Quản trị viên Page dùng được ngay ở chế độ Development. Muốn
    bot trả lời **mọi người** thì app cần qua **App Review** và chuyển sang Live.
 4. Sao chép `.env.example` thành `.env` và điền `FB_PAGE_ID`, `FB_PAGE_ACCESS_TOKEN`, `FB_APP_SECRET`,
-   `FB_VERIFY_TOKEN` (tự đặt), `ADMIN_PASSWORD`.
+   `FB_VERIFY_TOKEN` (tự đặt).
 5. Webhook cần địa chỉ **HTTPS công khai**. Có thể chạy trên VPS có tên miền, hoặc trên máy mình với
    `cloudflared tunnel --url http://localhost:8787`.
    - Callback URL: `https://<địa-chỉ>/webhook`
@@ -58,8 +56,14 @@ vào tab *Nhật ký*. Bạn có thể dùng tab *Thử kịch bản* để ch�
    - Đăng ký trường: `messages`, `messaging_postbacks`, `feed`
 6. Khởi động lại phần mềm → tab *Tổng quan* → **Kiểm tra kết nối Fanpage**.
 
-> Bảng điều khiển luôn yêu cầu mật khẩu, còn `/webhook` thì công khai nhưng được xác thực bằng chữ ký
-> `X-Hub-Signature-256` từ `FB_APP_SECRET`. Khi mở tunnel ra Internet, nhớ đặt `ADMIN_PASSWORD` mạnh.
+> Mặc định bảng điều khiển không cần đăng nhập (chỉ nghe ở `127.0.0.1`, không ai ngoài máy bạn vào
+> được). `/webhook` thì công khai nhưng được xác thực bằng chữ ký `X-Hub-Signature-256` từ
+> `FB_APP_SECRET`. **Nếu mở tunnel ra Internet** (để cấu hình webhook), người khác cũng gõ được đúng
+> địa chỉ tunnel để mở bảng điều khiển — khi đó nên bật lại mật khẩu bằng cách thêm vào `.env`:
+> ```
+> DASHBOARD_LOGIN=true
+> ADMIN_PASSWORD=matkhaucuaban
+> ```
 
 ## Giới hạn của Meta cần biết
 

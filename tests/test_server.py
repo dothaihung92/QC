@@ -16,9 +16,18 @@ def client():
     return TestClient(server.app)
 
 
-def test_dashboard_requires_password(client):
+def test_dashboard_no_login_by_default(client):
+    """Mặc định không cần mật khẩu - chỉ chạy trên máy của người dùng."""
+    assert client.get("/").status_code == 200
+    assert client.get("/api/status").status_code == 200
+
+
+def test_dashboard_login_when_enabled(client, monkeypatch):
+    """Bật DASHBOARD_LOGIN=true (vd khi mở tunnel ra Internet) thì đòi mật khẩu."""
+    monkeypatch.setattr(config, "REQUIRE_LOGIN", True)
+    monkeypatch.setattr(config, "ADMIN_USER", "admin")
+    monkeypatch.setattr(config, "ADMIN_PASSWORD", "secret")
     assert client.get("/").status_code == 401
-    assert client.get("/api/status").status_code == 401
     assert client.get("/", auth=("admin", "wrong")).status_code == 401
     r = client.get("/", auth=AUTH)
     assert r.status_code == 200 and "Quảng cáo Fanpage" in r.text

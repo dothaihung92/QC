@@ -1,4 +1,4 @@
-"""Máy chủ: bảng điều khiển (có mật khẩu) + webhook Facebook + lịch đăng bài."""
+"""Máy chủ: bảng điều khiển + webhook Facebook + lịch đăng bài."""
 import csv
 import io
 import logging
@@ -53,8 +53,12 @@ async def lifespan(_app):
     _stop.clear()
     threading.Thread(target=scheduler_loop, daemon=True).start()
     mode = "CHẠY THỬ (chưa gửi thật lên Facebook)" if config.DRY_RUN else f"Page {config.PAGE_ID}"
-    log.info("Bảng điều khiển: http://%s:%s  — đăng nhập: %s / %s",
-             config.HOST, config.PORT, config.ADMIN_USER, config.ADMIN_PASSWORD)
+    if config.REQUIRE_LOGIN:
+        log.info("Bảng điều khiển: http://%s:%s  — đăng nhập: %s / %s",
+                 config.HOST, config.PORT, config.ADMIN_USER, config.ADMIN_PASSWORD)
+    else:
+        log.info("Bảng điều khiển: http://%s:%s  (không yêu cầu đăng nhập)",
+                 config.HOST, config.PORT)
     log.info("Chế độ: %s", mode)
     yield
     _stop.set()
@@ -87,13 +91,19 @@ async def webhook_receive(request: Request, background: BackgroundTasks):
     return PlainTextResponse("EVENT_RECEIVED")
 
 
-# ---------------------------------------------------------------- bảng điều khiển (có mật khẩu)
+# ---------------------------------------------------------------- bảng điều khiển
+# Mặc định không yêu cầu đăng nhập (chỉ chạy trên máy của bạn). Đặt
+# DASHBOARD_LOGIN=true trong .env để bật lại mật khẩu - cần thiết nếu đưa
+# phần mềm ra ngoài Internet (vd qua cloudflared tunnel để cấu hình webhook).
 
-security = HTTPBasic()
+security = HTTPBasic(auto_error=False)
 
 
 def require_admin(cred: HTTPBasicCredentials = Depends(security)):
-    ok = (secrets.compare_digest(cred.username.encode(), config.ADMIN_USER.encode())
+    if not config.REQUIRE_LOGIN:
+        return
+    ok = (cred is not None
+          and secrets.compare_digest(cred.username.encode(), config.ADMIN_USER.encode())
           and secrets.compare_digest(cred.password.encode(), config.ADMIN_PASSWORD.encode()))
     if not ok:
         raise HTTPException(401, "Sai tài khoản", headers={"WWW-Authenticate": "Basic"})
