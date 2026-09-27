@@ -4,14 +4,19 @@ REM Chay phan mem quang cao Fanpage tren Windows
 cd /d "%~dp0"
 if not exist .env copy .env.example .env >nul
 
-REM Tim trinh chay Python: uu tien lenh "python", khong co thi dung "py" (Python Launcher)
+REM Tim trinh chay Python: PHAI thu goi thuc su (khong chi dung "where"), vi
+REM Windows co san mot "python.exe" gia (App Execution Alias, dan toi Microsoft
+REM Store) nam san trong PATH - "where python" van bao "tim thay" du may chua
+REM cai Python that, khien buoc sau chay "python ..." bao loi "not recognized".
 set "PY="
-where python >nul 2>nul && set "PY=python"
+python --version >nul 2>nul && set "PY=python"
 if not defined PY (
-  where py >nul 2>nul && set "PY=py -3"
+  py -3 --version >nul 2>nul && set "PY=py -3"
 )
 if not defined PY (
-  echo Chua tim thay Python. Tai tai https://www.python.org/downloads/ va tick "Add python.exe to PATH" khi cai.
+  echo Chua tim thay Python that su tren may ^(chi thay "python" gia cua Windows,
+  echo dan toi Microsoft Store^). Tai va cai tai https://www.python.org/downloads/
+  echo va nho TICK vao o "Add python.exe to PATH" luc cai.
   pause
   exit /b 1
 )
@@ -19,11 +24,19 @@ echo Da tim thay Python: %PY%
 
 REM Tu dong cap nhat phan mem tu GitHub (neu co ban moi) - chi dung thu vien
 REM co san cua Python, khong can moi truong ao nen chay duoc ngay tai day.
-if exist update.py (
+REM Chi khoi dong lai khi update.py bao DUNG ma 10 (khong phai bat ky loi nao
+REM khac - vi du loi "khong goi duoc python" tra ve ma loi rat lon nhu 9009,
+REM neu chi kiem tra "errorlevel 10" ^(nghia la >= 10^) se hieu nham va gay
+REM vong lap mo lai vo tan). "%QC_DA_KHOI_DONG_LAI%" chan vong lap du co gi.
+if exist update.py if not defined QC_DA_KHOI_DONG_LAI (
   echo Dang kiem tra cap nhat phan mem...
   %PY% update.py
-  if errorlevel 10 (
-    echo Da cap nhat file khoi dong - dang mo lai...
+  REM "if errorlevel 10 if not errorlevel 11" nghia la ma loi DUNG BANG 10 -
+  REM khong dung bien trung gian vi bien so trong cung 1 khoi ngoac chi duoc
+  REM thay gia tri MOT LAN luc doc ca khoi, doc lai se ra gia tri cu.
+  if errorlevel 10 if not errorlevel 11 (
+    echo Da cap nhat file khoi dong - dang mo lai mot lan...
+    set "QC_DA_KHOI_DONG_LAI=1"
     start "" "%~f0"
     exit /b
   )
