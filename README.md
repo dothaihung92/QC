@@ -87,9 +87,18 @@ app/facebook.py   # Gọi Graph API + xác thực chữ ký webhook
 app/content.py    # Tính năng KE-TOAN, kịch bản mặc định, mẫu bài đăng
 app/db.py         # SQLite: bài đăng, khách tiềm năng, cài đặt, nhật ký
 static/index.html # Giao diện
+update.py         # Tự cập nhật phần mềm từ GitHub, chạy mỗi lần bấm start.bat
+start.bat / run_server.bat / start.sh  # Chạy nhanh trên Windows / Mac-Linux
 tests/            # pytest
 data/             # CSDL (tự tạo — KHÔNG commit)
 ```
+
+## Tự động cập nhật
+
+Mỗi lần bấm `start.bat`, phần mềm tự kiểm tra và tải phiên bản mới nhất từ nhánh
+`claude/facebook-auto-advertising-tool-ireuil` trên GitHub (chỉ tải file mã nguồn,
+không đụng đến `.env` hay dữ liệu trong `data/`). Nếu không có mạng, phần mềm bỏ
+qua bước này và chạy tiếp với bản đang có sẵn — không bao giờ bị treo vì thiếu mạng.
 
 ## Chạy test
 

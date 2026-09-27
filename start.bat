@@ -17,6 +17,19 @@ if not defined PY (
 )
 echo Da tim thay Python: %PY%
 
+REM Tu dong cap nhat phan mem tu GitHub (neu co ban moi) - chi dung thu vien
+REM co san cua Python, khong can moi truong ao nen chay duoc ngay tai day.
+if exist update.py (
+  echo Dang kiem tra cap nhat phan mem...
+  %PY% update.py
+  if errorlevel 10 (
+    echo Da cap nhat file khoi dong - dang mo lai...
+    start "" "%~f0"
+    exit /b
+  )
+  echo.
+)
+
 if not exist .venv %PY% -m venv .venv
 if not exist .venv\Scripts\python.exe (
   echo Tao thu muc .venv that bai. Xoa thu muc .venv roi chay lai file nay.
