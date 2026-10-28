@@ -134,3 +134,10 @@ def test_seo_writer_opened_directly_redirects_into_dashboard_tab(client):
     framed = client.get("/seo-writer", headers={"Sec-Fetch-Dest": "iframe"})
     assert framed.status_code == 200 and "SEO Article Writer" in framed.text
     assert client.get("/").headers["cache-control"] == "no-store"
+
+
+def test_server_survives_missing_groupbot_module(client, monkeypatch):
+    monkeypatch.setattr(server, "groupbot", None)
+    r = client.get("/api/groupbot/status")
+    assert r.status_code == 503 and "start.bat" in r.json()["detail"]
+    assert client.get("/api/status").status_code == 200

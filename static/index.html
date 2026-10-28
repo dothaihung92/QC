@@ -352,6 +352,8 @@
         <div id="gjGroups" class="small"></div>
         <label>Giờ nhắc đăng <span class="muted small">(để trống = nhắc ngay)</span></label>
         <input id="gjTime" type="datetime-local">
+        <label style="font-weight:400"><input type="checkbox" id="gjAuto" style="width:auto">
+          Đến giờ <b>tự đăng bằng trình duyệt</b> (cần đã đăng nhập Facebook ở khung 🤖, máy bật và phần mềm đang chạy)</label>
         <div class="btns"><button class="btn pri" onclick="saveGroupJob()">⏰ Hẹn giờ nhắc</button>
           <button class="btn" id="notifBtn" onclick="enableNotify()">🔔 Bật thông báo trình duyệt</button></div>
       </div>
@@ -368,6 +370,19 @@
         <p class="muted small">Link nhóm dạng <code>facebook.com/groups/123456789</code>.</p>
       </div>
     </div>
+  </div>
+  <div class="card">
+    <h2>🤖 Tự động đăng bằng trình duyệt <span class="pill p-warn">thử nghiệm · có rủi ro</span></h2>
+    <div class="note small" style="margin-bottom:10px">
+      Phần mềm mở <b>Microsoft Edge/Chrome thật</b> trên máy bạn, vào từng nhóm và đăng như người dùng. Facebook <b>không cho phép</b>
+      việc này — tài khoản có thể bị yêu cầu xác minh hoặc khóa. Phần mềm <b>không lưu mật khẩu</b> (bạn đăng nhập tay 1 lần), giới hạn
+      <span id="gbLimit">15</span> bài/ngày và nghỉ 1–2 phút giữa các nhóm. Nên thử với 1 nhóm trước, dùng tài khoản bạn chấp nhận rủi ro.
+    </div>
+    <label style="font-weight:400"><input type="checkbox" id="gbRisk" style="width:auto" onchange="gbSaveRisk()">
+      Tôi hiểu và chấp nhận rủi ro bị Facebook hạn chế/khóa tài khoản</label>
+    <div id="gbState" style="margin:10px 0"></div>
+    <div class="btns" id="gbBtns" style="margin-top:0"></div>
+    <pre id="gbLog" class="small" style="display:none;background:#0f172a;color:#d6e2ff;border-radius:8px;padding:10px;max-height:200px;overflow:auto;margin:10px 0 0;white-space:pre-wrap"></pre>
   </div>
   <div class="card">
     <h2>Lịch đăng nhóm</h2>
@@ -717,6 +732,7 @@ async function loadGroups() {
     || '<span class="muted">Thêm nhóm ở cột bên phải trước.</span>';
   renderNotifBtn();
   loadGroupJobs();
+  loadGroupBot();
 }
 async function addGroup() {
   await api('/api/groups', { method: 'POST', body: { name: $('gName').value, url: $('gUrl').value } });
@@ -731,11 +747,51 @@ async function saveGroupJob() {
   const ids = [...document.querySelectorAll('#gjGroups input:checked')].map(i => +i.value);
   const t = $('gjTime').value;
   const at = t ? Math.floor(new Date(t).getTime() / 1000) : null;
+  const auto = $('gjAuto').checked;
+  if (auto && !GB_RISK()) return toast('Tick "Tôi hiểu và chấp nhận rủi ro" ở khung 🤖 trước');
   await api('/api/group-jobs', { method: 'POST', body: { message: $('gjMsg').value, link: $('gjLink').value.trim(),
-                                                         scheduled_at: at, group_ids: ids } });
+                                                         scheduled_at: at, group_ids: ids, auto, accept_risk: auto } });
   toast(at && at > Date.now() / 1000 ? '⏰ Đã hẹn giờ nhắc' : '🔔 Đến giờ rồi — xem lịch bên dưới');
   $('gjMsg').value = ''; $('gjLink').value = ''; $('gjTime').value = '';
   loadGroupJobs(); pollBadges();
+}
+// ---- tự đăng bằng trình duyệt
+const GB_RISK = () => { try { return localStorage.getItem('gbRisk') === '1'; } catch { return false; } };
+function gbSaveRisk() { try { localStorage.setItem('gbRisk', $('gbRisk').checked ? '1' : '0'); } catch {} }
+let GBS = null, gbTimer = null;
+async function loadGroupBot() {
+  $('gbRisk').checked = GB_RISK();
+  const was = GBS, logLen = was ? was.log.length : 0;
+  try { GBS = await api('/api/groupbot/status'); } catch { return; }
+  renderGroupBot();
+  if (was && (was.busy !== GBS.busy || GBS.log.length !== logLen)) loadGroupJobs();   // có nhóm vừa đăng xong
+  clearTimeout(gbTimer);
+  if (location.hash === '#groups') gbTimer = setTimeout(loadGroupBot, GBS.busy ? 2000 : 8000);
+}
+function renderGroupBot() {
+  const g = GBS, ok = '<span class="pill p-ok">sẵn sàng</span>', no = t => `<span class="pill p-err">${t}</span>`;
+  $('gbLimit').textContent = g.daily_limit;
+  $('gbState').innerHTML = `Trình điều khiển: ${g.playwright ? ok : no('chưa cài')} &nbsp; Facebook: ${g.logged_in ? ok : no('chưa đăng nhập')}
+    &nbsp; Hôm nay đã đăng: <b>${g.daily_used}/${g.daily_limit}</b> bài ${g.busy ? '&nbsp; <span class="pill p-warn">đang chạy…</span>' : ''}`;
+  const b = [];
+  if (!g.playwright) b.push('<button class="btn pri" onclick="gbDo(\'install\')">⬇ Cài đặt trình điều khiển</button>');
+  else b.push(`<button class="btn ${g.logged_in ? '' : 'pri'}" onclick="gbDo('login')">🔑 ${g.logged_in ? 'Đăng nhập lại Facebook' : 'Đăng nhập Facebook (1 lần)'}</button>`);
+  if (g.busy) b.push('<button class="btn danger" onclick="gbDo(\'stop\')">⏹ Dừng</button>');
+  $('gbBtns').innerHTML = b.join('');
+  const log = $('gbLog'); log.style.display = g.log.length ? 'block' : 'none';
+  const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+  log.textContent = g.log.join('\n'); if (atBottom) log.scrollTop = log.scrollHeight;
+}
+async function gbDo(what) {
+  try { GBS = await api('/api/groupbot/' + what, { method: 'POST' }); renderGroupBot(); } catch { return; }
+  loadGroupBot(); setTimeout(loadGroupJobs, 3000);
+}
+async function runJob(id) {
+  if (!GB_RISK()) return toast('Tick "Tôi hiểu và chấp nhận rủi ro" ở khung 🤖 trước');
+  if (!GBS?.logged_in) return toast('Bấm "Đăng nhập Facebook" ở khung 🤖 trước');
+  if (!confirm('Phần mềm sẽ mở trình duyệt và đăng vào các nhóm còn lại. Đừng đóng cửa sổ đó khi đang chạy. Tiếp tục?')) return;
+  try { GBS = await api('/api/groupbot/run', { method: 'POST', body: { job_id: id, accept_risk: true } }); } catch { return; }
+  renderGroupBot(); loadGroupBot(); toast('🤖 Đang chạy — xem tiến trình ở khung 🤖');
 }
 let JOBS = [];
 const JOB_TXT = { scheduled: ['Chờ đến giờ', 'p-info'], due: ['Đến giờ đăng!', 'p-warn'], done: ['Đã xong', 'p-ok'] };
@@ -745,6 +801,8 @@ async function loadGroupJobs() {
     return `<div class="job ${j.status}">
       <div class="row" style="align-items:center;gap:8px"><b style="flex:1">${fmt(j.scheduled_at)}</b>
         <span class="pill ${cls}">${label}</span>
+        ${j.auto && j.status !== 'done' ? '<span class="pill p-info">tự đăng khi đến giờ</span>' : ''}
+        ${j.status !== 'done' ? `<button class="btn pri" onclick="runJob(${j.id})">🤖 Tự đăng các nhóm còn lại</button>` : ''}
         <button class="btn" onclick="copyJob(${j.id})">📋 Copy nội dung</button>
         <button class="btn danger" onclick="delJob(${j.id})">Xóa</button></div>
       <div class="pre small" style="margin:8px 0;max-height:90px;overflow:auto">${esc(j.message)}${j.link ? '\n' + esc(j.link) : ''}</div>
@@ -849,6 +907,7 @@ async function pollBadges() {
     if (lastDue !== null && b.group_due > lastDue) notifyUser('Đến giờ đăng nhóm', `${b.group_due} lịch đang chờ bạn`);
     if (lastCm !== null && b.comments_new > lastCm) notifyUser('Bình luận mới', `${b.comments_new} bình luận cần trả lời`);
     if (location.hash === '#comments' && lastCm !== null && b.comments_new !== lastCm) loadComments();
+    if (location.hash === '#groups' && GBS?.busy) loadGroupJobs();
     lastCm = b.comments_new; lastDue = b.group_due;
   } catch {}
 }

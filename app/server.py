@@ -18,6 +18,11 @@ from pydantic import BaseModel
 from . import bot, config, content, db, facebook
 from .facebook import FacebookError
 
+try:
+    from . import groupbot
+except ImportError:      # file mới chưa được tự cập nhật về: đừng làm sập cả phần mềm
+    groupbot = None
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("qc")
 
@@ -43,6 +48,8 @@ def scheduler_loop(interval=20):
         try:
             for post in db.claim_due_posts():
                 publish(post)
+            if groupbot:
+                groupbot.run_due_auto_jobs()
         except Exception as e:
             log.exception("scheduler: %s", e)
         _stop.wait(interval)
@@ -520,6 +527,8 @@ class GroupJobIn(BaseModel):
     link: str = ""
     scheduled_at: Optional[int] = None    # None = đăng ngay (nhắc luôn)
     group_ids: list[int]
+    auto: bool = False                    # đến giờ tự đăng bằng trình duyệt (thử nghiệm)
+    accept_risk: bool = False
 
 
 @admin.get("/api/group-jobs")
@@ -535,7 +544,9 @@ def add_group_job(body: GroupJobIn):
     ids = [g for g in body.group_ids if g in valid]
     if not ids:
         raise HTTPException(400, "Chọn ít nhất 1 group")
-    jid = db.add_group_job(body.message.strip(), body.link.strip(), body.scheduled_at or db.now(), ids)
+    if body.auto and not body.accept_risk:
+        raise HTTPException(400, RISK_MSG)
+    jid = db.add_group_job(body.message.strip(), body.link.strip(), body.scheduled_at or db.now(), ids, auto=body.auto)
     return {"id": jid}
 
 
@@ -554,6 +565,59 @@ def toggle_group_job(jid: int, body: ToggleIn):
 def delete_group_job(jid: int):
     db.delete_group_job(jid)
     return {"ok": True}
+
+
+# ----- tự đăng nhóm bằng trình duyệt (thử nghiệm) ------------------------------
+
+RISK_MSG = "Cần xác nhận đã hiểu rủi ro: tự động đăng nhóm trái điều khoản Facebook, có thể bị khóa tài khoản."
+
+
+def _bot():
+    if groupbot is None:
+        raise HTTPException(503, "Thiếu app/groupbot.py — đóng hết cửa sổ đen rồi chạy lại start.bat để tự cập nhật")
+    return groupbot
+
+
+def _bot_call(fn_name, *args):
+    bot_module = _bot()
+    try:
+        getattr(bot_module, fn_name)(*args)
+    except bot_module.GroupBotError as e:
+        raise HTTPException(400, str(e))
+    return bot_module.status()
+
+
+@admin.get("/api/groupbot/status")
+def groupbot_status():
+    return _bot().status()
+
+
+@admin.post("/api/groupbot/install")
+def groupbot_install():
+    return _bot_call("start_install")
+
+
+@admin.post("/api/groupbot/login")
+def groupbot_login():
+    return _bot_call("start_login")
+
+
+class RunIn(BaseModel):
+    job_id: int
+    accept_risk: bool = False
+
+
+@admin.post("/api/groupbot/run")
+def groupbot_run(body: RunIn):
+    if not body.accept_risk:
+        raise HTTPException(400, RISK_MSG)
+    return _bot_call("start_run", body.job_id)
+
+
+@admin.post("/api/groupbot/stop")
+def groupbot_stop():
+    _bot().stop()
+    return _bot().status()
 
 
 app.include_router(admin)

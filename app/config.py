@@ -57,3 +57,10 @@ DB_PATH = Path(os.environ.get("DB_PATH", str(DATA_DIR / "qc.db")))
 DRY_RUN = os.environ.get("DRY_RUN", "").lower() in ("1", "true", "yes") or not (
     PAGE_ID and PAGE_ACCESS_TOKEN
 )
+
+# Tự đăng nhóm bằng trình duyệt (thử nghiệm): giới hạn để bảo vệ tài khoản.
+GROUPBOT_DAILY_LIMIT = int(os.environ.get("GROUPBOT_DAILY_LIMIT", "15"))   # số bài/ngày tối đa
+GROUPBOT_DELAY_MIN = int(os.environ.get("GROUPBOT_DELAY_MIN", "60"))       # nghỉ giữa 2 nhóm (giây)
+GROUPBOT_DELAY_MAX = int(os.environ.get("GROUPBOT_DELAY_MAX", "150"))
+GROUPBOT_BROWSER_PATH = os.environ.get("GROUPBOT_BROWSER_PATH", "").strip()  # mặc định dùng Edge/Chrome có sẵn
+GROUPBOT_HEADLESS = os.environ.get("GROUPBOT_HEADLESS", "").lower() in ("1", "true", "yes")  # chỉ để thử/gỡ lỗi

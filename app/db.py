@@ -81,7 +81,8 @@ CREATE TABLE IF NOT EXISTS group_jobs (
     scheduled_at INTEGER NOT NULL,
     group_ids    TEXT NOT NULL DEFAULT '[]',       -- JSON list id group_targets
     done_ids     TEXT NOT NULL DEFAULT '[]',       -- JSON list group đã đăng xong
-    created_at   INTEGER NOT NULL
+    created_at   INTEGER NOT NULL,
+    auto         INTEGER NOT NULL DEFAULT 0        -- 1 = đến giờ tự đăng bằng trình duyệt
 );
 CREATE TABLE IF NOT EXISTS activity (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -108,6 +109,9 @@ def conn():
 def init():
     with conn() as c:
         c.executescript(SCHEMA)
+        cols = {r["name"] for r in c.execute("PRAGMA table_info(group_jobs)")}
+        if "auto" not in cols:                       # CSDL cũ chưa có cột auto
+            c.execute("ALTER TABLE group_jobs ADD COLUMN auto INTEGER NOT NULL DEFAULT 0")
 
 
 def now() -> int:
@@ -375,12 +379,33 @@ def delete_group(gid):
         c.execute("DELETE FROM group_targets WHERE id=?", (gid,))
 
 
-def add_group_job(message, link, scheduled_at, group_ids):
+def add_group_job(message, link, scheduled_at, group_ids, auto=False):
     with conn() as c:
         return c.execute(
-            "INSERT INTO group_jobs(message, link, scheduled_at, group_ids, created_at) VALUES(?, ?, ?, ?, ?)",
-            (message, link, scheduled_at, json.dumps(group_ids), now()),
+            "INSERT INTO group_jobs(message, link, scheduled_at, group_ids, created_at, auto) VALUES(?, ?, ?, ?, ?, ?)",
+            (message, link, scheduled_at, json.dumps(group_ids), now(), int(bool(auto))),
         ).lastrowid
+
+
+def set_group_job_auto(job_id, auto: bool):
+    with conn() as c:
+        c.execute("UPDATE group_jobs SET auto=? WHERE id=?", (int(bool(auto)), job_id))
+
+
+def mark_group_done(job_id, group_id):
+    """Đánh dấu 1 group đã đăng xong (khác toggle: gọi nhiều lần vẫn là 'đã đăng')."""
+    with conn() as c:
+        row = c.execute("SELECT done_ids FROM group_jobs WHERE id=?", (job_id,)).fetchone()
+        if row:
+            done = set(json.loads(row["done_ids"])) | {group_id}
+            c.execute("UPDATE group_jobs SET done_ids=? WHERE id=?", (json.dumps(sorted(done)), job_id))
+
+
+def count_activity_today(kind) -> int:
+    t = time.localtime()
+    midnight = int(time.mktime((t.tm_year, t.tm_mon, t.tm_mday, 0, 0, 0, 0, 0, -1)))
+    with conn() as c:
+        return c.execute("SELECT COUNT(*) FROM activity WHERE kind=? AND created_at>=?", (kind, midnight)).fetchone()[0]
 
 
 def _job_dict(row, groups_by_id):

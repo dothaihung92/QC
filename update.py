@@ -39,6 +39,7 @@ FILES = [
     "app/facebook.py",
     "app/content.py",
     "app/bot.py",
+    "app/groupbot.py",
     "app/server.py",
     "static/index.html",
     "static/seo-writer.html",
