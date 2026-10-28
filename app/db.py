@@ -54,9 +54,11 @@ CREATE TABLE IF NOT EXISTS comments (
     from_name   TEXT DEFAULT '',
     message     TEXT DEFAULT '',
     created_at  INTEGER NOT NULL,
-    status      TEXT NOT NULL DEFAULT 'new',       -- new|replied|private_replied|ignored
+    status      TEXT NOT NULL DEFAULT 'new',       -- new|replied|private_replied|ignored|page (trả lời của Fanpage)
     reply_text  TEXT DEFAULT '',
-    replied_at  INTEGER
+    replied_at  INTEGER,
+    seen        INTEGER NOT NULL DEFAULT 0,        -- 0 = bình luận mới, người dùng chưa mở xem
+    reply_by    TEXT NOT NULL DEFAULT ''           -- auto|manual: ai đã trả lời
 );
 CREATE TABLE IF NOT EXISTS post_stats (
     fb_post_id   TEXT PRIMARY KEY,
@@ -112,6 +114,12 @@ def init():
         cols = {r["name"] for r in c.execute("PRAGMA table_info(group_jobs)")}
         if "auto" not in cols:                       # CSDL cũ chưa có cột auto
             c.execute("ALTER TABLE group_jobs ADD COLUMN auto INTEGER NOT NULL DEFAULT 0")
+        ccols = {r["name"] for r in c.execute("PRAGMA table_info(comments)")}
+        if "seen" not in ccols:                      # bình luận cũ coi như đã xem, chỉ bình luận mới mới có chấm "Mới"
+            c.execute("ALTER TABLE comments ADD COLUMN seen INTEGER NOT NULL DEFAULT 0")
+            c.execute("UPDATE comments SET seen=1")
+        if "reply_by" not in ccols:
+            c.execute("ALTER TABLE comments ADD COLUMN reply_by TEXT NOT NULL DEFAULT ''")
 
 
 def now() -> int:
@@ -295,16 +303,16 @@ def stats():
 # ---------- bình luận ----------
 
 def save_comment(cid, post_id="", from_id="", from_name="", message="",
-                 created_at=None, parent_id="", status="new"):
-    """Thêm bình luận; có rồi thì chỉ bổ sung nội dung/tên còn thiếu, KHÔNG đổi trạng thái."""
+                 created_at=None, parent_id="", status="new", seen=0, reply_by=""):
+    """Thêm bình luận; có rồi thì chỉ bổ sung nội dung/tên còn thiếu, KHÔNG đổi trạng thái / đã xem."""
     with conn() as c:
         c.execute(
-            "INSERT INTO comments(id, post_id, parent_id, from_id, from_name, message, created_at, status) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?) "
+            "INSERT INTO comments(id, post_id, parent_id, from_id, from_name, message, created_at, status, seen, reply_by) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(id) DO UPDATE SET "
             "message=CASE WHEN excluded.message != '' THEN excluded.message ELSE message END, "
             "from_name=CASE WHEN excluded.from_name != '' THEN excluded.from_name ELSE from_name END",
-            (cid, post_id, parent_id, from_id, from_name, message, created_at or now(), status),
+            (cid, post_id, parent_id, from_id, from_name, message, created_at or now(), status, seen, reply_by),
         )
 
 
@@ -315,19 +323,22 @@ def get_comment(cid):
 
 
 def list_comments(status=None, limit=300):
-    sql, args = "SELECT * FROM comments", []
-    if status == "open":                    # cần xử lý
-        sql += " WHERE status='new'"
-    elif status:
-        sql += " WHERE status=?"; args.append(status)
-    sql += " ORDER BY created_at DESC LIMIT ?"
+    """Hộp thư bình luận. Trả lời của chính Fanpage (status='page') chỉ hiện trong khung xem bài."""
+    sql, args = "SELECT * FROM comments WHERE status != 'page'", []
+    if status == "open":                    # cần trả lời
+        sql += " AND status='new'"
+    elif status == "unseen":                # chưa mở xem
+        sql += " AND seen=0"
+    elif status and status != "all":
+        sql += " AND status=?"; args.append(status)
+    sql += " ORDER BY created_at DESC, rowid DESC LIMIT ?"
     with conn() as c:
         rows = c.execute(sql, (*args, limit)).fetchall()
     return [dict(r) for r in rows]
 
 
 def update_comment(cid, **fields):
-    allowed = {"status", "reply_text", "replied_at"}
+    allowed = {"status", "reply_text", "replied_at", "seen", "reply_by"}
     fields = {k: v for k, v in fields.items() if k in allowed}
     if not fields:
         return
@@ -337,8 +348,41 @@ def update_comment(cid, **fields):
 
 
 def count_new_comments() -> int:
+    """Số bình luận cần trả lời."""
     with conn() as c:
         return c.execute("SELECT COUNT(*) FROM comments WHERE status='new'").fetchone()[0]
+
+
+def count_unseen_comments() -> int:
+    """Số bình luận mới chưa mở xem (số đỏ trên menu)."""
+    with conn() as c:
+        return c.execute("SELECT COUNT(*) FROM comments WHERE seen=0 AND status != 'page'").fetchone()[0]
+
+
+def mark_all_seen():
+    with conn() as c:
+        c.execute("UPDATE comments SET seen=1 WHERE seen=0")
+
+
+def list_thread(post_id):
+    """Mọi bình luận của 1 bài (cả trả lời của Fanpage), theo thứ tự thời gian."""
+    with conn() as c:
+        rows = c.execute("SELECT * FROM comments WHERE post_id=? ORDER BY created_at, rowid", (post_id,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def has_auto_reply_to(post_id, from_id, except_id="") -> bool:
+    """Người này đã được trả lời tự động ở bài này chưa (để không trả lời lặp)."""
+    with conn() as c:
+        return c.execute(
+            "SELECT 1 FROM comments WHERE post_id=? AND from_id=? AND reply_by='auto' AND id != ? LIMIT 1",
+            (post_id, from_id, except_id)).fetchone() is not None
+
+
+def get_post_stat(fb_post_id):
+    with conn() as c:
+        row = c.execute("SELECT * FROM post_stats WHERE fb_post_id=?", (fb_post_id,)).fetchone()
+    return dict(row) if row else None
 
 
 # ---------- thống kê bài ----------
@@ -449,3 +493,15 @@ def delete_group_job(job_id):
 
 def count_due_group_jobs() -> int:
     return sum(1 for j in list_group_jobs() if j["status"] == "due")
+
+
+def post_message(fb_post_id) -> str:
+    """Nội dung bài Fanpage (để hiện 'Trên bài: ...' cạnh bình luận): số liệu đã đồng bộ, không có thì bài đăng từ phần mềm."""
+    if not fb_post_id:
+        return ""
+    stat = get_post_stat(fb_post_id)
+    if stat and stat["message"]:
+        return stat["message"]
+    with conn() as c:
+        row = c.execute("SELECT message FROM posts WHERE fb_post_id=?", (fb_post_id,)).fetchone()
+    return row["message"] if row else ""

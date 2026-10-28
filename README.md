@@ -103,6 +103,8 @@ data/             # CSDL (tự tạo — KHÔNG commit)
 | Tab | Làm được gì | Cần gì |
 |---|---|---|
 | **Bình luận** | Mọi bình luận trên bài Fanpage hiện ở đây (tự về qua webhook; nút *Đồng bộ* kéo bù khi máy/tunnel từng tắt). Trả lời công khai, nhắn riêng, bỏ qua. Số đỏ trên menu + thông báo trình duyệt khi có bình luận mới. | Trả lời công khai cần quyền `pages_manage_engagement`; đọc nội dung khi *Đồng bộ* cần `pages_read_user_content` (webhook không cần) |
+| **Bình luận — nâng cấp** | 🆕 Bình luận mới có nhãn **MỚI** và số đỏ trên menu cho tới khi bạn mở xem. Mỗi bình luận ghi rõ **bài nào, Fanpage nào**. Bấm vào một bình luận → khung bên phải hiện **toàn bộ bình luận của bài đó như trên Facebook** (kèm các câu trả lời, kể cả của Fanpage) và trả lời ngay trong đó. | — |
+| **Trả lời tự động** (đầu tab Bình luận) | Đặt quy tắc *từ khóa → câu trả lời công khai + tin nhắn riêng*; quy tắc đầu tiên khớp sẽ trả lời **ngay dưới bình luận trên Facebook**. Có câu trả lời mặc định, mỗi người chỉ 1 lần/bài, giới hạn/ngày, và ô **Thử** để xem trước. Không khớp thì để bạn trả lời tay. | Trả lời công khai cần `pages_manage_engagement`; phần mềm tự kiểm tra và báo thiếu quyền ở đầu tab |
 | **Thống kê** | Lượt thích, bình luận, chia sẻ, lượt xem của từng bài + tổng, bấm tiêu đề cột để sắp xếp. | Lượt xem cần quyền `read_insights`; thiếu thì hiện "—" |
 | **Đăng nhóm** | Hẹn giờ nhắc đăng nhiều nhóm: đến giờ phần mềm báo, mở sẵn nhóm, chép sẵn nội dung; bạn dán, bấm đăng, rồi bấm *✓ Đã đăng*. | Mở sẵn trang phần mềm để nhận nhắc |
 

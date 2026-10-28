@@ -33,6 +33,24 @@
   .cm .msg { white-space: pre-wrap; margin: 4px 0 8px; }
   .cm .answer { background: var(--ok-weak); border-radius: 8px; padding: 8px 10px; margin: 0 0 8px; font-size: 13px; white-space: pre-wrap; }
   .cm .replybox { display: none; margin-top: 8px; } .cm .replybox.show { display: block; }
+  .cm .cmclick { cursor: pointer; } .cm .cmclick:hover .msg { color: var(--pri); }
+  .cm .where { color: var(--muted); margin: 2px 0 4px; }
+  #thBg { display: none; position: fixed; inset: 0; background: rgba(15,23,42,.35); z-index: 50; } #thBg.open { display: block; }
+  #thDrawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(580px, 100vw); background: #fff; z-index: 51; transform: translateX(100%);
+              transition: transform .2s; box-shadow: -4px 0 24px rgba(0,0,0,.18); display: flex; flex-direction: column; }
+  #thDrawer.open { transform: none; }
+  #thDrawer .thtop { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  #thBody { overflow-y: auto; flex: 1; padding-bottom: 30px; }
+  .thpost { padding: 12px 14px; border-bottom: 1px solid var(--line); background: #f8fafc; }
+  .thlist { padding: 10px 14px; }
+  .thc { display: flex; gap: 8px; margin: 10px 0; } .thc.reply { margin-left: 4px; }
+  .thc .avatar { flex: none; width: 32px; height: 32px; border-radius: 50%; background: var(--pri-weak); color: var(--pri);
+                 display: inline-flex; align-items: center; justify-content: center; font-weight: 700; }
+  .thc .avatar.page { background: var(--pri); color: #fff; }
+  .thc .thbody { flex: 1; min-width: 0; }
+  .thc .bubble { background: #f0f2f5; border-radius: 16px; padding: 8px 12px; display: inline-block; max-width: 100%; white-space: normal; }
+  .thc.focus > .thbody > .bubble { background: #fff6d6; box-shadow: 0 0 0 2px #f5c542; }
+  .thc .replybox { display: none; margin-top: 6px; } .thc .replybox.show { display: block; }
   .job { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; background: #fff; }
   .job.due { border-color: var(--warn); background: var(--warn-weak); }
   .job.done { opacity: .6; }
@@ -394,22 +412,61 @@
 
 <!-- ============================ BÌNH LUẬN -->
 <section id="comments">
+  <div id="scopeWarn"></div>
+
+  <div class="card">
+    <div class="row" style="align-items:center">
+      <h2 style="margin:0;flex:1">🤖 Trả lời bình luận tự động <span id="arState" class="pill p-info">…</span></h2>
+      <button class="btn" onclick="toggleAr()" id="arToggle">Cài đặt ▾</button>
+    </div>
+    <div id="arBody" style="display:none">
+      <p class="muted small">Khi có bình luận mới trên bài Fanpage, phần mềm xét các quy tắc <b>từ trên xuống</b>, quy tắc đầu tiên khớp từ khóa
+        (không phân biệt hoa thường / dấu) sẽ trả lời <b>ngay dưới bình luận trên Facebook</b> và/hoặc nhắn riêng. Dùng <code>{name}</code> để gọi tên người bình luận.
+        Bình luận không khớp quy tắc nào thì để lại cho bạn trả lời tay.</p>
+      <label style="font-weight:400"><input type="checkbox" id="arEnabled" style="width:auto"> <b>Bật trả lời tự động</b></label>
+      <div id="arRules"></div>
+      <div class="btns"><button class="btn" onclick="arAddRule()">+ Thêm quy tắc</button></div>
+      <div class="row">
+        <div class="col"><label>Trả lời mặc định (cho mọi bình luận khác — để trống = không trả lời)</label>
+          <textarea id="arDefReply" rows="2" placeholder="Cảm ơn {name} đã quan tâm ❤️"></textarea></div>
+        <div class="col"><label>Nhắn riêng mặc định (tùy chọn)</label><textarea id="arDefPrivate" rows="2"></textarea></div>
+      </div>
+      <label style="font-weight:400"><input type="checkbox" id="arOnce" style="width:auto"> Mỗi người chỉ trả lời tự động <b>1 lần</b> ở mỗi bài (tránh spam)</label>
+      <label style="font-weight:400"><input type="checkbox" id="arTop" style="width:auto"> Bỏ qua bình luận nằm trong phần trả lời của bình luận khác</label>
+      <label style="font-weight:400">Tối đa <input type="number" id="arLimit" min="1" max="2000" style="width:90px;display:inline-block"> lượt trả lời tự động mỗi ngày</label>
+      <div class="btns"><button class="btn pri" onclick="arSave()">💾 Lưu</button></div>
+      <hr style="border:0;border-top:1px solid var(--line);margin:14px 0">
+      <label>Thử xem bình luận nào sẽ được trả lời gì <span class="muted small">(không gửi gì lên Facebook)</span></label>
+      <div class="row" style="gap:8px"><input id="arTestText" placeholder="Ví dụ: Cho mình xin báo giá" style="flex:1 1 260px"
+        onkeydown="if(event.key==='Enter')arTest()"><button class="btn" onclick="arTest()">Thử</button></div>
+      <div id="arTestOut" style="margin-top:8px"></div>
+    </div>
+  </div>
+
   <div class="card">
     <div class="row" style="align-items:center">
       <h2 style="margin:0;flex:1">Bình luận trên Fanpage</h2>
       <select id="cmFilter" style="width:auto" onchange="loadComments()">
-        <option value="open">Cần trả lời</option>
+        <option value="unseen">🆕 Mới (chưa xem)</option>
+        <option value="open" selected>Cần trả lời</option>
         <option value="replied">Đã trả lời</option>
         <option value="private_replied">Đã nhắn riêng</option>
         <option value="ignored">Đã bỏ qua</option>
         <option value="all">Tất cả</option>
       </select>
+      <button class="btn" onclick="cmSeenAll()">✓ Đánh dấu đã xem hết</button>
       <button class="btn" id="cmSync" onclick="syncComments()">🔄 Đồng bộ từ Facebook</button>
     </div>
-    <p class="muted small">Bình luận mới tự xuất hiện ở đây khi webhook đang chạy. Nếu máy/tunnel từng tắt, bấm "Đồng bộ" để kéo bù.
-      Chỉ bình luận trên bài của Fanpage — Facebook không cho đọc bình luận trong group.</p>
+    <p class="muted small">Bấm vào một bình luận để mở <b>toàn bộ bình luận của bài đó</b> như trên Facebook (kèm các câu trả lời) và trả lời ngay trong đó.
+      Bình luận mới tự xuất hiện khi webhook đang chạy; nút "Đồng bộ" kéo bù lúc máy/tunnel từng tắt.</p>
     <div id="cmList"></div>
   </div>
+
+  <div id="thBg" onclick="closeThread()"></div>
+  <aside id="thDrawer">
+    <div class="thtop"><b style="flex:1">Bình luận của bài</b><button class="btn" onclick="closeThread()">✕ Đóng</button></div>
+    <div id="thBody"></div>
+  </aside>
 </section>
 
 <!-- ============================ THỐNG KÊ -->
@@ -829,50 +886,154 @@ async function delJob(id) { if (!confirm('Xóa lịch này?')) return;
 // ---------------- Bình luận
 let CM = [];
 const CM_TXT = { new: ['Cần trả lời', 'p-warn'], replied: ['Đã trả lời', 'p-ok'], private_replied: ['Đã nhắn riêng', 'p-ok'], ignored: ['Bỏ qua', 'p-info'] };
-const postLink = id => id ? 'https://www.facebook.com/' + id : '';
 async function getScript() { return SCRIPT || (SCRIPT = await api('/api/script')); }
+const firstName = n => (n || '').trim().split(/\s+/).pop() || 'bạn';
+const initial = n => esc((n || '?').trim().slice(0, 1).toUpperCase());
+
 async function loadComments() {
+  loadScopes(); loadAutoReply();
   CM = await api('/api/comments?status=' + $('cmFilter').value);
   $('cmList').innerHTML = CM.map(c => { const [label, cls] = CM_TXT[c.status] || [c.status, 'p-info'];
-    const name = c.from_name || '(chưa rõ tên)';
-    return `<div class="cm ${c.status === 'new' ? 'open' : ''}" id="cm-${esc(c.id)}">
-      <div class="who"><span class="avatar">${esc(name.trim().slice(0, 1).toUpperCase())}</span><b>${esc(name)}</b>
-        <span class="muted small">${fmt(c.created_at)}</span><span class="pill ${cls}">${label}</span>
-        ${c.post_id ? `<a class="small" target="_blank" rel="noopener" href="${esc(postLink(c.post_id))}">xem bài ↗</a>` : ''}</div>
-      <div class="msg">${c.message ? esc(c.message) : '<i class="muted">(Không đọc được nội dung — cần quyền pages_read_user_content, hoặc xem trực tiếp trên Facebook)</i>'}</div>
-      ${c.reply_text ? `<div class="answer"><b>Đã gửi:</b> ${esc(c.reply_text)}</div>` : ''}
+    const name = c.from_name || '(chưa rõ tên)', id = esc(c.id);
+    return `<div class="cm ${c.seen ? '' : 'open'}" id="cm-${id}">
+      <div class="cmclick" onclick="openThread('${id}')" title="Bấm để xem toàn bộ bình luận của bài">
+        <div class="who"><span class="avatar">${initial(name)}</span><b>${esc(name)}</b>
+          <span class="muted small">${fmt(c.created_at)}</span>
+          ${c.seen ? '' : '<span class="pill p-err">MỚI</span>'}<span class="pill ${cls}">${label}</span>
+          ${c.reply_by === 'auto' ? '<span class="pill p-info">🤖 tự động</span>' : ''}</div>
+        <div class="where small">📍 <b>${esc(c.page_name)}</b>${c.post_snippet ? ' › ' + esc(c.post_snippet) : (c.post_id ? '' : ' › (chưa rõ bài)')}</div>
+        <div class="msg">${c.message ? esc(c.message) : '<i class="muted">(Không đọc được nội dung — cần quyền pages_read_user_content, hoặc xem trực tiếp trên Facebook)</i>'}</div>
+        ${c.reply_text ? `<div class="answer"><b>Đã gửi:</b> ${esc(c.reply_text)}</div>` : ''}
+      </div>
       <div class="btns" style="margin:0">
-        <button class="btn pri" onclick="openReply('${esc(c.id)}', 'public')">💬 Trả lời</button>
-        <button class="btn" onclick="openReply('${esc(c.id)}', 'private')">✉️ Nhắn riêng</button>
-        ${c.status === 'ignored' ? `<button class="btn" onclick="setCm('${esc(c.id)}','new')">Mở lại</button>`
-          : `<button class="btn" onclick="setCm('${esc(c.id)}','ignored')">Bỏ qua</button>`}</div>
-      <div class="replybox" id="rb-${esc(c.id)}"><textarea rows="3" id="rt-${esc(c.id)}"></textarea>
-        <div class="btns"><button class="btn pri" onclick="sendReply('${esc(c.id)}')">Gửi</button>
-          <button class="btn" onclick="document.getElementById('rb-${esc(c.id)}').classList.remove('show')">Hủy</button></div></div>
+        <button class="btn pri" onclick="openThread('${id}')">💬 Xem & trả lời</button>
+        ${c.post_url ? `<a class="btn" target="_blank" rel="noopener" href="${esc(c.post_url)}">Mở bài trên Facebook ↗</a>` : ''}
+        ${c.status === 'ignored' ? `<button class="btn" onclick="setCm('${id}','new')">Mở lại</button>`
+          : `<button class="btn" onclick="setCm('${id}','ignored')">Bỏ qua</button>`}</div>
     </div>`; }).join('') || '<p class="muted">Không có bình luận nào ở mục này.</p>';
-}
-const REPLY_MODE = {};
-async function openReply(id, mode) {
-  const c = CM.find(x => x.id === id); REPLY_MODE[id] = mode;
-  const first = (c.from_name || '').trim().split(/\s+/).pop() || 'bạn';
-  const sc = await getScript();
-  const tpl = mode === 'private' ? sc.comment_private_reply : (sc.comment_public_reply || 'Cảm ơn {name} đã quan tâm ❤️');
-  $('rt-' + id).value = tpl.replace(/\{name\}/g, first).replace(/\{product\}/g, 'Phần mềm Kế toán Đa công ty');
-  $('rb-' + id).classList.add('show'); $('rt-' + id).focus();
-}
-async function sendReply(id) {
-  const mode = REPLY_MODE[id] || 'public', text = $('rt-' + id).value;
-  if (mode === 'private' && !confirm('Nhắn riêng chỉ gửi được 1 tin cho mỗi bình luận, trong 7 ngày. Gửi?')) return;
-  await api(`/api/comments/${encodeURIComponent(id)}/${mode === 'private' ? 'private' : 'reply'}`, { method: 'POST', body: { text } });
-  toast(mode === 'private' ? '✉️ Đã nhắn riêng' : '✅ Đã trả lời'); loadComments(); pollBadges();
 }
 async function setCm(id, status) { await api(`/api/comments/${encodeURIComponent(id)}/status`, { method: 'POST', body: { status } });
   loadComments(); pollBadges(); }
+async function cmSeenAll() { await api('/api/comments/seen-all', { method: 'POST' }); toast('✓ Đã đánh dấu đã xem hết'); loadComments(); pollBadges(); }
 async function syncComments() {
   $('cmSync').disabled = true; $('cmSync').textContent = '⏳ Đang kéo...';
   try { const r = await api('/api/comments/sync', { method: 'POST' }); toast(`✅ Có thêm ${r.added} bình luận mới`); loadComments(); pollBadges(); }
   catch {}   // api() đã hiện lỗi cho người dùng
   finally { $('cmSync').disabled = false; $('cmSync').textContent = '🔄 Đồng bộ từ Facebook'; }
+}
+
+// ---- cảnh báo thiếu quyền của token
+async function loadScopes() {
+  let s; try { s = await (await fetch('/api/token-scopes')).json(); } catch { return; }
+  const box = $('scopeWarn');
+  if (!s.connected || s.error || !s.missing.length) { box.innerHTML = ''; return; }
+  const needReply = s.missing.some(m => m.scope === 'pages_manage_engagement');
+  box.innerHTML = `<div class="note small" style="margin-bottom:14px"><b>⚠ Token Fanpage chưa có đủ quyền:</b>
+    ${s.missing.map(m => `<div><code>${esc(m.scope)}</code> — ${esc(m.feature)}</div>`).join('')}
+    ${needReply ? '<div style="margin-top:6px"><b>Chưa có quyền trả lời bình luận</b> nên trả lời (kể cả tự động) sẽ báo lỗi.</div>' : ''}
+    <div class="muted" style="margin-top:6px">Cách thêm: developers.facebook.com → app → <b>Xét duyệt → Quyền và tính năng</b> → bấm <b>Thêm</b> cạnh từng quyền,
+      rồi lấy lại Page Access Token (Graph API Explorer) và dán vào <code>.env</code>. <a href="#" onclick="loadScopesFresh();return false">Kiểm tra lại</a></div></div>`;
+}
+async function loadScopesFresh() { await fetch('/api/token-scopes?refresh=1'); loadScopes(); toast('Đã kiểm tra lại quyền'); }
+
+// ---- trả lời tự động: cài đặt
+let AR = null;
+async function loadAutoReply() { try { AR = await api('/api/auto-reply'); } catch { return; } renderAr(); }
+function toggleAr() { const b = $('arBody'), open = b.style.display === 'none';
+  b.style.display = open ? 'block' : 'none'; $('arToggle').textContent = 'Cài đặt ' + (open ? '▴' : '▾'); }
+function renderAr() {
+  $('arState').textContent = AR.enabled ? `Đang bật · hôm nay đã trả lời ${AR.sent_today} lần` : 'Đang tắt';
+  $('arState').className = 'pill ' + (AR.enabled ? 'p-ok' : 'p-info');
+  if ($('arBody').dataset.dirty) return;      // đang sửa dở thì đừng ghi đè
+  $('arEnabled').checked = AR.enabled; $('arOnce').checked = AR.once_per_person; $('arTop').checked = AR.only_top_level;
+  $('arLimit').value = AR.daily_limit; $('arDefReply').value = AR.default_reply; $('arDefPrivate').value = AR.default_private;
+  arRenderRules(AR.rules);
+}
+function arRenderRules(rules) {
+  $('arRules').innerHTML = rules.map((r, i) => `<div class="feature arRule"><div class="row" style="align-items:center;gap:8px">
+      <b>Quy tắc ${i + 1}</b><input class="arKw" value="${esc((r.keywords || []).join(', '))}" placeholder="Từ khóa, cách nhau dấu phẩy: giá, báo giá" style="flex:1 1 260px">
+      <button class="btn danger" onclick="arDelRule(${i})">Xóa</button></div>
+      <div class="row"><div class="col"><label>Trả lời công khai dưới bình luận</label><textarea class="arReply" rows="2">${esc(r.reply || '')}</textarea></div>
+      <div class="col"><label>Nhắn riêng (tùy chọn)</label><textarea class="arPrivate" rows="2">${esc(r.private || '')}</textarea></div></div></div>`).join('')
+    || '<p class="muted small">Chưa có quy tắc nào — bấm "+ Thêm quy tắc".</p>';
+  document.querySelectorAll('#arBody input, #arBody textarea').forEach(el => el.oninput = () => { $('arBody').dataset.dirty = '1'; });
+}
+function arCollect() {
+  return { enabled: $('arEnabled').checked, once_per_person: $('arOnce').checked, only_top_level: $('arTop').checked,
+    daily_limit: Number($('arLimit').value) || 200, default_reply: $('arDefReply').value, default_private: $('arDefPrivate').value,
+    rules: [...document.querySelectorAll('.arRule')].map(el => ({ keywords: el.querySelector('.arKw').value,
+      reply: el.querySelector('.arReply').value, private: el.querySelector('.arPrivate').value })) };
+}
+function arAddRule() { const c = arCollect(); c.rules.push({ keywords: '', reply: '', private: '' });
+  arRenderRules(c.rules.map(r => ({ ...r, keywords: String(r.keywords).split(',').map(x => x.trim()).filter(Boolean) }))); $('arBody').dataset.dirty = '1'; }
+function arDelRule(i) { const c = arCollect(); c.rules.splice(i, 1);
+  arRenderRules(c.rules.map(r => ({ ...r, keywords: String(r.keywords).split(',').map(x => x.trim()).filter(Boolean) }))); $('arBody').dataset.dirty = '1'; }
+async function arSave() {
+  AR = await api('/api/auto-reply', { method: 'PUT', body: arCollect() });
+  delete $('arBody').dataset.dirty; renderAr(); toast(AR.enabled ? '✅ Đã lưu — đang trả lời tự động' : '✅ Đã lưu (đang tắt)');
+}
+async function arTest() {
+  const text = $('arTestText').value.trim(); if (!text) return;
+  const c = arCollect();
+  const r = await api('/api/auto-reply/test', { method: 'POST', body: { text, rules: c.rules, default_reply: c.default_reply, default_private: c.default_private } });
+  $('arTestOut').innerHTML = r.match
+    ? `<span class="pill p-ok">Khớp ${esc(r.label)}</span>${r.reply ? `<div class="answer" style="background:var(--ok-weak);border-radius:8px;padding:8px 10px;margin-top:6px"><b>Trả lời công khai:</b> ${esc(r.reply)}</div>` : ''}
+       ${r.private ? `<div class="answer" style="background:var(--pri-weak);border-radius:8px;padding:8px 10px;margin-top:6px"><b>Nhắn riêng:</b> ${esc(r.private)}</div>` : ''}`
+    : '<span class="pill p-info">Không khớp quy tắc nào → để người thật trả lời</span>';
+}
+
+// ---- khung xem toàn bộ bình luận của bài (như Facebook)
+let TH = null;
+function closeThread() { $('thDrawer').classList.remove('open'); $('thBg').classList.remove('open'); }
+async function openThread(id) {
+  $('thDrawer').classList.add('open'); $('thBg').classList.add('open');
+  $('thBody').innerHTML = '<p class="muted" style="padding:16px">Đang tải…</p>';
+  const enc = encodeURIComponent(id);
+  try { TH = await api(`/api/comments/${enc}/thread`); } catch { return closeThread(); }
+  renderThread(true);
+  api(`/api/comments/${enc}/seen`, { method: 'POST' }).then(() => { pollBadges(); loadComments(); }).catch(() => {});
+  try { TH = await api(`/api/comments/${enc}/thread?live=1`); if ($('thDrawer').classList.contains('open')) renderThread(false); } catch {}
+}
+function thNode(c, isReply) {
+  const id = esc(c.id), name = c.from_name || '(chưa rõ tên)';
+  const note = c.reply_text && !c.is_page && /✉️|private/.test(c.reply_text + (c.status === 'private_replied' ? '✉️' : '')) ? '<div class="small muted">✉️ Đã nhắn riêng cho người này</div>' : '';
+  return `<div class="thc ${isReply ? 'reply' : ''} ${c.id === TH.focus ? 'focus' : ''}" id="thc-${id}">
+    <span class="avatar ${c.is_page ? 'page' : ''}">${initial(name)}</span>
+    <div class="thbody"><div class="bubble"><b>${esc(name)}</b>${c.is_page ? ' <span class="pill p-info">Fanpage</span>' : ''}${c.is_page && c.reply_by === 'auto' ? ' <span title="Trả lời tự động">🤖</span>' : ''}
+      <div class="pre">${c.message ? esc(c.message) : '<i class="muted">(không đọc được nội dung)</i>'}</div></div>
+      <div class="small muted" style="margin:2px 0 0 8px">${fmt(c.created_at)}${c.is_page ? '' : ` · <a href="#" onclick="thReply('${id}','public');return false">Trả lời</a> · <a href="#" onclick="thReply('${id}','private');return false">Nhắn riêng</a>`}
+        ${c.seen ? '' : ' · <span class="pill p-err">MỚI</span>'}</div>
+      ${note}
+      <div class="replybox" id="thr-${id}"><textarea rows="2" id="thrt-${id}"></textarea>
+        <div class="btns" style="margin-top:6px"><button class="btn pri" onclick="thSend('${id}')">Gửi</button>
+        <button class="btn" onclick="document.getElementById('thr-${id}').classList.remove('show')">Hủy</button></div></div>
+      ${(c.replies || []).map(r => thNode(r, true)).join('')}</div></div>`;
+}
+function renderThread(scroll) {
+  const p = TH.post, stats = [p.likes != null ? '👍 ' + p.likes : '', p.comments != null ? '💬 ' + p.comments : '', p.shares != null ? '↗ ' + p.shares : ''].filter(Boolean).join(' · ');
+  const keepOpen = document.querySelector('#thBody .replybox.show')?.id;
+  $('thBody').innerHTML = `<div class="thpost"><div class="small muted">📍 Fanpage đăng bài</div><b>${esc(p.page_name)}</b>
+      <div class="pre" style="margin:6px 0">${p.message ? esc(p.message) : '<i class="muted">(chưa có nội dung bài — bấm Thống kê → Cập nhật để lấy)</i>'}</div>
+      <div class="small">${stats ? stats + ' &nbsp; ' : ''}${p.permalink ? `<a target="_blank" rel="noopener" href="${esc(p.permalink)}">Mở bài trên Facebook ↗</a>` : ''}</div></div>
+    ${TH.live_error ? `<div class="note small" style="margin:8px 12px">Chưa kéo thêm được từ Facebook (đang hiện dữ liệu đã lưu): ${esc(TH.live_error)}</div>` : ''}
+    <div class="thlist">${TH.comments.map(c => thNode(c, false)).join('') || '<p class="muted">Bài này chưa có bình luận nào được lưu.</p>'}</div>`;
+  if (scroll) document.getElementById('thc-' + CSS.escape(TH.focus))?.scrollIntoView({ block: 'center' });
+}
+const TH_MODE = {};
+async function thReply(id, mode) {
+  TH_MODE[id] = mode;
+  const find = (list) => { for (const c of list) { if (c.id === id) return c; const r = find(c.replies || []); if (r) return r; } };
+  const c = find(TH.comments) || {}, sc = await getScript();
+  const tpl = mode === 'private' ? sc.comment_private_reply : (sc.comment_public_reply || 'Cảm ơn {name} đã quan tâm ❤️');
+  $('thrt-' + id).value = tpl.replace(/\{name\}/g, firstName(c.from_name)).replace(/\{product\}/g, 'Phần mềm Kế toán Đa công ty');
+  $('thr-' + id).classList.add('show'); $('thrt-' + id).focus();
+}
+async function thSend(id) {
+  const mode = TH_MODE[id] || 'public', text = $('thrt-' + id).value;
+  if (mode === 'private' && !confirm('Nhắn riêng chỉ gửi được 1 tin cho mỗi bình luận, trong 7 ngày. Gửi?')) return;
+  await api(`/api/comments/${encodeURIComponent(id)}/${mode === 'private' ? 'private' : 'reply'}`, { method: 'POST', body: { text } });
+  toast(mode === 'private' ? '✉️ Đã nhắn riêng' : '✅ Đã trả lời — hiện ngay dưới bình luận trên Facebook');
+  TH = await api(`/api/comments/${encodeURIComponent(TH.focus)}/thread`); renderThread(false); loadComments(); pollBadges();
 }
 
 // ---------------- Thống kê
@@ -911,8 +1072,8 @@ async function pollBadges() {
     setBadge('comments', b.comments_new); setBadge('groups', b.group_due);
     document.title = (b.comments_new + b.group_due ? `(${b.comments_new + b.group_due}) ` : '') + 'Quảng cáo Fanpage';
     if (lastDue !== null && b.group_due > lastDue) notifyUser('Đến giờ đăng nhóm', `${b.group_due} lịch đang chờ bạn`);
-    if (lastCm !== null && b.comments_new > lastCm) notifyUser('Bình luận mới', `${b.comments_new} bình luận cần trả lời`);
-    if (location.hash === '#comments' && lastCm !== null && b.comments_new !== lastCm) loadComments();
+    if (lastCm !== null && b.comments_new > lastCm) notifyUser('Bình luận mới', `${b.comments_new} bình luận chưa xem`);
+    if (location.hash === '#comments' && lastCm !== null && b.comments_new !== lastCm && !$('thDrawer').classList.contains('open')) loadComments();
     if (location.hash === '#groups' && GBS?.busy) loadGroupJobs();
     lastCm = b.comments_new; lastDue = b.group_due;
   } catch {}

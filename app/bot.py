@@ -6,7 +6,7 @@ không bao giờ nhắn cho người lạ.
 import re
 import unicodedata
 
-from . import config, content, db, facebook
+from . import config, content, db, facebook, replies
 from .facebook import FacebookError
 
 PHONE_RE = re.compile(r"(?<!\d)(?:\+?84|0)(?:[\s.\-]?\d){9}(?!\d)")
@@ -112,6 +112,10 @@ def handle_comment(value: dict):
     if phone:
         db.update_lead(lead_id, phone=phone, status="can_goi_lai")
 
+    from . import autoreply          # nạp trễ: autoreply dùng lại các hàm của module này
+    if autoreply.try_auto_reply(comment_id, value, sender, text):
+        return
+
     script = get_script()
     if not (script.get("reply_all_comments") or phone
             or has_keyword(normalize(text), script["comment_keywords"])):
@@ -119,17 +123,14 @@ def handle_comment(value: dict):
 
     name = first_name(sender.get("name", ""))
     try:
-        private_text = content.render(script["comment_private_reply"], name=name)
-        facebook.private_reply(comment_id, private_text)
+        replies.private_reply(comment_id, content.render(script["comment_private_reply"], name=name), by="auto")
         db.log("private_reply", f"comment {comment_id}", lead_id)
-        db.update_comment(comment_id, status="private_replied", reply_text=private_text, replied_at=db.now())
     except FacebookError as e:
         db.log("error", f"private_reply {comment_id}: {e}", lead_id)
         return
     if script.get("comment_public_reply"):
         try:
-            facebook.reply_comment(comment_id, content.render(script["comment_public_reply"], name=name))
-            db.update_comment(comment_id, status="replied")
+            replies.public_reply(comment_id, content.render(script["comment_public_reply"], name=name), by="auto")
         except FacebookError as e:
             db.log("error", f"reply_comment {comment_id}: {e}", lead_id)
 

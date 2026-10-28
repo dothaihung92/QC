@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
-from . import bot, config, content, db, facebook
+from . import autoreply, bot, config, content, db, facebook, replies
 from .facebook import FacebookError
 
 try:
@@ -373,12 +373,39 @@ def _fb_error(e: FacebookError) -> HTTPException:
 
 @admin.get("/api/badges")
 def badges():
-    return {"comments_new": db.count_new_comments(), "group_due": db.count_due_group_jobs()}
+    # comments_new = bình luận mới CHƯA MỞ XEM (số đỏ trên menu); comments_open = cần trả lời
+    return {"comments_new": db.count_unseen_comments(), "comments_open": db.count_new_comments(),
+            "group_due": db.count_due_group_jobs()}
+
+
+_page_cache = {"at": 0, "name": ""}
+
+
+def _page_name() -> str:
+    """Tên Fanpage đang kết nối (hỏi Facebook 1 lần mỗi giờ)."""
+    if config.DRY_RUN:
+        return "Fanpage (chạy thử)"
+    if not _page_cache["name"] or time.time() - _page_cache["at"] > 3600:
+        try:
+            _page_cache.update(name=facebook.page_info().get("name") or "", at=time.time())
+        except FacebookError:
+            _page_cache["at"] = time.time() - 3000          # thử lại sau ~10 phút
+    return _page_cache["name"] or f"Trang {config.PAGE_ID}"
+
+
+def _where(post_id: str) -> dict:
+    """Bài này nằm ở Fanpage nào, là bài nào (id bài có dạng <id Trang>_<id bài>)."""
+    page_id = post_id.split("_")[0] if "_" in post_id else config.PAGE_ID
+    name = _page_name() if page_id == config.PAGE_ID else f"Trang {page_id}"
+    snippet = " ".join(db.post_message(post_id).split())
+    return {"page_id": page_id, "page_name": name,
+            "post_snippet": snippet[:90] + ("…" if len(snippet) > 90 else ""),
+            "post_url": f"https://www.facebook.com/{post_id}" if post_id else ""}
 
 
 @admin.get("/api/comments")
 def list_comments(status: str = "open"):
-    return db.list_comments(None if status == "all" else status)
+    return [{**c, **_where(c["post_id"])} for c in db.list_comments(None if status == "all" else status)]
 
 
 class ReplyIn(BaseModel):
@@ -398,13 +425,13 @@ def reply_comment(cid: str, body: ReplyIn):
     if not body.text.strip():
         raise HTTPException(400, "Nội dung trả lời trống")
     try:
-        facebook.reply_comment(cid, body.text.strip())
+        c = replies.public_reply(cid, body.text, by="manual")
     except FacebookError as e:
         db.log("error", f"reply_comment {cid}: {e}")
         raise _fb_error(e)
-    db.update_comment(cid, status="replied", reply_text=body.text.strip(), replied_at=db.now())
+    db.update_comment(cid, seen=1)
     db.log("reply", body.text.strip(), "")
-    return db.get_comment(cid)
+    return c
 
 
 @admin.post("/api/comments/{cid}/private")
@@ -413,13 +440,13 @@ def private_reply(cid: str, body: ReplyIn):
     if not body.text.strip():
         raise HTTPException(400, "Nội dung tin nhắn trống")
     try:
-        facebook.private_reply(cid, body.text.strip())
+        c = replies.private_reply(cid, body.text, by="manual")
     except FacebookError as e:
         db.log("error", f"private_reply {cid}: {e}")
         raise _fb_error(e)
-    db.update_comment(cid, status="private_replied", reply_text=body.text.strip(), replied_at=db.now())
+    db.update_comment(cid, seen=1)
     db.log("private_reply", f"comment {cid}")
-    return db.get_comment(cid)
+    return c
 
 
 class StatusIn(BaseModel):
@@ -433,6 +460,68 @@ def set_comment_status(cid: str, body: StatusIn):
         raise HTTPException(400, "Trạng thái không hợp lệ")
     db.update_comment(cid, status=body.status)
     return db.get_comment(cid)
+
+
+@admin.post("/api/comments/seen-all")
+def seen_all():
+    db.mark_all_seen()
+    return {"ok": True}
+
+
+@admin.post("/api/comments/{cid}/seen")
+def mark_seen(cid: str):
+    _comment_or_404(cid)
+    db.update_comment(cid, seen=1)
+    return {"ok": True}
+
+
+def _ingest_thread(post_id: str):
+    """Kéo cả cuộc hội thoại của bài từ Facebook, bổ sung những gì webhook/phần mềm chưa có
+    (bình luận bị lỡ, trả lời bạn đã gõ thẳng trên Facebook). Không đụng trạng thái bình luận đã có."""
+    items = facebook.fetch_thread(post_id)
+    answered = {i["parent_id"] for i in items if i["is_page"] and i["parent_id"]}
+    have = db.list_thread(post_id)
+    for it in items:
+        if it["is_page"]:
+            if any(r["status"] == "page" and r["parent_id"] == it["parent_id"] and r["message"] == it["message"] for r in have):
+                continue
+            db.save_comment(it["id"], post_id, it["from_id"], "Fanpage (bạn)", it["message"], it["created_time"],
+                            it["parent_id"], status="page", seen=1)
+        else:
+            db.save_comment(it["id"], post_id, it["from_id"], it["from_name"], it["message"], it["created_time"],
+                            it["parent_id"], status="replied" if it["id"] in answered else "new", seen=1)
+
+
+def _node(c: dict) -> dict:
+    return {"id": c["id"], "from_id": c["from_id"], "from_name": c["from_name"], "message": c["message"],
+            "created_at": c["created_at"], "is_page": c["status"] == "page", "status": c["status"],
+            "seen": c["seen"], "reply_by": c["reply_by"], "reply_text": c["reply_text"], "replies": []}
+
+
+@admin.get("/api/comments/{cid}/thread")
+def comment_thread(cid: str, live: int = 0):
+    """Khung xem bài: bài viết + mọi bình luận (kèm trả lời) như trên Facebook."""
+    focus = _comment_or_404(cid)
+    post_id, live_error = focus["post_id"], ""
+    if live and post_id:
+        try:
+            _ingest_thread(post_id)
+        except FacebookError as e:
+            live_error = str(e)
+    rows = db.list_thread(post_id) if post_id else [focus]
+    nodes = {r["id"]: _node(r) for r in rows}
+    top = []
+    for r in rows:
+        parent = nodes.get(r["parent_id"]) if r["parent_id"] and r["parent_id"] != post_id else None
+        (parent["replies"] if parent else top).append(nodes[r["id"]])
+    stat = db.get_post_stat(post_id) or {}
+    return {
+        "post": {"id": post_id, "message": stat.get("message") or db.post_message(post_id), "likes": stat.get("likes"),
+                 "page_name": _where(post_id)["page_name"], "page_id": _where(post_id)["page_id"],
+                 "comments": stat.get("comments"), "shares": stat.get("shares"),
+                 "permalink": stat.get("permalink") or (f"https://www.facebook.com/{post_id}" if post_id else "")},
+        "focus": cid, "comments": top, "live_error": live_error,
+    }
 
 
 @admin.post("/api/comments/sync")
@@ -453,6 +542,77 @@ def sync_comments(posts: int = 8):
     except FacebookError as e:
         raise _fb_error(e)
     return {"added": added, "new_total": db.count_new_comments()}
+
+
+# ----- trả lời bình luận tự động ------------------------------------------------
+
+@admin.get("/api/auto-reply")
+def get_auto_reply():
+    return {**autoreply.get_config(), "sent_today": db.count_activity_today("auto_reply")}
+
+
+@admin.put("/api/auto-reply")
+def save_auto_reply(body: dict):
+    try:
+        cfg = autoreply.clean_config(body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    db.set_setting("auto_reply", cfg)
+    return {**cfg, "sent_today": db.count_activity_today("auto_reply")}
+
+
+class AutoTestIn(BaseModel):
+    text: str
+    rules: Optional[list] = None
+    default_reply: Optional[str] = None
+    default_private: Optional[str] = None
+
+
+@admin.post("/api/auto-reply/test")
+def test_auto_reply(body: AutoTestIn):
+    """Thử một bình luận giả: quy tắc nào sẽ bắt và trả lời gì (không gửi gì lên Facebook)."""
+    override = {"enabled": False}
+    if body.rules is not None:
+        override["rules"] = body.rules
+    if body.default_reply is not None:
+        override["default_reply"] = body.default_reply
+    if body.default_private is not None:
+        override["default_private"] = body.default_private
+    try:
+        cfg = autoreply.clean_config({**autoreply.get_config(), **override})
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    hit = autoreply.match(body.text, cfg)
+    if not hit:
+        return {"match": False}
+    return {"match": True, "label": hit["label"],
+            "reply": content.render(hit["reply"], name="Lan") if hit["reply"] else "",
+            "private": content.render(hit["private"], name="Lan") if hit["private"] else ""}
+
+
+_scope_cache = {"at": 0, "data": None}
+SCOPE_FEATURES = {
+    "pages_manage_engagement": "Trả lời bình luận công khai (thủ công và tự động)",
+    "read_insights": "Số lượt xem trong tab Thống kê",
+    "pages_read_user_content": "Đọc nội dung bình luận khi bấm Đồng bộ / mở bài",
+}
+
+
+@admin.get("/api/token-scopes")
+def token_scopes(refresh: int = 0):
+    """Token đang có quyền gì, thiếu quyền nào thì tính năng nào chưa dùng được."""
+    if not refresh and _scope_cache["data"] and time.time() - _scope_cache["at"] < 300:
+        return _scope_cache["data"]
+    out = {"connected": not config.DRY_RUN, "scopes": [], "missing": [], "error": ""}
+    if out["connected"]:
+        try:
+            info = facebook.token_scopes()
+            out["scopes"] = info["scopes"]
+            out["missing"] = [{"scope": k, "feature": v} for k, v in SCOPE_FEATURES.items() if k not in info["scopes"]]
+        except FacebookError as e:
+            out["error"] = str(e)
+    _scope_cache.update(at=time.time(), data=out)
+    return out
 
 
 # ----- thống kê ----------------------------------------------------------------

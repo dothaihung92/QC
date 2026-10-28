@@ -28,12 +28,12 @@ def _url(path: str) -> str:
     return f"https://graph.facebook.com/{config.GRAPH_API_VERSION}/{path.lstrip('/')}"
 
 
-def _call(method: str, path: str, *, params=None, json=None) -> dict:
+def _call(method: str, path: str, *, params=None, json=None, token=None) -> dict:
     if config.DRY_RUN:
         db.log("dry_run", f"{method} {path} {json or params or ''}")
         return {"id": "dry-run", "dry_run": True}
     params = dict(params or {})
-    params["access_token"] = config.PAGE_ACCESS_TOKEN
+    params["access_token"] = token or config.PAGE_ACCESS_TOKEN
     try:
         r = requests.request(method, _url(path), params=params, json=json, timeout=30)
         data = r.json()
@@ -176,3 +176,37 @@ def list_post_comments(post_id: str, limit=25) -> list:
             "page_replied": any((r.get("from") or {}).get("id") == config.PAGE_ID for r in replies),
         })
     return out
+
+
+def token_scopes() -> dict:
+    """Quyền mà Page Access Token đang có (để báo thiếu quyền trước khi người dùng gặp lỗi)."""
+    _need_connection()
+    if not config.APP_SECRET:
+        raise FacebookError("Cần FB_APP_SECRET trong .env để kiểm tra quyền của token")
+    app_id = _call("GET", "app", params={"fields": "id"}).get("id")
+    data = _call("GET", "debug_token", params={"input_token": config.PAGE_ACCESS_TOKEN},
+                 token=f"{app_id}|{config.APP_SECRET}").get("data", {})
+    return {"scopes": data.get("scopes", []), "valid": bool(data.get("is_valid", True)),
+            "expires_at": data.get("expires_at", 0)}
+
+
+def _thread_item(c: dict, post_id: str, parent_id: str) -> dict:
+    author = c.get("from") or {}
+    return {"id": c["id"], "post_id": post_id, "parent_id": parent_id,
+            "from_id": author.get("id", ""), "from_name": author.get("name", ""),
+            "message": c.get("message", ""), "created_time": _ts(c.get("created_time")),
+            "is_page": author.get("id") == config.PAGE_ID}
+
+
+def fetch_thread(post_id: str, limit: int = 50) -> list:
+    """Toàn bộ bình luận cấp 1 + trả lời trong từng bình luận của 1 bài (kể cả trả lời của Fanpage)."""
+    _need_connection()
+    fields = "id,message,created_time,from{id,name},comments.limit(50){id,message,created_time,from{id,name}}"
+    data = _call("GET", f"{post_id}/comments", params={
+        "fields": fields, "limit": limit, "filter": "toplevel", "order": "chronological"})
+    items = []
+    for c in data.get("data", []):
+        items.append(_thread_item(c, post_id, ""))
+        for r in (c.get("comments") or {}).get("data", []):
+            items.append(_thread_item(r, post_id, c["id"]))
+    return items
