@@ -1,4 +1,4 @@
-"""SQLite: bài đăng, khách hàng tiềm năng, cài đặt kịch bản, nhật ký."""
+"""SQLite: bài đăng, bình luận, thống kê, lịch đăng nhóm, khách hàng tiềm năng, nhật ký."""
 import json
 import sqlite3
 import threading
@@ -45,6 +45,43 @@ CREATE TABLE IF NOT EXISTS leads (
 CREATE TABLE IF NOT EXISTS processed (
     ref_id     TEXT PRIMARY KEY,                   -- mid tin nhắn / comment_id, chống xử lý trùng
     created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS comments (
+    id          TEXT PRIMARY KEY,                  -- comment_id của Facebook
+    post_id     TEXT DEFAULT '',
+    parent_id   TEXT DEFAULT '',                   -- khác post_id = trả lời trong 1 bình luận
+    from_id     TEXT DEFAULT '',
+    from_name   TEXT DEFAULT '',
+    message     TEXT DEFAULT '',
+    created_at  INTEGER NOT NULL,
+    status      TEXT NOT NULL DEFAULT 'new',       -- new|replied|private_replied|ignored
+    reply_text  TEXT DEFAULT '',
+    replied_at  INTEGER
+);
+CREATE TABLE IF NOT EXISTS post_stats (
+    fb_post_id   TEXT PRIMARY KEY,
+    message      TEXT DEFAULT '',
+    permalink    TEXT DEFAULT '',
+    created_time INTEGER,
+    likes        INTEGER DEFAULT 0,
+    comments     INTEGER DEFAULT 0,
+    shares       INTEGER DEFAULT 0,
+    views        INTEGER,                          -- NULL = Facebook không trả về
+    synced_at    INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS group_targets (
+    id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    url  TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS group_jobs (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    message      TEXT NOT NULL,
+    link         TEXT DEFAULT '',
+    scheduled_at INTEGER NOT NULL,
+    group_ids    TEXT NOT NULL DEFAULT '[]',       -- JSON list id group_targets
+    done_ids     TEXT NOT NULL DEFAULT '[]',       -- JSON list group đã đăng xong
+    created_at   INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS activity (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -249,3 +286,141 @@ def stats():
             "replies_sent": q("SELECT COUNT(*) FROM activity WHERE kind IN ('send','private_reply') "
                               "AND lead_id NOT LIKE 'test:%'"),
         }
+
+
+# ---------- bình luận ----------
+
+def save_comment(cid, post_id="", from_id="", from_name="", message="",
+                 created_at=None, parent_id="", status="new"):
+    """Thêm bình luận; có rồi thì chỉ bổ sung nội dung/tên còn thiếu, KHÔNG đổi trạng thái."""
+    with conn() as c:
+        c.execute(
+            "INSERT INTO comments(id, post_id, parent_id, from_id, from_name, message, created_at, status) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(id) DO UPDATE SET "
+            "message=CASE WHEN excluded.message != '' THEN excluded.message ELSE message END, "
+            "from_name=CASE WHEN excluded.from_name != '' THEN excluded.from_name ELSE from_name END",
+            (cid, post_id, parent_id, from_id, from_name, message, created_at or now(), status),
+        )
+
+
+def get_comment(cid):
+    with conn() as c:
+        row = c.execute("SELECT * FROM comments WHERE id=?", (cid,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_comments(status=None, limit=300):
+    sql, args = "SELECT * FROM comments", []
+    if status == "open":                    # cần xử lý
+        sql += " WHERE status='new'"
+    elif status:
+        sql += " WHERE status=?"; args.append(status)
+    sql += " ORDER BY created_at DESC LIMIT ?"
+    with conn() as c:
+        rows = c.execute(sql, (*args, limit)).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_comment(cid, **fields):
+    allowed = {"status", "reply_text", "replied_at"}
+    fields = {k: v for k, v in fields.items() if k in allowed}
+    if not fields:
+        return
+    sets = ", ".join(f"{k}=?" for k in fields)
+    with conn() as c:
+        c.execute(f"UPDATE comments SET {sets} WHERE id=?", (*fields.values(), cid))
+
+
+def count_new_comments() -> int:
+    with conn() as c:
+        return c.execute("SELECT COUNT(*) FROM comments WHERE status='new'").fetchone()[0]
+
+
+# ---------- thống kê bài ----------
+
+def upsert_post_stats(fb_post_id, message="", permalink="", created_time=None,
+                      likes=0, comments=0, shares=0, views=None):
+    with conn() as c:
+        c.execute(
+            "INSERT INTO post_stats(fb_post_id, message, permalink, created_time, likes, comments, shares, views, synced_at) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "ON CONFLICT(fb_post_id) DO UPDATE SET message=excluded.message, permalink=excluded.permalink, "
+            "created_time=excluded.created_time, likes=excluded.likes, comments=excluded.comments, "
+            "shares=excluded.shares, views=COALESCE(excluded.views, views), synced_at=excluded.synced_at",
+            (fb_post_id, message, permalink, created_time, likes, comments, shares, views, now()),
+        )
+
+
+def list_post_stats(limit=100):
+    with conn() as c:
+        rows = c.execute("SELECT * FROM post_stats ORDER BY created_time DESC LIMIT ?", (limit,)).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---------- lịch đăng nhóm (nhắc, đăng tay) ----------
+
+def add_group(name, url):
+    with conn() as c:
+        return c.execute("INSERT INTO group_targets(name, url) VALUES(?, ?)", (name, url)).lastrowid
+
+
+def list_groups():
+    with conn() as c:
+        return [dict(r) for r in c.execute("SELECT * FROM group_targets ORDER BY id").fetchall()]
+
+
+def delete_group(gid):
+    with conn() as c:
+        c.execute("DELETE FROM group_targets WHERE id=?", (gid,))
+
+
+def add_group_job(message, link, scheduled_at, group_ids):
+    with conn() as c:
+        return c.execute(
+            "INSERT INTO group_jobs(message, link, scheduled_at, group_ids, created_at) VALUES(?, ?, ?, ?, ?)",
+            (message, link, scheduled_at, json.dumps(group_ids), now()),
+        ).lastrowid
+
+
+def _job_dict(row, groups_by_id):
+    d = dict(row)
+    ids = [g for g in json.loads(d.pop("group_ids")) if g in groups_by_id]   # bỏ group đã xóa
+    done = set(json.loads(d.pop("done_ids")))
+    d["groups"] = [{"id": g, "name": groups_by_id[g]["name"], "url": groups_by_id[g]["url"],
+                    "done": g in done} for g in ids]
+    if ids and all(g in done for g in ids):
+        d["status"] = "done"
+    elif d["scheduled_at"] <= now():
+        d["status"] = "due"
+    else:
+        d["status"] = "scheduled"
+    return d
+
+
+def list_group_jobs():
+    groups = {g["id"]: g for g in list_groups()}
+    with conn() as c:
+        rows = c.execute("SELECT * FROM group_jobs ORDER BY scheduled_at DESC, id DESC").fetchall()
+    return [_job_dict(r, groups) for r in rows]
+
+
+def toggle_group_done(job_id, group_id):
+    """Đảo trạng thái 'đã đăng' của 1 group trong 1 lịch. Trả về True nếu lịch tồn tại."""
+    with conn() as c:
+        row = c.execute("SELECT done_ids FROM group_jobs WHERE id=?", (job_id,)).fetchone()
+        if not row:
+            return False
+        done = set(json.loads(row["done_ids"]))
+        done.symmetric_difference_update({group_id})
+        c.execute("UPDATE group_jobs SET done_ids=? WHERE id=?", (json.dumps(sorted(done)), job_id))
+    return True
+
+
+def delete_group_job(job_id):
+    with conn() as c:
+        c.execute("DELETE FROM group_jobs WHERE id=?", (job_id,))
+
+
+def count_due_group_jobs() -> int:
+    return sum(1 for j in list_group_jobs() if j["status"] == "due")

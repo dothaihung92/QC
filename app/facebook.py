@@ -11,6 +11,7 @@ Chỉ dùng những gì Meta cho phép với Page access token:
 import hashlib
 import hmac
 import logging
+from datetime import datetime
 
 import requests
 
@@ -97,3 +98,81 @@ def send_message(psid: str, text: str, quick_replies=None) -> dict:
         "messaging_type": "RESPONSE",
         "message": message,
     })
+
+
+# ---------------------------------------------------------------- đọc dữ liệu Fanpage
+# Chỉ đọc được bài / bình luận của CHÍNH Fanpage mình quản lý. Facebook không cho
+# ứng dụng đọc bài hay bình luận trong group.
+
+def _need_connection():
+    if config.DRY_RUN:
+        raise FacebookError("Chưa kết nối Fanpage (đang chạy thử) — điền FB_PAGE_ID và FB_PAGE_ACCESS_TOKEN trong .env")
+
+
+def _ts(value) -> int:
+    """'2026-09-28T16:00:00+0000' → epoch giây."""
+    try:
+        return int(datetime.strptime(value, "%Y-%m-%dT%H:%M:%S%z").timestamp())
+    except (TypeError, ValueError):
+        return 0
+
+
+# Facebook đổi tên số liệu "lượt xem" nhiều lần (post_impressions đã bị bỏ năm 2026),
+# nên thử lần lượt; không có số nào dùng được thì trả None (giao diện hiện "—").
+VIEW_METRICS = ("post_media_view", "post_impressions")
+
+
+def post_views(post_id: str):
+    for metric in VIEW_METRICS:
+        try:
+            data = _call("GET", f"{post_id}/insights", params={"metric": metric})
+        except FacebookError:
+            continue
+        for item in data.get("data", []):
+            values = item.get("values") or []
+            if values and values[0].get("value") is not None:
+                try:
+                    return int(values[0]["value"])
+                except (TypeError, ValueError):
+                    pass
+    return None
+
+
+def list_published_posts(limit=20, with_views=True) -> list:
+    _need_connection()
+    fields = ("id,message,created_time,permalink_url,shares,"
+              "reactions.summary(total_count).limit(0),comments.summary(total_count).limit(0)")
+    data = _call("GET", f"{config.PAGE_ID}/published_posts", params={"fields": fields, "limit": limit})
+    posts = []
+    for p in data.get("data", []):
+        posts.append({
+            "id": p["id"],
+            "message": p.get("message", ""),
+            "permalink": p.get("permalink_url", ""),
+            "created_time": _ts(p.get("created_time")),
+            "likes": ((p.get("reactions") or {}).get("summary") or {}).get("total_count", 0),
+            "comments": ((p.get("comments") or {}).get("summary") or {}).get("total_count", 0),
+            "shares": (p.get("shares") or {}).get("count", 0),
+            "views": post_views(p["id"]) if with_views else None,
+        })
+    return posts
+
+
+def list_post_comments(post_id: str, limit=25) -> list:
+    """Bình luận cấp 1 của 1 bài. Cần quyền pages_read_user_content mới đọc được nội dung
+    bình luận của người dùng; thiếu quyền thì message rỗng (webhook vẫn nhận đủ nội dung)."""
+    _need_connection()
+    fields = "id,message,created_time,from{id,name},comments.limit(5){id,from{id,name}}"
+    data = _call("GET", f"{post_id}/comments", params={
+        "fields": fields, "limit": limit, "filter": "toplevel", "order": "reverse_chronological"})
+    out = []
+    for c in data.get("data", []):
+        author = c.get("from") or {}
+        replies = (c.get("comments") or {}).get("data", [])
+        out.append({
+            "id": c["id"], "post_id": post_id,
+            "from_id": author.get("id", ""), "from_name": author.get("name", ""),
+            "message": c.get("message", ""), "created_time": _ts(c.get("created_time")),
+            "page_replied": any((r.get("from") or {}).get("id") == config.PAGE_ID for r in replies),
+        })
+    return out

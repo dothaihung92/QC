@@ -103,6 +103,10 @@ def handle_comment(value: dict):
     lead_id = f"c:{sender['id']}"
     db.upsert_lead(lead_id, "comment", sender.get("name", ""), text)
     db.log("comment", text, lead_id)
+    # Lưu vào hộp thư bình luận để người dùng đọc và trả lời trên phần mềm.
+    db.save_comment(comment_id, post_id=value.get("post_id", ""), parent_id=value.get("parent_id", ""),
+                    from_id=sender["id"], from_name=sender.get("name", ""), message=text,
+                    created_at=value.get("created_time"))
 
     phone = find_phone(text)
     if phone:
@@ -115,14 +119,17 @@ def handle_comment(value: dict):
 
     name = first_name(sender.get("name", ""))
     try:
-        facebook.private_reply(comment_id, content.render(script["comment_private_reply"], name=name))
+        private_text = content.render(script["comment_private_reply"], name=name)
+        facebook.private_reply(comment_id, private_text)
         db.log("private_reply", f"comment {comment_id}", lead_id)
+        db.update_comment(comment_id, status="private_replied", reply_text=private_text, replied_at=db.now())
     except FacebookError as e:
         db.log("error", f"private_reply {comment_id}: {e}", lead_id)
         return
     if script.get("comment_public_reply"):
         try:
             facebook.reply_comment(comment_id, content.render(script["comment_public_reply"], name=name))
+            db.update_comment(comment_id, status="replied")
         except FacebookError as e:
             db.log("error", f"reply_comment {comment_id}: {e}", lead_id)
 

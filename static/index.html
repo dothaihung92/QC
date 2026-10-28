@@ -21,6 +21,26 @@
   nav button { background: none; border: 0; padding: 8px 12px; border-radius: 8px; cursor: pointer;
                font: inherit; color: var(--muted); }
   nav button.active { background: var(--pri-weak); color: var(--pri); font-weight: 600; }
+  a { color: var(--pri); text-decoration: none; } a:hover { text-decoration: underline; }
+  a.btn { text-decoration: none; color: var(--text); } a.btn:hover { background: #f3f6fb; text-decoration: none; }
+  .badge { display: inline-block; min-width: 18px; padding: 0 6px; margin-left: 4px; border-radius: 99px;
+           background: var(--err); color: #fff; font-size: 11px; line-height: 18px; text-align: center; font-weight: 700; }
+  .cm { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; background: #fff; }
+  .cm.open { border-color: var(--pri); }
+  .cm .who { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+  .cm .avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--pri-weak); color: var(--pri);
+                display: inline-flex; align-items: center; justify-content: center; font-weight: 700; }
+  .cm .msg { white-space: pre-wrap; margin: 4px 0 8px; }
+  .cm .answer { background: var(--ok-weak); border-radius: 8px; padding: 8px 10px; margin: 0 0 8px; font-size: 13px; white-space: pre-wrap; }
+  .cm .replybox { display: none; margin-top: 8px; } .cm .replybox.show { display: block; }
+  .job { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; background: #fff; }
+  .job.due { border-color: var(--warn); background: var(--warn-weak); }
+  .job.done { opacity: .6; }
+  .job .grp { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+  .job .grp b { flex: 1; min-width: 120px; }
+  .kpi b { font-size: 24px; }
+  th.sort { cursor: pointer; user-select: none; } th.sort:hover { color: var(--pri); }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
   main.full { max-width: none; padding: 0; }
   #seo iframe { display: block; width: 100%; height: calc(100vh - 62px); border: 0; background: #fff; }
   main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
@@ -81,6 +101,9 @@
   <nav id="nav">
     <button data-s="overview" class="active">Tổng quan</button>
     <button data-s="posts">Bài đăng</button>
+    <button data-s="groups" data-label="Đăng nhóm">Đăng nhóm</button>
+    <button data-s="comments" data-label="Bình luận">Bình luận</button>
+    <button data-s="stats">Thống kê</button>
     <button data-s="script">Kịch bản trả lời</button>
     <button data-s="sim">Thử kịch bản</button>
     <button data-s="leads">Khách tiềm năng</button>
@@ -309,6 +332,92 @@
     </ul>
   </div>
 </section>
+<!-- ============================ ĐĂNG NHÓM (nhắc giờ, đăng tay) -->
+<section id="groups">
+  <div class="row">
+    <div class="col">
+      <div class="card">
+        <h2>Hẹn giờ đăng nhóm</h2>
+        <p class="note small" style="margin-top:0"><b>Cách hoạt động:</b> Facebook không cho phần mềm tự đăng vào group
+          (tự động hóa sẽ bị khóa tài khoản). Đến giờ hẹn, phần mềm <b>nhắc bạn</b>, mở sẵn từng nhóm và chép sẵn nội dung —
+          bạn chỉ cần dán, bấm đăng rồi bấm <b>✓ Đã đăng</b>. Mỗi nhóm khoảng 10 giây.
+          Chỉ đăng ở nhóm cho phép quảng cáo.</p>
+        <label>Nội dung</label>
+        <textarea id="gjMsg" style="min-height:180px" placeholder="Nội dung bài sẽ đăng vào nhóm..."></textarea>
+        <div class="btns" style="margin-top:6px">
+          <button class="btn" onclick="gjFromPosts()">↙ Lấy từ bài ở tab Bài đăng</button>
+        </div>
+        <label>Link kèm theo (tùy chọn)</label><input id="gjLink" placeholder="https://dailythuehungphuc.com/...">
+        <label>Đăng vào các nhóm</label>
+        <div id="gjGroups" class="small"></div>
+        <label>Giờ nhắc đăng <span class="muted small">(để trống = nhắc ngay)</span></label>
+        <input id="gjTime" type="datetime-local">
+        <div class="btns"><button class="btn pri" onclick="saveGroupJob()">⏰ Hẹn giờ nhắc</button>
+          <button class="btn" id="notifBtn" onclick="enableNotify()">🔔 Bật thông báo trình duyệt</button></div>
+      </div>
+    </div>
+    <div class="col" style="flex-basis:300px;max-width:420px">
+      <div class="card">
+        <h2>Danh sách nhóm</h2>
+        <div class="row" style="gap:6px">
+          <input id="gName" placeholder="Tên nhóm (để nhớ)" style="flex:1 1 110px">
+          <input id="gUrl" placeholder="Link hoặc ID nhóm" style="flex:1 1 140px">
+        </div>
+        <div class="btns"><button class="btn" onclick="addGroup()">+ Thêm nhóm</button></div>
+        <div id="gList" style="margin-top:10px"></div>
+        <p class="muted small">Link nhóm dạng <code>facebook.com/groups/123456789</code>.</p>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Lịch đăng nhóm</h2>
+    <div id="gjList"></div>
+  </div>
+</section>
+
+<!-- ============================ BÌNH LUẬN -->
+<section id="comments">
+  <div class="card">
+    <div class="row" style="align-items:center">
+      <h2 style="margin:0;flex:1">Bình luận trên Fanpage</h2>
+      <select id="cmFilter" style="width:auto" onchange="loadComments()">
+        <option value="open">Cần trả lời</option>
+        <option value="replied">Đã trả lời</option>
+        <option value="private_replied">Đã nhắn riêng</option>
+        <option value="ignored">Đã bỏ qua</option>
+        <option value="all">Tất cả</option>
+      </select>
+      <button class="btn" id="cmSync" onclick="syncComments()">🔄 Đồng bộ từ Facebook</button>
+    </div>
+    <p class="muted small">Bình luận mới tự xuất hiện ở đây khi webhook đang chạy. Nếu máy/tunnel từng tắt, bấm "Đồng bộ" để kéo bù.
+      Chỉ bình luận trên bài của Fanpage — Facebook không cho đọc bình luận trong group.</p>
+    <div id="cmList"></div>
+  </div>
+</section>
+
+<!-- ============================ THỐNG KÊ -->
+<section id="stats">
+  <div class="grid" id="stKpi"></div>
+  <div class="card" style="margin-top:16px">
+    <div class="row" style="align-items:center">
+      <h2 style="margin:0;flex:1">Hiệu quả từng bài trên Fanpage</h2>
+      <span class="muted small" id="stSynced"></span>
+      <button class="btn" id="stSync" onclick="syncStats()">🔄 Cập nhật số liệu</button>
+    </div>
+    <div class="tbl-wrap" style="margin-top:10px"><table>
+      <thead><tr><th>Bài</th>
+        <th class="sort num" onclick="stSort('created_time')">Ngày ↕</th>
+        <th class="sort num" onclick="stSort('views')">👁 Lượt xem ↕</th>
+        <th class="sort num" onclick="stSort('likes')">👍 Thích ↕</th>
+        <th class="sort num" onclick="stSort('comments')">💬 Bình luận ↕</th>
+        <th class="sort num" onclick="stSort('shares')">↗ Chia sẻ ↕</th></tr></thead>
+      <tbody id="stRows"></tbody>
+    </table></div>
+    <p class="muted small">"—" ở cột lượt xem nghĩa là Facebook không trả số này (cần thêm quyền <code>read_insights</code> trong
+      Xét duyệt → Quyền và tính năng). Bài đăng trong group không có số liệu vì Facebook không cho phần mềm đọc.</p>
+  </div>
+</section>
+
 <!-- ============================ VIẾT BÀI SEO (nạp khi mở tab lần đầu) -->
 <section id="seo">
   <iframe id="seoFrame" title="Viết bài SEO" allow="clipboard-read; clipboard-write"></iframe>
@@ -342,7 +451,8 @@ function openTab(name) {
   document.querySelectorAll('main section').forEach(s => s.classList.toggle('active', s.id === name));
   document.querySelector('main').classList.toggle('full', name === 'seo');
   if (name === 'seo' && !$('seoFrame').src) $('seoFrame').src = '/seo-writer';
-  ({ overview: loadStatus, posts: loadPosts, script: loadScript, leads: loadLeads, activity: loadActivity })[name]?.();
+  ({ overview: loadStatus, posts: loadPosts, script: loadScript, leads: loadLeads, activity: loadActivity,
+     groups: loadGroups, comments: loadComments, stats: loadStats })[name]?.();
   // Ghi tab vào địa chỉ (vd 127.0.0.1:8787/#seo) để mở lại / lưu dấu trang đúng tab.
   if (location.hash.slice(1) !== name) history.replaceState(null, '', '#' + name);
 }
@@ -592,6 +702,161 @@ async function loadActivity() {
     <td class="small">${esc(a.lead_id)}</td><td class="small pre">${esc(a.text)}</td></tr>`).join('')
     || '<tr><td colspan="4" class="muted">Chưa có hoạt động.</td></tr>';
 }
+
+// ---------------- Đăng nhóm (nhắc giờ, đăng tay)
+let GROUPS = [];
+async function loadGroups() {
+  GROUPS = await api('/api/groups');
+  $('gList').innerHTML = GROUPS.map(g => `<div class="row" style="align-items:center;gap:8px;padding:4px 0">
+      <a href="${esc(g.url)}" target="_blank" rel="noopener" style="flex:1"><b>${esc(g.name)}</b></a>
+      <button class="btn danger" onclick="delGroup(${g.id})">Xóa</button></div>`).join('')
+    || '<p class="muted small">Chưa có nhóm nào — thêm ở trên.</p>';
+  const keep = new Set([...document.querySelectorAll('#gjGroups input:checked')].map(i => +i.value));
+  $('gjGroups').innerHTML = GROUPS.map(g => `<label style="font-weight:400;margin:4px 0"><input type="checkbox" value="${g.id}"
+      style="width:auto" ${keep.has(g.id) ? 'checked' : ''}> ${esc(g.name)}</label>`).join('')
+    || '<span class="muted">Thêm nhóm ở cột bên phải trước.</span>';
+  renderNotifBtn();
+  loadGroupJobs();
+}
+async function addGroup() {
+  await api('/api/groups', { method: 'POST', body: { name: $('gName').value, url: $('gUrl').value } });
+  $('gName').value = ''; $('gUrl').value = ''; loadGroups();
+}
+async function delGroup(id) { if (!confirm('Xóa nhóm này khỏi danh sách?')) return;
+  await api('/api/groups/' + id, { method: 'DELETE' }); loadGroups(); }
+function gjFromPosts() { const t = $('pMsg').value.trim();
+  if (!t) return toast('Tab Bài đăng chưa có nội dung — soạn bài ở đó trước');
+  $('gjMsg').value = t; $('gjLink').value = $('pLink').value.trim(); }
+async function saveGroupJob() {
+  const ids = [...document.querySelectorAll('#gjGroups input:checked')].map(i => +i.value);
+  const t = $('gjTime').value;
+  const at = t ? Math.floor(new Date(t).getTime() / 1000) : null;
+  await api('/api/group-jobs', { method: 'POST', body: { message: $('gjMsg').value, link: $('gjLink').value.trim(),
+                                                         scheduled_at: at, group_ids: ids } });
+  toast(at && at > Date.now() / 1000 ? '⏰ Đã hẹn giờ nhắc' : '🔔 Đến giờ rồi — xem lịch bên dưới');
+  $('gjMsg').value = ''; $('gjLink').value = ''; $('gjTime').value = '';
+  loadGroupJobs(); pollBadges();
+}
+let JOBS = [];
+const JOB_TXT = { scheduled: ['Chờ đến giờ', 'p-info'], due: ['Đến giờ đăng!', 'p-warn'], done: ['Đã xong', 'p-ok'] };
+async function loadGroupJobs() {
+  JOBS = await api('/api/group-jobs');
+  $('gjList').innerHTML = JOBS.map(j => { const [label, cls] = JOB_TXT[j.status];
+    return `<div class="job ${j.status}">
+      <div class="row" style="align-items:center;gap:8px"><b style="flex:1">${fmt(j.scheduled_at)}</b>
+        <span class="pill ${cls}">${label}</span>
+        <button class="btn" onclick="copyJob(${j.id})">📋 Copy nội dung</button>
+        <button class="btn danger" onclick="delJob(${j.id})">Xóa</button></div>
+      <div class="pre small" style="margin:8px 0;max-height:90px;overflow:auto">${esc(j.message)}${j.link ? '\n' + esc(j.link) : ''}</div>
+      ${j.groups.map(g => `<div class="grp"><b>${g.done ? '✅' : '⭕'} ${esc(g.name)}</b>
+        <a class="btn" href="${esc(g.url)}" target="_blank" rel="noopener" onclick="copyJob(${j.id}, true)">Mở nhóm ↗</a>
+        <button class="btn ${g.done ? '' : 'pri'}" onclick="toggleJob(${j.id}, ${g.id})">${g.done ? 'Bỏ đánh dấu' : '✓ Đã đăng'}</button></div>`).join('')}
+    </div>`; }).join('') || '<p class="muted">Chưa có lịch nào.</p>';
+}
+async function copyJob(id, quiet) { const j = JOBS.find(x => x.id === id); if (!j) return;
+  const text = j.message + (j.link ? '\n\n' + j.link : '');
+  try { await navigator.clipboard.writeText(text); if (!quiet) toast('📋 Đã copy — dán vào ô viết bài của nhóm'); else toast('📋 Đã copy nội dung, nhóm đang mở ở tab mới'); }
+  catch { toast('Không copy được — bôi đen nội dung rồi Ctrl+C'); } }
+async function toggleJob(jid, gid) { await api(`/api/group-jobs/${jid}/toggle`, { method: 'POST', body: { group_id: gid } });
+  loadGroupJobs(); pollBadges(); }
+async function delJob(id) { if (!confirm('Xóa lịch này?')) return;
+  await api('/api/group-jobs/' + id, { method: 'DELETE' }); loadGroupJobs(); pollBadges(); }
+
+// ---------------- Bình luận
+let CM = [];
+const CM_TXT = { new: ['Cần trả lời', 'p-warn'], replied: ['Đã trả lời', 'p-ok'], private_replied: ['Đã nhắn riêng', 'p-ok'], ignored: ['Bỏ qua', 'p-info'] };
+const postLink = id => id ? 'https://www.facebook.com/' + id : '';
+async function getScript() { return SCRIPT || (SCRIPT = await api('/api/script')); }
+async function loadComments() {
+  CM = await api('/api/comments?status=' + $('cmFilter').value);
+  $('cmList').innerHTML = CM.map(c => { const [label, cls] = CM_TXT[c.status] || [c.status, 'p-info'];
+    const name = c.from_name || '(chưa rõ tên)';
+    return `<div class="cm ${c.status === 'new' ? 'open' : ''}" id="cm-${esc(c.id)}">
+      <div class="who"><span class="avatar">${esc(name.trim().slice(0, 1).toUpperCase())}</span><b>${esc(name)}</b>
+        <span class="muted small">${fmt(c.created_at)}</span><span class="pill ${cls}">${label}</span>
+        ${c.post_id ? `<a class="small" target="_blank" rel="noopener" href="${esc(postLink(c.post_id))}">xem bài ↗</a>` : ''}</div>
+      <div class="msg">${c.message ? esc(c.message) : '<i class="muted">(Không đọc được nội dung — cần quyền pages_read_user_content, hoặc xem trực tiếp trên Facebook)</i>'}</div>
+      ${c.reply_text ? `<div class="answer"><b>Đã gửi:</b> ${esc(c.reply_text)}</div>` : ''}
+      <div class="btns" style="margin:0">
+        <button class="btn pri" onclick="openReply('${esc(c.id)}', 'public')">💬 Trả lời</button>
+        <button class="btn" onclick="openReply('${esc(c.id)}', 'private')">✉️ Nhắn riêng</button>
+        ${c.status === 'ignored' ? `<button class="btn" onclick="setCm('${esc(c.id)}','new')">Mở lại</button>`
+          : `<button class="btn" onclick="setCm('${esc(c.id)}','ignored')">Bỏ qua</button>`}</div>
+      <div class="replybox" id="rb-${esc(c.id)}"><textarea rows="3" id="rt-${esc(c.id)}"></textarea>
+        <div class="btns"><button class="btn pri" onclick="sendReply('${esc(c.id)}')">Gửi</button>
+          <button class="btn" onclick="document.getElementById('rb-${esc(c.id)}').classList.remove('show')">Hủy</button></div></div>
+    </div>`; }).join('') || '<p class="muted">Không có bình luận nào ở mục này.</p>';
+}
+const REPLY_MODE = {};
+async function openReply(id, mode) {
+  const c = CM.find(x => x.id === id); REPLY_MODE[id] = mode;
+  const first = (c.from_name || '').trim().split(/\s+/).pop() || 'bạn';
+  const sc = await getScript();
+  const tpl = mode === 'private' ? sc.comment_private_reply : (sc.comment_public_reply || 'Cảm ơn {name} đã quan tâm ❤️');
+  $('rt-' + id).value = tpl.replace(/\{name\}/g, first).replace(/\{product\}/g, 'Phần mềm Kế toán Đa công ty');
+  $('rb-' + id).classList.add('show'); $('rt-' + id).focus();
+}
+async function sendReply(id) {
+  const mode = REPLY_MODE[id] || 'public', text = $('rt-' + id).value;
+  if (mode === 'private' && !confirm('Nhắn riêng chỉ gửi được 1 tin cho mỗi bình luận, trong 7 ngày. Gửi?')) return;
+  await api(`/api/comments/${encodeURIComponent(id)}/${mode === 'private' ? 'private' : 'reply'}`, { method: 'POST', body: { text } });
+  toast(mode === 'private' ? '✉️ Đã nhắn riêng' : '✅ Đã trả lời'); loadComments(); pollBadges();
+}
+async function setCm(id, status) { await api(`/api/comments/${encodeURIComponent(id)}/status`, { method: 'POST', body: { status } });
+  loadComments(); pollBadges(); }
+async function syncComments() {
+  $('cmSync').disabled = true; $('cmSync').textContent = '⏳ Đang kéo...';
+  try { const r = await api('/api/comments/sync', { method: 'POST' }); toast(`✅ Có thêm ${r.added} bình luận mới`); loadComments(); pollBadges(); }
+  catch {}   // api() đã hiện lỗi cho người dùng
+  finally { $('cmSync').disabled = false; $('cmSync').textContent = '🔄 Đồng bộ từ Facebook'; }
+}
+
+// ---------------- Thống kê
+let ST = { posts: [], totals: {}, synced_at: null }, stKey = 'created_time', stDir = -1;
+async function loadStats() { ST = await api('/api/stats'); renderStats(); }
+const num = v => v == null ? '—' : Number(v).toLocaleString('vi-VN');
+function renderStats() {
+  const t = ST.totals || {};
+  $('stKpi').innerHTML = [[t.posts, 'Bài đã theo dõi'], [t.views, '👁 Tổng lượt xem'], [t.likes, '👍 Tổng lượt thích'],
+    [t.comments, '💬 Tổng bình luận'], [t.shares, '↗ Tổng chia sẻ']]
+    .map(([n, l]) => `<div class="stat kpi"><b>${num(n)}</b><span>${l}</span></div>`).join('');
+  $('stSynced').textContent = ST.synced_at ? 'Cập nhật lúc ' + fmt(ST.synced_at) : 'Chưa cập nhật lần nào';
+  const rows = [...ST.posts].sort((a, b) => ((a[stKey] ?? -1) - (b[stKey] ?? -1)) * stDir);
+  $('stRows').innerHTML = rows.map(p => `<tr><td style="max-width:420px"><a target="_blank" rel="noopener" href="${esc(p.permalink)}">
+      ${esc((p.message || '(bài không có chữ)').slice(0, 110))}</a></td><td class="num small">${p.created_time ? new Date(p.created_time * 1000).toLocaleDateString('vi-VN') : ''}</td>
+      <td class="num">${num(p.views)}</td><td class="num">${num(p.likes)}</td><td class="num">${num(p.comments)}</td><td class="num">${num(p.shares)}</td></tr>`).join('')
+    || '<tr><td colspan="6" class="muted">Chưa có số liệu — bấm "Cập nhật số liệu".</td></tr>';
+}
+function stSort(k) { stDir = stKey === k ? -stDir : -1; stKey = k; renderStats(); }
+async function syncStats() {
+  $('stSync').disabled = true; $('stSync').textContent = '⏳ Đang lấy...';
+  try { ST = await api('/api/stats/sync', { method: 'POST' }); renderStats(); toast('✅ Đã cập nhật số liệu'); }
+  catch {}   // api() đã hiện lỗi cho người dùng
+  finally { $('stSync').disabled = false; $('stSync').textContent = '🔄 Cập nhật số liệu'; }
+}
+
+// ---------------- Nhắc việc: số đỏ trên menu + thông báo khi có bình luận / đến giờ đăng nhóm
+let lastCm = null, lastDue = null;
+function setBadge(tab, n) { const b = document.querySelector(`#nav button[data-s=${tab}]`);
+  b.innerHTML = b.dataset.label + (n ? ` <span class="badge">${n}</span>` : ''); }
+function notifyUser(title, body) { toast('🔔 ' + title + ' — ' + body);
+  try { if ('Notification' in window && Notification.permission === 'granted') new Notification(title, { body }); } catch {} }
+async function pollBadges() {
+  try {
+    const b = await (await fetch('/api/badges')).json();
+    setBadge('comments', b.comments_new); setBadge('groups', b.group_due);
+    document.title = (b.comments_new + b.group_due ? `(${b.comments_new + b.group_due}) ` : '') + 'Quảng cáo Fanpage';
+    if (lastDue !== null && b.group_due > lastDue) notifyUser('Đến giờ đăng nhóm', `${b.group_due} lịch đang chờ bạn`);
+    if (lastCm !== null && b.comments_new > lastCm) notifyUser('Bình luận mới', `${b.comments_new} bình luận cần trả lời`);
+    if (location.hash === '#comments' && lastCm !== null && b.comments_new !== lastCm) loadComments();
+    lastCm = b.comments_new; lastDue = b.group_due;
+  } catch {}
+}
+function renderNotifBtn() { const btn = $('notifBtn'); if (!btn) return;
+  btn.style.display = ('Notification' in window && Notification.permission === 'default') ? '' : 'none'; }
+async function enableNotify() { try { await Notification.requestPermission(); } catch {} renderNotifBtn();
+  toast(Notification.permission === 'granted' ? '🔔 Đã bật thông báo' : 'Trình duyệt đang chặn thông báo'); }
+setInterval(pollBadges, 30000); pollBadges();
 
 loadStatus();
 if (location.hash.length > 1) openTab(location.hash.slice(1));

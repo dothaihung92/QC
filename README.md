@@ -98,6 +98,18 @@ tests/            # pytest
 data/             # CSDL (tự tạo — KHÔNG commit)
 ```
 
+## Bình luận, thống kê, đăng nhóm
+
+| Tab | Làm được gì | Cần gì |
+|---|---|---|
+| **Bình luận** | Mọi bình luận trên bài Fanpage hiện ở đây (tự về qua webhook; nút *Đồng bộ* kéo bù khi máy/tunnel từng tắt). Trả lời công khai, nhắn riêng, bỏ qua. Số đỏ trên menu + thông báo trình duyệt khi có bình luận mới. | Trả lời công khai cần quyền `pages_manage_engagement`; đọc nội dung khi *Đồng bộ* cần `pages_read_user_content` (webhook không cần) |
+| **Thống kê** | Lượt thích, bình luận, chia sẻ, lượt xem của từng bài + tổng, bấm tiêu đề cột để sắp xếp. | Lượt xem cần quyền `read_insights`; thiếu thì hiện "—" |
+| **Đăng nhóm** | Hẹn giờ nhắc đăng nhiều nhóm: đến giờ phần mềm báo, mở sẵn nhóm, chép sẵn nội dung; bạn dán, bấm đăng, rồi bấm *✓ Đã đăng*. | Mở sẵn trang phần mềm để nhận nhắc |
+
+**Vì sao nhóm không tự động hoàn toàn?** Facebook đã khóa API đăng bài và đọc bình luận trong group (2024);
+tự động hóa trình duyệt vi phạm điều khoản và dễ bị khóa tài khoản. Vì vậy bài đăng trong nhóm **không có**
+thống kê/bình luận trên phần mềm — chỉ Fanpage mới có.
+
 ## Viết bài bằng AI
 
 - **✍️ Viết bài SEO** (nút trên thanh menu, mở `/seo-writer`): công cụ SEO Article Writer dùng Gemini.

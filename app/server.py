@@ -2,6 +2,7 @@
 import csv
 import io
 import logging
+import re
 import secrets
 import threading
 import time
@@ -352,6 +353,207 @@ def leads_csv():
 @admin.get("/api/activity")
 def activity():
     return db.list_activity()
+
+
+# ----- bình luận (hộp thư) ----------------------------------------------------
+
+def _fb_error(e: FacebookError) -> HTTPException:
+    msg = str(e)
+    if "(#200)" in msg or "(#10)" in msg or "ermission" in msg:
+        msg += " — thiếu quyền: thêm pages_manage_engagement (trả lời bình luận) / pages_read_user_content (đọc nội dung) trong Xét duyệt → Quyền và tính năng, rồi lấy lại token."
+    return HTTPException(502, msg)
+
+
+@admin.get("/api/badges")
+def badges():
+    return {"comments_new": db.count_new_comments(), "group_due": db.count_due_group_jobs()}
+
+
+@admin.get("/api/comments")
+def list_comments(status: str = "open"):
+    return db.list_comments(None if status == "all" else status)
+
+
+class ReplyIn(BaseModel):
+    text: str
+
+
+def _comment_or_404(cid: str) -> dict:
+    c = db.get_comment(cid)
+    if not c:
+        raise HTTPException(404, "Không có bình luận này")
+    return c
+
+
+@admin.post("/api/comments/{cid}/reply")
+def reply_comment(cid: str, body: ReplyIn):
+    _comment_or_404(cid)
+    if not body.text.strip():
+        raise HTTPException(400, "Nội dung trả lời trống")
+    try:
+        facebook.reply_comment(cid, body.text.strip())
+    except FacebookError as e:
+        db.log("error", f"reply_comment {cid}: {e}")
+        raise _fb_error(e)
+    db.update_comment(cid, status="replied", reply_text=body.text.strip(), replied_at=db.now())
+    db.log("reply", body.text.strip(), "")
+    return db.get_comment(cid)
+
+
+@admin.post("/api/comments/{cid}/private")
+def private_reply(cid: str, body: ReplyIn):
+    _comment_or_404(cid)
+    if not body.text.strip():
+        raise HTTPException(400, "Nội dung tin nhắn trống")
+    try:
+        facebook.private_reply(cid, body.text.strip())
+    except FacebookError as e:
+        db.log("error", f"private_reply {cid}: {e}")
+        raise _fb_error(e)
+    db.update_comment(cid, status="private_replied", reply_text=body.text.strip(), replied_at=db.now())
+    db.log("private_reply", f"comment {cid}")
+    return db.get_comment(cid)
+
+
+class StatusIn(BaseModel):
+    status: str
+
+
+@admin.post("/api/comments/{cid}/status")
+def set_comment_status(cid: str, body: StatusIn):
+    _comment_or_404(cid)
+    if body.status not in ("new", "ignored", "replied"):
+        raise HTTPException(400, "Trạng thái không hợp lệ")
+    db.update_comment(cid, status=body.status)
+    return db.get_comment(cid)
+
+
+@admin.post("/api/comments/sync")
+def sync_comments(posts: int = 8):
+    """Kéo bình luận gần đây từ Facebook — bù cho lúc webhook/tunnel bị tắt."""
+    try:
+        recent = facebook.list_published_posts(limit=posts, with_views=False)
+        added = 0
+        for post in recent:
+            for c in facebook.list_post_comments(post["id"]):
+                if c["from_id"] == config.PAGE_ID:
+                    continue
+                is_new = db.get_comment(c["id"]) is None
+                db.save_comment(c["id"], post_id=post["id"], from_id=c["from_id"], from_name=c["from_name"],
+                                message=c["message"], created_at=c["created_time"],
+                                status="replied" if c["page_replied"] else "new")
+                added += is_new
+    except FacebookError as e:
+        raise _fb_error(e)
+    return {"added": added, "new_total": db.count_new_comments()}
+
+
+# ----- thống kê ----------------------------------------------------------------
+
+def _stats_payload():
+    posts = db.list_post_stats()
+    tot = {k: sum((p[k] or 0) for p in posts) for k in ("likes", "comments", "shares")}
+    views = [p["views"] for p in posts if p["views"] is not None]
+    tot["views"] = sum(views) if views else None
+    tot["posts"] = len(posts)
+    synced = max((p["synced_at"] for p in posts), default=None)
+    return {"posts": posts, "totals": tot, "synced_at": synced}
+
+
+@admin.get("/api/stats")
+def get_stats():
+    return _stats_payload()
+
+
+@admin.post("/api/stats/sync")
+def sync_stats(limit: int = 20):
+    try:
+        for p in facebook.list_published_posts(limit=min(max(limit, 1), 50)):
+            db.upsert_post_stats(p["id"], p["message"], p["permalink"], p["created_time"],
+                                 p["likes"], p["comments"], p["shares"], p["views"])
+    except FacebookError as e:
+        raise _fb_error(e)
+    return _stats_payload()
+
+
+# ----- lịch đăng nhóm (nhắc đăng tay) -------------------------------------------
+# Facebook không cho ứng dụng tự đăng vào group → đến giờ phần mềm nhắc, mở sẵn nhóm
+# và chép sẵn nội dung; người dùng dán và bấm đăng rồi đánh dấu "đã đăng".
+
+class GroupIn(BaseModel):
+    name: str = ""
+    url: str
+
+
+def _group_url(raw: str) -> str:
+    raw = raw.strip()
+    m = re.search(r"facebook\.com/groups/([^/?#\s]+)", raw)
+    ident = m.group(1) if m else raw
+    if not re.fullmatch(r"[0-9A-Za-z._-]+", ident):
+        raise HTTPException(400, "Dán đường dẫn group (facebook.com/groups/...) hoặc Group ID")
+    return f"https://www.facebook.com/groups/{ident}"
+
+
+@admin.get("/api/groups")
+def list_groups():
+    return db.list_groups()
+
+
+@admin.post("/api/groups")
+def add_group(body: GroupIn):
+    url = _group_url(body.url)
+    if any(g["url"] == url for g in db.list_groups()):
+        raise HTTPException(400, "Group này đã có rồi")
+    name = body.name.strip() or url.rsplit("/", 1)[-1]
+    gid = db.add_group(name, url)
+    return {"id": gid, "name": name, "url": url}
+
+
+@admin.delete("/api/groups/{gid}")
+def delete_group(gid: int):
+    db.delete_group(gid)
+    return {"ok": True}
+
+
+class GroupJobIn(BaseModel):
+    message: str
+    link: str = ""
+    scheduled_at: Optional[int] = None    # None = đăng ngay (nhắc luôn)
+    group_ids: list[int]
+
+
+@admin.get("/api/group-jobs")
+def list_group_jobs():
+    return db.list_group_jobs()
+
+
+@admin.post("/api/group-jobs")
+def add_group_job(body: GroupJobIn):
+    if not body.message.strip():
+        raise HTTPException(400, "Nội dung trống")
+    valid = {g["id"] for g in db.list_groups()}
+    ids = [g for g in body.group_ids if g in valid]
+    if not ids:
+        raise HTTPException(400, "Chọn ít nhất 1 group")
+    jid = db.add_group_job(body.message.strip(), body.link.strip(), body.scheduled_at or db.now(), ids)
+    return {"id": jid}
+
+
+class ToggleIn(BaseModel):
+    group_id: int
+
+
+@admin.post("/api/group-jobs/{jid}/toggle")
+def toggle_group_job(jid: int, body: ToggleIn):
+    if not db.toggle_group_done(jid, body.group_id):
+        raise HTTPException(404, "Không có lịch này")
+    return {"ok": True}
+
+
+@admin.delete("/api/group-jobs/{jid}")
+def delete_group_job(jid: int):
+    db.delete_group_job(jid)
+    return {"ok": True}
 
 
 app.include_router(admin)
