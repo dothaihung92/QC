@@ -126,3 +126,11 @@ def test_seo_writer_missing_file_is_friendly(client, monkeypatch, tmp_path):
     r = client.get("/seo-writer")
     assert r.status_code == 200 and "start.bat" in r.text
     assert client.get("/qc-bridge.js").status_code == 200
+
+
+def test_seo_writer_opened_directly_redirects_into_dashboard_tab(client):
+    r = client.get("/seo-writer", headers={"Sec-Fetch-Dest": "document"}, follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == "/#seo"
+    framed = client.get("/seo-writer", headers={"Sec-Fetch-Dest": "iframe"})
+    assert framed.status_code == 200 and "SEO Article Writer" in framed.text
+    assert client.get("/").headers["cache-control"] == "no-store"

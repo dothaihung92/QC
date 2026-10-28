@@ -10,7 +10,7 @@ from typing import Optional
 
 from fastapi import (APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException,
                      Request)
-from fastapi.responses import HTMLResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
@@ -112,15 +112,22 @@ def require_admin(cred: HTTPBasicCredentials = Depends(security)):
 admin = APIRouter(dependencies=[Depends(require_admin)])
 
 
+NO_STORE = {"Cache-Control": "no-store"}  # luôn lấy bản mới sau khi tự cập nhật
+
+
 @admin.get("/", response_class=HTMLResponse)
 def index():
-    return (STATIC / "index.html").read_text(encoding="utf-8")
+    return HTMLResponse((STATIC / "index.html").read_text(encoding="utf-8"), headers=NO_STORE)
 
 
 @admin.get("/seo-writer", response_class=HTMLResponse)
-def seo_writer():
+def seo_writer(request: Request):
     """Công cụ SEO Article Writer (Gemini) — cùng địa chỉ với bảng điều khiển nên
     dùng chung Gemini key (localStorage 'gkey') và gọi được /api/posts."""
+    # Mở thẳng (dấu trang / liên kết cũ) thì đưa về tab "Viết bài SEO" trong bảng điều khiển;
+    # tab đó nhúng chính trang này dưới dạng iframe nên không bị lặp.
+    if request.headers.get("sec-fetch-dest") == "document":
+        return RedirectResponse("/#seo", status_code=302, headers=NO_STORE)
     path = STATIC / "seo-writer.html"
     if not path.exists():
         return HTMLResponse(
@@ -131,7 +138,8 @@ def seo_writer():
     html = path.read_text(encoding="utf-8")
     # Tự chèn nút "Đăng lên Fanpage" — thay seo-writer.html bằng bản mới vẫn giữ được.
     tag = '<script src="/qc-bridge.js"></script>'
-    return html.replace("</body>", tag + "</body>", 1) if "</body>" in html else html + tag
+    html = html.replace("</body>", tag + "</body>", 1) if "</body>" in html else html + tag
+    return HTMLResponse(html, headers=NO_STORE)
 
 
 @admin.get("/qc-bridge.js")
