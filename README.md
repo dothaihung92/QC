@@ -91,11 +91,25 @@ app/facebook.py   # Gọi Graph API + xác thực chữ ký webhook
 app/content.py    # Tính năng KE-TOAN, kịch bản mặc định, mẫu bài đăng
 app/db.py         # SQLite: bài đăng, khách tiềm năng, cài đặt, nhật ký
 static/index.html # Giao diện
+static/seo-writer.html, static/qc-bridge.js  # Công cụ viết bài SEO + nút đẩy bài sang Fanpage
 update.py         # Tự cập nhật phần mềm từ GitHub, chạy mỗi lần bấm start.bat
 start.bat / run_server.bat / start.sh  # Chạy nhanh trên Windows / Mac-Linux
 tests/            # pytest
 data/             # CSDL (tự tạo — KHÔNG commit)
 ```
+
+## Viết bài bằng AI
+
+- **✍️ Viết bài SEO** (nút trên thanh menu, mở `/seo-writer`): công cụ SEO Article Writer dùng Gemini.
+  Viết xong, trong khung "Đăng lên Facebook" có thêm 2 nút **💾 Lưu nháp vào QC** và
+  **📤 Đăng ngay lên Fanpage** — bài được đưa thẳng vào tab *Bài đăng* (kèm link bài viết).
+  Thay `static/seo-writer.html` bằng bản mới hơn vẫn giữ 2 nút này (máy chủ tự chèn `qc-bridge.js`).
+- **✨ Viết lại từ bài nguồn** (tab *Bài đăng*): dán nội dung + link bài hay trong group/page khác,
+  AI viết lại thành bài mới của Fanpage và ghi "📌 Nguồn tham khảo: <link>" ở cuối.
+  Phần mềm **không tự vào group lấy bài** (Facebook không cho phép, dễ bị khóa tài khoản) — bạn chọn bài, AI viết.
+
+Cả hai dùng chung một Gemini API key (lấy miễn phí tại <https://aistudio.google.com/apikey>),
+nhập một lần là dùng được ở cả hai nơi.
 
 ## Tự động cập nhật
 

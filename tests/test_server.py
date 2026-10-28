@@ -102,3 +102,20 @@ def test_leads_csv(client):
     db.upsert_lead("PSID9", "messenger", "Lan", "hello")
     r = client.get("/api/leads.csv", auth=AUTH)
     assert r.status_code == 200 and "PSID9" in r.text and "Lan" in r.text
+
+
+def test_seo_writer_served_with_bridge(client):
+    r = client.get("/seo-writer")
+    assert r.status_code == 200
+    assert "SEO Article Writer" in r.text
+    assert '<script src="/qc-bridge.js"></script></body>' in r.text
+    js = client.get("/qc-bridge.js")
+    assert js.status_code == 200 and "javascript" in js.headers["content-type"]
+    assert "/api/posts" in js.text
+
+
+def test_post_from_seo_writer_keeps_link(client):
+    r = client.post("/api/posts", json={"message": "Bài SEO", "link": "https://dailythuehungphuc.com/bai",
+                                        "template_key": "seo-writer"})
+    post = r.json()
+    assert post["status"] == "draft" and post["link"] == "https://dailythuehungphuc.com/bai"

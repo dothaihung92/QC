@@ -21,6 +21,8 @@
   nav button { background: none; border: 0; padding: 8px 12px; border-radius: 8px; cursor: pointer;
                font: inherit; color: var(--muted); }
   nav button.active { background: var(--pri-weak); color: var(--pri); font-weight: 600; }
+  nav .navlink { padding: 8px 12px; border-radius: 8px; color: var(--pri); text-decoration: none; font-weight: 600; }
+  nav .navlink:hover { background: var(--pri-weak); }
   main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
   section { display: none; } section.active { display: block; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
@@ -84,6 +86,7 @@
     <button data-s="leads">Khách tiềm năng</button>
     <button data-s="activity">Nhật ký</button>
     <button data-s="guide">Hướng dẫn</button>
+    <a href="/seo-writer" target="_blank" class="navlink">✍️ Viết bài SEO ↗</a>
   </nav>
 </header>
 
@@ -137,6 +140,30 @@
       </div>
     </div>
     <div class="col" style="flex-basis:300px;max-width:420px">
+      <div class="card">
+        <h2>✨ Viết lại từ bài nguồn</h2>
+        <p class="muted small" style="margin-top:0">Thấy bài hay trong group/page khác? Dán nội dung + link vào đây,
+          AI viết lại thành bài mới của Fanpage và ghi nguồn ở cuối.</p>
+        <label>Nội dung bài gốc</label>
+        <textarea id="rwSrc" style="min-height:120px" placeholder="Dán nội dung bài viết gốc..."></textarea>
+        <label>Link bài gốc</label>
+        <input id="rwLink" placeholder="https://www.facebook.com/groups/.../posts/...">
+        <label>Giọng văn</label>
+        <select id="rwTone">
+          <option value="chuyên gia, dễ hiểu, gần gũi">Chuyên gia, dễ hiểu</option>
+          <option value="ngắn gọn, súc tích, nhiều gạch đầu dòng">Ngắn gọn, gạch đầu dòng</option>
+          <option value="kể chuyện, gây tò mò, tạo tương tác">Kể chuyện, tạo tương tác</option>
+        </select>
+        <label style="font-weight:400"><input type="checkbox" id="rwPromo" checked style="width:auto">
+          Nhắc khéo phần mềm kế toán nếu hợp ngữ cảnh</label>
+        <div id="rwKeyBox" style="display:none">
+          <label>Gemini API key <a class="small" href="https://aistudio.google.com/apikey" target="_blank">(lấy miễn phí)</a></label>
+          <input id="rwKey" type="password" placeholder="AIzaSy...">
+        </div>
+        <div class="btns"><button class="btn pri" id="rwBtn" onclick="rewriteSource()">✨ Viết lại bằng AI</button></div>
+        <p class="muted small">Dùng chung Gemini key với công cụ <a href="/seo-writer" target="_blank">Viết bài SEO</a>.
+          Kết quả hiện ở ô "Soạn bài" để bạn xem lại trước khi đăng.</p>
+      </div>
       <div class="card">
         <h2>Mẫu bài theo tính năng</h2>
         <div id="tpls"></div>
@@ -338,6 +365,7 @@ async function checkConn() {
 
 // ---------------- Bài đăng
 async function loadPosts() {
+  rwShowKeyBox();
   if (!$('tpls').children.length) {
     const tpls = await api('/api/templates');
     $('tpls').innerHTML = tpls.map((t, i) => `<div class="tpl" data-i="${i}"><b>${esc(t.title)}</b>
@@ -381,6 +409,64 @@ async function publishPost(id) { if (!confirm('Đăng bài #' + id + ' ngay?')) 
 async function unschedule(id) { await api(`/api/posts/${id}`, { method: 'PUT', body: { unschedule: true } }); loadPosts(); }
 async function delPost(id) { if (!confirm('Xóa bài #' + id + ' khỏi danh sách? (không xóa trên Facebook)')) return;
   await api(`/api/posts/${id}`, { method: 'DELETE' }); loadPosts(); }
+// ---------------- Viết lại từ bài nguồn (Gemini, dùng chung key 'gkey' với /seo-writer)
+const RW_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite'];
+function rwKey() {
+  try { return localStorage.getItem('gkey') || ''; } catch { return ''; }
+}
+function rwShowKeyBox() { $('rwKeyBox').style.display = rwKey() ? 'none' : 'block'; }
+async function rewriteSource() {
+  const src = $('rwSrc').value.trim(), link = $('rwLink').value.trim();
+  if (src.length < 30) return toast('Dán nội dung bài gốc (ít nhất vài câu)');
+  let key = rwKey();
+  if (!key) {
+    key = $('rwKey').value.trim();
+    if (!key.startsWith('AIza')) { rwShowKeyBox(); return toast('Nhập Gemini API key (bắt đầu bằng AIza...)'); }
+    try { localStorage.setItem('gkey', key); } catch {}
+    rwShowKeyBox();
+  }
+  const promo = $('rwPromo').checked
+    ? 'Nếu nội dung liên quan (hóa đơn, thuế, tờ khai, MISA, quản lý nhiều công ty), thêm 1-2 câu nhắc khéo rằng phần mềm Kế toán Đa công ty giúp làm việc đó nhanh hơn, và kết bài bằng: Bình luận "QUAN TÂM" để nhận tài liệu & bản dùng thử qua tin nhắn.'
+    : 'Không quảng cáo sản phẩm nào.';
+  const prompt = `Bạn là người viết nội dung cho Fanpage về kế toán - thuế tại Việt Nam.
+Viết lại bài dưới đây thành một bài Facebook MỚI, giọng văn ${$('rwTone').value}.
+Yêu cầu:
+- Diễn đạt hoàn toàn bằng lời của bạn, KHÔNG chép nguyên câu từ bài gốc; giữ đúng các thông tin, số liệu, mốc thời gian.
+- 150-250 chữ, mở bài thu hút, có emoji vừa phải, 3-5 hashtag cuối bài.
+- Chỉ trả về văn bản thuần (không markdown, không dùng ** hay #tiêu đề), không ghi chú thêm.
+- ${promo}
+
+BÀI GỐC:
+${src}`;
+  $('rwBtn').disabled = true; $('rwBtn').textContent = '⏳ Đang viết...';
+  try {
+    let text = '', lastErr = '';
+    for (const model of RW_MODELS) {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { temperature: 0.9 } })
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok) { text = (d.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('').trim(); if (text) break; }
+      lastErr = d.error?.message || r.statusText;
+      if (r.status === 400 || r.status === 403) { // key sai → cho nhập lại
+        try { localStorage.removeItem('gkey'); } catch {}
+        rwShowKeyBox(); break;
+      }
+    }
+    if (!text) return toast('⚠ AI lỗi: ' + (lastErr || 'không có kết quả'));
+    text = text.replace(/\*\*/g, '');
+    if (link) text += `\n\n📌 Nguồn tham khảo: ${link}`;
+    $('pMsg').value = text; $('pMsg').dataset.tpl = 'rewrite';
+    $('pMsg').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    toast('✅ Đã viết xong — xem lại ở ô Soạn bài rồi đăng');
+  } catch (e) {
+    toast('⚠ Không gọi được Gemini: ' + e.message);
+  } finally {
+    $('rwBtn').disabled = false; $('rwBtn').textContent = '✨ Viết lại bằng AI';
+  }
+}
+
 async function copyPost() {
   try { await navigator.clipboard.writeText($('pMsg').value); toast('📋 Đã sao chép — nhớ chỉ đăng ở nhóm cho phép quảng cáo'); }
   catch { $('pMsg').select(); toast('Nhấn Ctrl+C để sao chép'); }

@@ -41,6 +41,8 @@ FILES = [
     "app/bot.py",
     "app/server.py",
     "static/index.html",
+    "static/seo-writer.html",
+    "static/qc-bridge.js",
 ]
 
 # File nao thay doi thi bat cho khoi dong lai (start.bat doc lai chinh no,
