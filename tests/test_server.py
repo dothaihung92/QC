@@ -119,3 +119,10 @@ def test_post_from_seo_writer_keeps_link(client):
                                         "template_key": "seo-writer"})
     post = r.json()
     assert post["status"] == "draft" and post["link"] == "https://dailythuehungphuc.com/bai"
+
+
+def test_seo_writer_missing_file_is_friendly(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(server, "STATIC", tmp_path)
+    r = client.get("/seo-writer")
+    assert r.status_code == 200 and "start.bat" in r.text
+    assert client.get("/qc-bridge.js").status_code == 200

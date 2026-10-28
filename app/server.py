@@ -121,7 +121,14 @@ def index():
 def seo_writer():
     """Công cụ SEO Article Writer (Gemini) — cùng địa chỉ với bảng điều khiển nên
     dùng chung Gemini key (localStorage 'gkey') và gọi được /api/posts."""
-    html = (STATIC / "seo-writer.html").read_text(encoding="utf-8")
+    path = STATIC / "seo-writer.html"
+    if not path.exists():
+        return HTMLResponse(
+            "<meta charset='utf-8'><div style='font:16px system-ui;padding:40px;line-height:1.6'>"
+            "<h2>Chưa có công cụ Viết bài SEO</h2>"
+            "<p>Thiếu file <code>static/seo-writer.html</code>. Đóng hết cửa sổ đen của phần mềm "
+            "rồi chạy lại <b>start.bat</b> để phần mềm tự tải về.</p></div>")
+    html = path.read_text(encoding="utf-8")
     # Tự chèn nút "Đăng lên Fanpage" — thay seo-writer.html bằng bản mới vẫn giữ được.
     tag = '<script src="/qc-bridge.js"></script>'
     return html.replace("</body>", tag + "</body>", 1) if "</body>" in html else html + tag
@@ -129,8 +136,9 @@ def seo_writer():
 
 @admin.get("/qc-bridge.js")
 def qc_bridge():
-    return Response((STATIC / "qc-bridge.js").read_text(encoding="utf-8"),
-                    media_type="application/javascript; charset=utf-8")
+    path = STATIC / "qc-bridge.js"
+    js = path.read_text(encoding="utf-8") if path.exists() else ""
+    return Response(js, media_type="application/javascript; charset=utf-8")
 
 
 @admin.get("/api/status")

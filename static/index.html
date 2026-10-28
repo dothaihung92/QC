@@ -21,8 +21,8 @@
   nav button { background: none; border: 0; padding: 8px 12px; border-radius: 8px; cursor: pointer;
                font: inherit; color: var(--muted); }
   nav button.active { background: var(--pri-weak); color: var(--pri); font-weight: 600; }
-  nav .navlink { padding: 8px 12px; border-radius: 8px; color: var(--pri); text-decoration: none; font-weight: 600; }
-  nav .navlink:hover { background: var(--pri-weak); }
+  main.full { max-width: none; padding: 0; }
+  #seo iframe { display: block; width: 100%; height: calc(100vh - 62px); border: 0; background: #fff; }
   main { max-width: 1180px; margin: 0 auto; padding: 20px 16px 60px; }
   section { display: none; } section.active { display: block; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
@@ -86,7 +86,7 @@
     <button data-s="leads">Khách tiềm năng</button>
     <button data-s="activity">Nhật ký</button>
     <button data-s="guide">Hướng dẫn</button>
-    <a href="/seo-writer" target="_blank" class="navlink">✍️ Viết bài SEO ↗</a>
+    <button data-s="seo">✍️ Viết bài SEO</button>
   </nav>
 </header>
 
@@ -161,7 +161,7 @@
           <input id="rwKey" type="password" placeholder="AIzaSy...">
         </div>
         <div class="btns"><button class="btn pri" id="rwBtn" onclick="rewriteSource()">✨ Viết lại bằng AI</button></div>
-        <p class="muted small">Dùng chung Gemini key với công cụ <a href="/seo-writer" target="_blank">Viết bài SEO</a>.
+        <p class="muted small">Dùng chung Gemini key với tab <a href="#seo">Viết bài SEO</a>.
           Kết quả hiện ở ô "Soạn bài" để bạn xem lại trước khi đăng.</p>
       </div>
       <div class="card">
@@ -309,6 +309,10 @@
     </ul>
   </div>
 </section>
+<!-- ============================ VIẾT BÀI SEO (nạp khi mở tab lần đầu) -->
+<section id="seo">
+  <iframe id="seoFrame" title="Viết bài SEO" allow="clipboard-read; clipboard-write"></iframe>
+</section>
 </main>
 <div id="toast"></div>
 
@@ -332,10 +336,21 @@ async function api(path, opts = {}) {
   return data;
 }
 
-document.querySelectorAll('#nav button').forEach(b => b.onclick = () => {
-  document.querySelectorAll('#nav button').forEach(x => x.classList.toggle('active', x === b));
-  document.querySelectorAll('main section').forEach(s => s.classList.toggle('active', s.id === b.dataset.s));
-  ({ overview: loadStatus, posts: loadPosts, script: loadScript, leads: loadLeads, activity: loadActivity })[b.dataset.s]?.();
+function openTab(name) {
+  if (!document.getElementById(name)) name = 'overview';
+  document.querySelectorAll('#nav button').forEach(x => x.classList.toggle('active', x.dataset.s === name));
+  document.querySelectorAll('main section').forEach(s => s.classList.toggle('active', s.id === name));
+  document.querySelector('main').classList.toggle('full', name === 'seo');
+  if (name === 'seo' && !$('seoFrame').src) $('seoFrame').src = '/seo-writer';
+  ({ overview: loadStatus, posts: loadPosts, script: loadScript, leads: loadLeads, activity: loadActivity })[name]?.();
+  // Ghi tab vào địa chỉ (vd 127.0.0.1:8787/#seo) để mở lại / lưu dấu trang đúng tab.
+  if (location.hash.slice(1) !== name) history.replaceState(null, '', '#' + name);
+}
+document.querySelectorAll('#nav button').forEach(b => b.onclick = () => openTab(b.dataset.s));
+window.addEventListener('hashchange', () => openTab(location.hash.slice(1)));
+// Tab Viết bài SEO báo vừa gửi bài sang → làm mới danh sách bài.
+window.addEventListener('message', e => {
+  if (e.origin === location.origin && e.data?.qc === 'post-saved') { loadPosts(); }
 });
 
 // ---------------- Tổng quan
@@ -579,6 +594,7 @@ async function loadActivity() {
 }
 
 loadStatus();
+if (location.hash.length > 1) openTab(location.hash.slice(1));
 </script>
 </body>
 </html>

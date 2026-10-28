@@ -16,7 +16,7 @@ Tu dong cap nhat phan mem tu GitHub (repo Public) - chay moi khi bam start.bat.
 Tra ve exit code 10 neu start.bat hoac run_server.bat bi thay doi (de
 start.bat tu khoi dong lai voi ban moi).
 """
-import os, sys, ssl, urllib.request
+import os, subprocess, sys, ssl, urllib.request
 
 OWNER  = "dothaihung92"
 REPO   = "QC"
@@ -62,6 +62,7 @@ def main():
     n = 0
     loi = 0
     can_khoi_dong_lai = False
+    tu_cap_nhat = False
     for path in FILES:
         try:
             content = _tai_raw(path)
@@ -88,6 +89,8 @@ def main():
             print(f"[update]  + {path}")
             if path.lower() in RESTART_TRIGGERS:
                 can_khoi_dong_lai = True
+            if path == "update.py":
+                tu_cap_nhat = True
         except Exception as e:
             print(f"[update]  (khong ghi duoc {path}: {e})")
 
@@ -97,6 +100,14 @@ def main():
         print(f"[update] Khong ket noi duoc GitHub ({loi} file) - chay tiep voi ban dang co san.")
     else:
         print(f"[update] Xong: da cap nhat {n} file.")
+
+    # Chinh update.py vua doi: chay lai ban MOI mot lan, vi ban moi co the co
+    # them file trong FILES ma ban cu (dang chay) khong biet de tai.
+    if tu_cap_nhat and "--lan-2" not in sys.argv:
+        print("[update] update.py vua duoc cap nhat - chay lai de tai not file moi...")
+        rc = subprocess.call([sys.executable, os.path.abspath(__file__), "--lan-2"])
+        if rc == 10:
+            can_khoi_dong_lai = True
     return 10 if can_khoi_dong_lai else 0
 
 

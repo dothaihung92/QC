@@ -33,9 +33,10 @@
       });
       var d = await r.json().catch(function () { return {}; });
       if (!r.ok) { notify('⚠ ' + (d.detail || r.statusText)); return; }
+      if (window.parent !== window) window.parent.postMessage({ qc: 'post-saved', id: d.id }, location.origin);
       notify(d.status === 'posted' ? '✅ Đã đăng lên Fanpage'
         : d.status === 'failed' ? '⚠ Đăng lỗi: ' + d.error
-        : '💾 Đã lưu nháp — xem ở tab Bài đăng của phần mềm QC');
+        : '💾 Đã lưu nháp — xem ở tab Bài đăng');
     } catch (e) {
       notify('⚠ Không kết nối được phần mềm QC: ' + e.message);
     }
@@ -67,7 +68,10 @@
     document.body.appendChild(a);
   }
 
-  function init() { addButtons(); addBackLink(); }
+  function init() {
+    addButtons();
+    if (window.parent === window) addBackLink(); // mở trong tab của bảng điều khiển thì không cần
+  }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
   window.qcSendToFanpage = sendToQC;
 })();
