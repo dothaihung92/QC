@@ -4,8 +4,9 @@ Facebook không có API đăng vào group, nên phần này điều khiển trì
 - KHÔNG lưu mật khẩu: bạn đăng nhập tay 1 lần trong cửa sổ do phần mềm mở, phiên đăng nhập được
   giữ trong data/browser-profile để các lần sau dùng lại.
 - Có giới hạn số bài/ngày và nghỉ giữa các nhóm để bảo vệ tài khoản.
+- Chỉ cửa sổ ĐĂNG NHẬP là hiện ra; khi đăng bài trình duyệt chạy ẩn (trừ khi bật "hiện cửa sổ").
 - Gặp bất kỳ chỗ nào không chắc (đòi đăng nhập lại, đổi giao diện...) thì DỪNG, chụp màn hình vào
-  data/groupbot-errors và giữ cửa sổ mở để bạn tự hoàn tất — không đoán mò.
+  data/groupbot-errors (chạy hiện thì còn giữ cửa sổ mở để bạn tự hoàn tất) — không đoán mò.
 Hành vi này trái điều khoản Facebook, có thể bị khóa tài khoản: người dùng tự chịu rủi ro.
 """
 import importlib.util
@@ -42,8 +43,14 @@ def playwright_available() -> bool:
     return importlib.util.find_spec("playwright") is not None
 
 
+def is_visible() -> bool:
+    """Có hiện cửa sổ khi đăng không (mặc định: ẩn)."""
+    return bool(db.get_setting("groupbot_visible", False)) and not config.GROUPBOT_FORCE_HEADLESS
+
+
 def status() -> dict:
     return {
+        "visible": is_visible(),
         "playwright": playwright_available(),
         "logged_in": MARKER.exists(),
         "busy": state["busy"], "kind": state["kind"], "log": state["log"],
@@ -93,9 +100,9 @@ def _install():
 
 # ---------------------------------------------------------------- trình duyệt
 
-def _launch(p):
+def _launch(p, visible=True):
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
-    kw = dict(user_data_dir=str(PROFILE_DIR), headless=config.GROUPBOT_HEADLESS,
+    kw = dict(user_data_dir=str(PROFILE_DIR), headless=(not visible) or config.GROUPBOT_FORCE_HEADLESS,
               viewport={"width": 1280, "height": 900}, locale="vi-VN")
     attempts = ([{"executable_path": config.GROUPBOT_BROWSER_PATH}] if config.GROUPBOT_BROWSER_PATH
                 else [{"channel": "msedge"}, {"channel": "chrome"}, {}])
@@ -126,7 +133,7 @@ def _need_playwright():
 def _login_flow():
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
-        ctx = _launch(p)
+        ctx = _launch(p, visible=True)          # đăng nhập luôn hiện cửa sổ để bạn nhập
         try:
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
             page.goto("https://www.facebook.com/", wait_until="domcontentloaded")
@@ -210,9 +217,9 @@ def post_to_open_group(page, text: str, timeout: int = 0) -> str:
 
 # ---------------------------------------------------------------- chạy cả lịch
 
-def start_run(job_id: int):
+def start_run(job_id: int, visible=None):
     _need_playwright()
-    _start("run", _run_job, job_id)
+    _start("run", _run_job, job_id, is_visible() if visible is None else visible)
 
 
 def _sleep(seconds: float):
@@ -221,7 +228,7 @@ def _sleep(seconds: float):
         time.sleep(1)
 
 
-def _run_job(job_id: int):
+def _run_job(job_id: int, visible: bool = False):
     from playwright.sync_api import sync_playwright
     job = next((j for j in db.list_group_jobs() if j["id"] == job_id), None)
     if not job:
@@ -240,8 +247,9 @@ def _run_job(job_id: int):
         todo = todo[:room]
     text = job["message"] + (("\n\n" + job["link"]) if job["link"] else "")
 
+    _log("Chạy " + ("có hiện cửa sổ trình duyệt." if visible else "ẩn (không hiện cửa sổ)."))
     with sync_playwright() as p:
-        ctx = _launch(p)
+        ctx = _launch(p, visible)
         failure = None
         try:
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
@@ -270,9 +278,13 @@ def _run_job(job_id: int):
                 _log("Xong lượt đăng.")
             if failure:
                 _log(f"⚠ Dừng ở «{getattr(failure, 'group', '?')}»: {failure}")
-                _log("Cửa sổ trình duyệt được giữ mở để bạn tự đăng nốt; đóng cửa sổ khi xong, "
-                     "rồi bấm '✓ Đã đăng' ở nhóm đó. Ảnh chụp lỗi lưu ở data/groupbot-errors.")
-                _wait_until_closed(ctx, 900)
+                if visible:
+                    _log("Cửa sổ trình duyệt được giữ mở để bạn tự đăng nốt; đóng cửa sổ khi xong, "
+                         "rồi bấm '✓ Đã đăng' ở nhóm đó. Ảnh chụp lỗi lưu ở data/groupbot-errors.")
+                    _wait_until_closed(ctx, 900)
+                else:
+                    _log("Ảnh chụp lỗi lưu ở data/groupbot-errors. Muốn xem trực tiếp: bật 'Hiện cửa sổ khi đăng' "
+                         "rồi chạy lại; nếu Facebook đòi xác minh thì bấm 'Đăng nhập lại Facebook'.")
         finally:
             _close(ctx)
 

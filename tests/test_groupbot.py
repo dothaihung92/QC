@@ -98,14 +98,18 @@ def _setup_job(site, paths):
 
 @pytest.fixture
 def headless(monkeypatch):
-    def launch(p):
+    def launch(p, visible=True):
+        launch.visible_args.append(visible)
         return p.chromium.launch_persistent_context(str(groupbot.PROFILE_DIR.parent / "pw-test"), headless=True,
                                                     executable_path=CHROME, args=["--no-sandbox"])
+    launch.visible_args = []
     monkeypatch.setattr(groupbot, "_launch", launch)
+    monkeypatch.setattr(groupbot, "_wait_calls", [], raising=False)
     monkeypatch.setattr(config, "GROUPBOT_DELAY_MIN", 0)
     monkeypatch.setattr(config, "GROUPBOT_DELAY_MAX", 0)
-    monkeypatch.setattr(groupbot, "_wait_until_closed", lambda ctx, s: None)
+    monkeypatch.setattr(groupbot, "_wait_until_closed", lambda ctx, s: groupbot._wait_calls.append(s))
     monkeypatch.setattr(groupbot, "PAUSE_AFTER_LOAD", (0, 0))
+    return launch
 
 
 def test_run_job_posts_all_groups_and_counts_today(site, headless):
@@ -151,3 +155,29 @@ def test_auto_jobs_run_once_when_due(site, monkeypatch):
     groupbot.run_due_auto_jobs()
     assert started == [jid]                                  # lịch chưa đến giờ không chạy, chạy 1 lần thôi
     assert [j["auto"] for j in db.list_group_jobs() if j["id"] == jid] == [0]
+
+
+def test_runs_hidden_by_default_and_does_not_wait_on_failure(site, headless):
+    assert groupbot.is_visible() is False
+    jid, _ = _setup_job(site, ["/nocomposer"])
+    groupbot._run_job(jid)                                   # mặc định visible=False
+    assert headless.visible_args == [False] and groupbot._wait_calls == []
+    log = "\n".join(groupbot.state["log"])
+    assert "ẩn" in log and "Hiện cửa sổ khi đăng" in log
+
+
+def test_visible_run_keeps_window_open_on_failure(site, headless):
+    jid, _ = _setup_job(site, ["/nocomposer"])
+    groupbot._run_job(jid, True)
+    assert headless.visible_args == [True] and groupbot._wait_calls == [900]
+
+
+def test_visible_setting_and_start_run_default(site, monkeypatch):
+    seen = []
+    monkeypatch.setattr(groupbot, "_start", lambda kind, fn, *a: seen.append(a))
+    db.set_setting("groupbot_visible", True)
+    groupbot.start_run(7)
+    db.set_setting("groupbot_visible", False)
+    groupbot.start_run(8)
+    groupbot.start_run(9, True)
+    assert seen == [(7, True), (8, False), (9, True)]

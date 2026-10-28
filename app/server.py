@@ -602,6 +602,16 @@ def groupbot_login():
     return _bot_call("start_login")
 
 
+class BotSettingsIn(BaseModel):
+    visible: bool
+
+
+@admin.post("/api/groupbot/settings")
+def groupbot_settings(body: BotSettingsIn):
+    db.set_setting("groupbot_visible", body.visible)
+    return _bot().status()
+
+
 class RunIn(BaseModel):
     job_id: int
     accept_risk: bool = False

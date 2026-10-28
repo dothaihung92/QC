@@ -141,3 +141,9 @@ def test_server_survives_missing_groupbot_module(client, monkeypatch):
     r = client.get("/api/groupbot/status")
     assert r.status_code == 503 and "start.bat" in r.json()["detail"]
     assert client.get("/api/status").status_code == 200
+
+
+def test_groupbot_visible_setting_api(client):
+    assert client.get("/api/groupbot/status").json()["visible"] is False
+    assert client.post("/api/groupbot/settings", json={"visible": True}).json()["visible"] is True
+    assert client.post("/api/groupbot/settings", json={"visible": False}).json()["visible"] is False

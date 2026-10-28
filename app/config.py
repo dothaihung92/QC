@@ -63,4 +63,4 @@ GROUPBOT_DAILY_LIMIT = int(os.environ.get("GROUPBOT_DAILY_LIMIT", "15"))   # s�
 GROUPBOT_DELAY_MIN = int(os.environ.get("GROUPBOT_DELAY_MIN", "60"))       # nghỉ giữa 2 nhóm (giây)
 GROUPBOT_DELAY_MAX = int(os.environ.get("GROUPBOT_DELAY_MAX", "150"))
 GROUPBOT_BROWSER_PATH = os.environ.get("GROUPBOT_BROWSER_PATH", "").strip()  # mặc định dùng Edge/Chrome có sẵn
-GROUPBOT_HEADLESS = os.environ.get("GROUPBOT_HEADLESS", "").lower() in ("1", "true", "yes")  # chỉ để thử/gỡ lỗi
+GROUPBOT_FORCE_HEADLESS = os.environ.get("GROUPBOT_HEADLESS", "").lower() in ("1", "true", "yes")  # máy không có màn hình (thử/gỡ lỗi)

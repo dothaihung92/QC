@@ -113,12 +113,15 @@ Trong tab **Đăng nhóm** có khung 🤖: phần mềm mở **Microsoft Edge/Ch
 1. Bấm **Cài đặt trình điều khiển** (1 lần, tự `pip install playwright`) — không cần tải thêm trình duyệt.
 2. Bấm **Đăng nhập Facebook (1 lần)** → đăng nhập tay trong cửa sổ hiện ra (có thể có mã xác thực 2 bước). Phần mềm **không lưu mật khẩu**;
    phiên đăng nhập nằm trong `data/browser-profile`, các lần sau tự dùng lại.
-3. Tick *"Tôi hiểu và chấp nhận rủi ro"*, rồi bấm **🤖 Tự đăng các nhóm còn lại** ở một lịch, hoặc tick
+3. Từ đây trình duyệt **chạy ẩn** (không hiện cửa sổ) — chỉ lúc đăng nhập/xác minh mới hiện. Muốn xem trực tiếp thì tick
+   *"Hiện cửa sổ trình duyệt khi đăng"*.
+4. Tick *"Tôi hiểu và chấp nhận rủi ro"*, rồi bấm **🤖 Tự đăng các nhóm còn lại** ở một lịch, hoặc tick
    *"Đến giờ tự đăng bằng trình duyệt"* khi hẹn giờ (máy phải bật, phần mềm đang chạy, đừng khóa màn hình).
 
 Bảo vệ tài khoản: tối đa `GROUPBOT_DAILY_LIMIT` bài/ngày (mặc định 15), nghỉ `GROUPBOT_DELAY_MIN`–`MAX` giây (60–150) giữa các nhóm.
-Gặp chỗ lạ (Facebook đòi đăng nhập lại, không thấy ô viết bài, hộp soạn không đóng...) phần mềm **dừng**, chụp ảnh vào
-`data/groupbot-errors`, **giữ cửa sổ mở** để bạn tự đăng nốt; nhóm nào đã đăng xong được đánh dấu ✅, nhóm lỗi để ⭕.
+Gặp chỗ lạ (Facebook đòi đăng nhập lại, không thấy ô viết bài, hộp soạn không đóng...) phần mềm **dừng** và chụp ảnh vào
+`data/groupbot-errors`; ở chế độ hiện cửa sổ thì còn **giữ cửa sổ mở** để bạn tự đăng nốt. Nhóm nào đã đăng xong được đánh dấu ✅, nhóm lỗi để ⭕.
+Facebook đòi xác minh → bấm *Đăng nhập lại Facebook* (cửa sổ đăng nhập luôn hiện).
 Nhóm bật duyệt bài thì ghi nhận "đang chờ quản trị viên duyệt".
 
 > ⚠️ Việc này **trái điều khoản Facebook** và có thể khiến tài khoản bị xác minh hoặc khóa. Chỉ đăng ở nhóm cho phép quảng cáo.

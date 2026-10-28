@@ -380,6 +380,8 @@
     </div>
     <label style="font-weight:400"><input type="checkbox" id="gbRisk" style="width:auto" onchange="gbSaveRisk()">
       Tôi hiểu và chấp nhận rủi ro bị Facebook hạn chế/khóa tài khoản</label>
+    <label style="font-weight:400;display:block;margin-top:6px"><input type="checkbox" id="gbVisible" style="width:auto" onchange="gbSetVisible()">
+      Hiện cửa sổ trình duyệt khi đăng <span class="muted small">(mặc định <b>ẩn</b>: chỉ cửa sổ đăng nhập hiện ra, còn lại phần mềm tự chạy nền)</span></label>
     <div id="gbState" style="margin:10px 0"></div>
     <div class="btns" id="gbBtns" style="margin-top:0"></div>
     <pre id="gbLog" class="small" style="display:none;background:#0f172a;color:#d6e2ff;border-radius:8px;padding:10px;max-height:200px;overflow:auto;margin:10px 0 0;white-space:pre-wrap"></pre>
@@ -768,8 +770,12 @@ async function loadGroupBot() {
   clearTimeout(gbTimer);
   if (location.hash === '#groups') gbTimer = setTimeout(loadGroupBot, GBS.busy ? 2000 : 8000);
 }
+async function gbSetVisible() {
+  try { GBS = await api('/api/groupbot/settings', { method: 'POST', body: { visible: $('gbVisible').checked } }); renderGroupBot(); } catch {}
+}
 function renderGroupBot() {
   const g = GBS, ok = '<span class="pill p-ok">sẵn sàng</span>', no = t => `<span class="pill p-err">${t}</span>`;
+  $('gbVisible').checked = !!g.visible;
   $('gbLimit').textContent = g.daily_limit;
   $('gbState').innerHTML = `Trình điều khiển: ${g.playwright ? ok : no('chưa cài')} &nbsp; Facebook: ${g.logged_in ? ok : no('chưa đăng nhập')}
     &nbsp; Hôm nay đã đăng: <b>${g.daily_used}/${g.daily_limit}</b> bài ${g.busy ? '&nbsp; <span class="pill p-warn">đang chạy…</span>' : ''}`;
