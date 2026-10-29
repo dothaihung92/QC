@@ -138,11 +138,30 @@ def post_views(post_id: str):
     return None
 
 
+_POST_FIELDS = (
+    "id,message,created_time,permalink_url,shares,"
+    "reactions.summary(total_count).limit(0),comments.summary(total_count).limit(0)",
+    "id,message,created_time,permalink_url,shares",
+    "id,message,created_time,permalink_url",
+)
+
+
 def list_published_posts(limit=20, with_views=True) -> list:
+    """Bài đã đăng của Fanpage. Thiếu quyền đọc tương tác thì thử lại với ít trường hơn
+    (khi đó số thích/bình luận/chia sẻ chỉ là 0); cả 3 mức đều lỗi thì báo lỗi mức cuối."""
     _need_connection()
-    fields = ("id,message,created_time,permalink_url,shares,"
-              "reactions.summary(total_count).limit(0),comments.summary(total_count).limit(0)")
-    data = _call("GET", f"{config.PAGE_ID}/published_posts", params={"fields": fields, "limit": limit})
+    data, last = None, None
+    for fields in _POST_FIELDS:
+        try:
+            data = _call("GET", f"{config.PAGE_ID}/published_posts",
+                         params={"fields": fields, "limit": limit})
+            break
+        except FacebookError as e:
+            last = e
+            if "code 10)" not in str(e) and "code 200)" not in str(e):
+                raise
+    if data is None:
+        raise last
     posts = []
     for p in data.get("data", []):
         posts.append({

@@ -173,3 +173,18 @@ def test_deleted_group_disappears_from_jobs(client):
     client.delete(f"/api/groups/{g2}")
     job = client.get("/api/group-jobs").json()[0]
     assert job["id"] == jid and [g["id"] for g in job["groups"]] == [g1]
+
+
+def test_list_published_posts_falls_back_when_fields_denied(monkeypatch):
+    from app import facebook, config
+    monkeypatch.setattr(config, "DRY_RUN", False)
+    calls = []
+
+    def fake(method, path, params=None, **kw):
+        calls.append(params["fields"])
+        if "reactions" in params["fields"]:
+            raise facebook.FacebookError("(#10) denied (code 10)")
+        return {"data": [{"id": "1_2", "message": "x", "created_time": "2026-09-28T16:00:00+0000"}]}
+    monkeypatch.setattr(facebook, "_call", fake)
+    posts = facebook.list_published_posts(with_views=False)
+    assert len(calls) == 2 and posts[0]["likes"] == 0 and posts[0]["id"] == "1_2"

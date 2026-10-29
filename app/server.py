@@ -364,8 +364,13 @@ def activity():
 
 # ----- bình luận (hộp thư) ----------------------------------------------------
 
-def _fb_error(e: FacebookError) -> HTTPException:
+def _fb_error(e: FacebookError, what: str = "") -> HTTPException:
     msg = str(e)
+    if what == "stats" and ("(#10)" in msg or "(#200)" in msg):
+        return HTTPException(502, msg.split(" Refer to")[0] + " — Facebook chưa cho đọc bài đăng của Fanpage. "
+                             "Vào developers.facebook.com → ứng dụng → Xét duyệt → Quyền và tính năng, "
+                             "bấm \"Thêm\" cho pages_read_engagement và pages_read_user_content "
+                             "(hoặc tính năng Page Public Content Access), rồi lấy lại Page Access Token.")
     if "(#200)" in msg or "(#10)" in msg or "ermission" in msg:
         msg += " — thiếu quyền: thêm pages_manage_engagement (trả lời bình luận) / pages_read_user_content (đọc nội dung) trong Xét duyệt → Quyền và tính năng, rồi lấy lại token."
     return HTTPException(502, msg)
@@ -639,7 +644,7 @@ def sync_stats(limit: int = 20):
             db.upsert_post_stats(p["id"], p["message"], p["permalink"], p["created_time"],
                                  p["likes"], p["comments"], p["shares"], p["views"])
     except FacebookError as e:
-        raise _fb_error(e)
+        raise _fb_error(e, "stats")
     return _stats_payload()
 
 
