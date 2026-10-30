@@ -71,6 +71,26 @@ def publish_post(message: str, link: str = "", image_url: str = "") -> str:
     return _call("POST", f"{config.PAGE_ID}/feed", json=body).get("id", "")
 
 
+def publish_video(path: str, description: str = "", title: str = "") -> str:
+    """Đăng video lên Fanpage (cần pages_manage_posts). Video dọc 9:16 Facebook hiển thị dạng thước phim."""
+    if config.DRY_RUN:
+        db.log("dry_run", f"POST {config.PAGE_ID}/videos {title}")
+        return "dry-run"
+    url = f"https://graph-video.facebook.com/{config.GRAPH_API_VERSION}/{config.PAGE_ID}/videos"
+    try:
+        with open(path, "rb") as f:
+            r = requests.post(url, timeout=900, files={"source": ("clip.mp4", f, "video/mp4")},
+                              data={"description": description, "title": title,
+                                    "access_token": config.PAGE_ACCESS_TOKEN})
+        data = r.json()
+    except (OSError, requests.RequestException, ValueError) as e:
+        raise FacebookError(f"Lỗi tải video lên Facebook: {e}") from e
+    if r.status_code >= 400 or "error" in data:
+        err = data.get("error", {})
+        raise FacebookError(f"{err.get('message', r.text)} (code {err.get('code')})")
+    return data.get("id", "")
+
+
 def _with_link(message: str, link: str) -> str:
     return f"{message}\n\n👉 {link}" if link and link not in message else message
 

@@ -123,6 +123,7 @@
     <button data-s="groups" data-label="Đăng nhóm">Đăng nhóm</button>
     <button data-s="comments" data-label="Bình luận">Bình luận</button>
     <button data-s="news">🤖 Tin tức AI</button>
+    <button data-s="video">🎬 Tạo clip</button>
     <button data-s="stats">Thống kê</button>
     <button data-s="script">Kịch bản trả lời</button>
     <button data-s="sim">Thử kịch bản</button>
@@ -546,6 +547,51 @@
   </div>
 </section>
 
+<!-- ============================ TẠO CLIP -->
+<section id="video">
+  <div class="row2">
+    <div class="card">
+      <h2>🎬 Tạo clip từ bài viết</h2>
+      <p class="muted small">AI viết kịch bản → giọng đọc tiếng Việt → chữ + phụ đề → ghép thành video dọc cho Reels / TikTok / Shorts.</p>
+      <label>Lấy nội dung từ</label>
+      <select id="vdSource" onchange="vdPick()"><option value="">— Tự dán nội dung —</option></select>
+      <label>Nội dung bài viết</label>
+      <textarea id="vdText" rows="8" placeholder="Dán bài viết hoặc chọn ở ô trên"></textarea>
+      <label>Ảnh của bài (tùy chọn, dùng cho cảnh đầu và cuối)</label>
+      <input id="vdImg" placeholder="https://...jpg">
+      <label>Độ dài</label>
+      <select id="vdLen"><option value="30">~30 giây (4 cảnh)</option><option value="45" selected>~45 giây (6 cảnh)</option>
+        <option value="60">~60 giây (7 cảnh)</option></select>
+      <div class="btns"><button class="btn pri" id="vdMake" onclick="vdCreate()">✨ AI viết kịch bản</button></div>
+      <p class="muted small" id="vdKeyHint"></p>
+    </div>
+    <div class="card">
+      <h2>Cài đặt clip</h2>
+      <div id="vdTools"></div>
+      <div class="row2">
+        <div><label>Giọng đọc</label><select id="vdVoice"></select></div>
+        <div><label>Tốc độ đọc (%)</label><input id="vdRate" type="number" min="-30" max="30"></div>
+      </div>
+      <div class="row2">
+        <div><label>Khung hình</label><select id="vdFormat"><option value="doc">Dọc 9:16 (Reels, TikTok)</option>
+          <option value="ngang">Ngang 16:9 (YouTube)</option></select></div>
+        <div><label>Màu thương hiệu</label><input id="vdColor" type="color" style="height:38px"></div>
+      </div>
+      <label>Dòng chữ cuối khung (tên Fanpage, số điện thoại)</label>
+      <input id="vdBrand" placeholder="Group Kế Toán HCM • 09xx xxx xxx">
+      <label>Pexels API key — ảnh minh họa miễn phí (tùy chọn) <a class="small" href="https://www.pexels.com/api/" target="_blank">(lấy key)</a>
+        <span id="vdPexState" class="small muted"></span></label>
+      <input id="vdPexels" type="password" placeholder="để trống = giữ key cũ / dùng nền màu">
+      <label style="font-weight:400"><input type="checkbox" id="vdMusic" style="width:auto"> Trộn nhạc nền <span id="vdMusicHint" class="small muted"></span></label>
+      <div class="btns"><button class="btn" onclick="vdSave()">💾 Lưu cài đặt</button></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Clip của bạn</h2>
+    <div id="vdList"></div>
+  </div>
+</section>
+
 <!-- ============================ VIẾT BÀI SEO (nạp khi mở tab lần đầu) -->
 <section id="seo">
   <iframe id="seoFrame" title="Viết bài SEO" allow="clipboard-read; clipboard-write"></iframe>
@@ -580,7 +626,7 @@ function openTab(name) {
   document.querySelector('main').classList.toggle('full', name === 'seo');
   if (name === 'seo' && !$('seoFrame').src) $('seoFrame').src = '/seo-writer';
   ({ overview: loadStatus, posts: loadPosts, script: loadScript, leads: loadLeads, activity: loadActivity,
-     groups: loadGroups, comments: loadComments, stats: loadStats, news: loadNews })[name]?.();
+     groups: loadGroups, comments: loadComments, stats: loadStats, news: loadNews, video: loadVideo })[name]?.();
   // Ghi tab vào địa chỉ (vd 127.0.0.1:8787/#seo) để mở lại / lưu dấu trang đúng tab.
   if (location.hash.slice(1) !== name) history.replaceState(null, '', '#' + name);
 }
@@ -624,8 +670,10 @@ function renderNews() {
         <label>Bài Facebook</label><textarea id="nf${n.id}" rows="5">${esc(n.fb_text)}</textarea>
         ${n.image_url ? `<img src="${esc(n.image_url)}" style="max-height:120px;border-radius:6px" referrerpolicy="no-referrer">` : ''}
         <div class="btns"><button class="btn pri" onclick="newsPublish(${n.id})">🚀 Đăng web + Fanpage</button>
-        <button class="btn" onclick="newsReject(${n.id})">Bỏ bài này</button></div>`
-        : `<div class="btns"><button class="btn" onclick="newsDel(${n.id})">Xóa</button></div>`}
+        <button class="btn" onclick="newsReject(${n.id})">Bỏ bài này</button>
+        <button class="btn" onclick="vdFromNews(${n.id})">🎬 Tạo clip</button></div>`
+        : `<div class="btns">${n.body ? `<button class="btn" onclick="vdFromNews(${n.id})">🎬 Tạo clip</button>` : ''}
+        <button class="btn" onclick="newsDel(${n.id})">Xóa</button></div>`}
     </div>`;
   }).join('') : '<p class="muted">Chưa có bài nào. Điền Gemini key, lưu rồi bấm "Dò &amp; viết bài ngay".</p>';
 }
@@ -655,6 +703,133 @@ async function newsPublish(id) {
 }
 async function newsReject(id) { await api('/api/news/' + id + '/reject', { method: 'POST' }); loadNews(); }
 async function newsDel(id) { await api('/api/news/' + id, { method: 'DELETE' }); loadNews(); }
+
+// ---------------- Tạo clip
+let VCFG = null, VIDEOS = [], VSRC = [], VPRESET = null, vdTimer = null;
+const VD_ST = { draft: ['Kịch bản','p-info'], rendering: ['Đang dựng','p-warn'], done: ['Đã dựng','p-ok'], failed: ['Lỗi','p-err'] };
+function vdFromNews(id) { VPRESET = 'news:' + id; openTab('video'); }
+async function loadVideo() {
+  VCFG = await api('/api/video/config');
+  $('vdVoice').innerHTML = Object.entries(VCFG.voices).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
+  $('vdVoice').value = VCFG.voice; $('vdRate').value = VCFG.rate; $('vdFormat').value = VCFG.format;
+  $('vdColor').value = VCFG.color; $('vdBrand').value = VCFG.brand; $('vdMusic').checked = VCFG.music;
+  $('vdPexState').textContent = VCFG.has_pexels_key ? '— đã lưu' : '';
+  $('vdMusicHint').textContent = VCFG.music_files ? `(${VCFG.music_files} bài trong ${VCFG.music_dir})`
+    : `(chép file .mp3 không bản quyền vào ${VCFG.music_dir})`;
+  $('vdKeyHint').innerHTML = VCFG.has_gemini_key ? 'Dùng Gemini key đã lưu ở tab Tin tức AI.'
+    : '⚠ Chưa có Gemini key — nhập ở tab <a href="#news">🤖 Tin tức AI</a> trước.';
+  vdRenderTools();
+  const [news, posts] = await Promise.all([api('/api/news').catch(() => []), api('/api/posts').catch(() => [])]);
+  VSRC = [...news.filter(n => n.body).map(n => ({ key: 'news:' + n.id, label: '📰 ' + n.title, text: n.title + '\n\n' + n.body, img: n.image_url })),
+          ...posts.map(p => ({ key: 'post:' + p.id, label: '📝 ' + p.message.slice(0, 70), text: p.message, img: p.image_url || '' }))];
+  $('vdSource').innerHTML = '<option value="">— Tự dán nội dung —</option>' +
+    VSRC.map(x => `<option value="${x.key}">${esc(x.label)}</option>`).join('');
+  if (VPRESET) { $('vdSource').value = VPRESET; vdPick(); VPRESET = null; }
+  await vdLoadList();
+}
+function vdRenderTools() {
+  const miss = VCFG.missing.length;
+  $('vdTools').innerHTML = (miss ? `<p class="note small">Cần cài thêm: <b>${VCFG.missing.join(', ')}</b> (giọng đọc, vẽ chữ, FFmpeg).
+      <button class="btn pri" onclick="vdInstall()" ${VCFG.busy ? 'disabled' : ''}>⬇ Cài công cụ</button></p>`
+      : '<p class="small"><span class="pill p-ok">Đã có đủ công cụ</span></p>') +
+    (VCFG.log.length ? `<pre class="small" style="white-space:pre-wrap;max-height:120px;overflow:auto">${esc(VCFG.log.join('\n'))}</pre>` : '');
+}
+async function vdInstall() {
+  VCFG = await api('/api/video/install', { method: 'POST' }); vdRenderTools();
+  const t = setInterval(async () => {
+    VCFG = await api('/api/video/config'); vdRenderTools();
+    if (!VCFG.busy) { clearInterval(t); toast(VCFG.missing.length ? '⚠ Cài chưa xong, xem thông báo' : '✅ Đã cài xong'); }
+  }, 3000);
+}
+function vdPick() {
+  const x = VSRC.find(x => x.key === $('vdSource').value);
+  if (x) { $('vdText').value = x.text; $('vdImg').value = x.img || ''; }
+}
+async function vdSave() {
+  VCFG = await api('/api/video/config', { method: 'PUT', body: { voice: $('vdVoice').value, rate: $('vdRate').value,
+    format: $('vdFormat').value, color: $('vdColor').value, brand: $('vdBrand').value, pexels_key: $('vdPexels').value,
+    music: $('vdMusic').checked } });
+  $('vdPexels').value = ''; toast('✅ Đã lưu cài đặt clip'); loadVideo();
+}
+async function vdCreate() {
+  $('vdMake').disabled = true; $('vdMake').textContent = '⏳ AI đang viết kịch bản...';
+  try {
+    await api('/api/videos', { method: 'POST', body: { text: $('vdText').value, seconds: +$('vdLen').value, image_url: $('vdImg').value } });
+    toast('✅ Đã có kịch bản — xem lại bên dưới rồi bấm Dựng clip');
+    await vdLoadList();
+  } finally { $('vdMake').disabled = false; $('vdMake').textContent = '✨ AI viết kịch bản'; }
+}
+async function vdLoadList() {
+  VIDEOS = await api('/api/videos');
+  vdRenderList();
+  clearTimeout(vdTimer);
+  if (VIDEOS.some(v => v.status === 'rendering') && document.getElementById('video').classList.contains('active'))
+    vdTimer = setTimeout(vdLoadList, 3000);
+}
+function vdScene(v, s, i) {
+  return `<div style="border-left:3px solid #ddd;padding-left:10px;margin:8px 0">
+    <b class="small">Cảnh ${i + 1}</b> <button class="btn" style="padding:2px 8px" onclick="vdDelScene(${v.id},${i})">✕</button>
+    <input data-v="${v.id}" data-i="${i}" data-f="headline" value="${esc(s.headline)}" placeholder="Chữ lớn trên màn hình">
+    <textarea data-v="${v.id}" data-i="${i}" data-f="narration" rows="2" placeholder="Lời đọc">${esc(s.narration)}</textarea>
+    <input data-v="${v.id}" data-i="${i}" data-f="keyword" value="${esc(s.keyword)}" placeholder="Từ khóa ảnh (tiếng Anh)">
+  </div>`;
+}
+function vdRenderList() {
+  $('vdList').innerHTML = VIDEOS.length ? VIDEOS.map(v => {
+    const [lbl, cls] = VD_ST[v.status] || [v.status, 'p-info'];
+    const busy = v.status === 'rendering';
+    return `<div class="card" style="margin:0 0 12px">
+      <span class="pill ${cls}">${lbl}</span> <b>${esc(v.title || 'Clip #' + v.id)}</b>
+      <span class="muted small">${fmt(v.created_at)}${v.duration ? ' · ' + Math.round(v.duration) + ' giây' : ''}${v.fb_video_id ? ' · đã đăng Fanpage' : ''}</span>
+      ${busy ? `<p class="small">⏳ ${esc(v.progress || 'Đang dựng...')}</p>` : ''}
+      ${v.error ? `<div class="small" style="color:#b42318">${esc(v.error)}</div>` : ''}
+      ${v.has_file && !busy ? `<div style="margin:8px 0"><video src="/api/videos/${v.id}/file?t=${v.duration}" controls preload="metadata"
+          style="max-height:420px;max-width:100%;border-radius:8px;background:#000"></video></div>` : ''}
+      <details ${v.status === 'draft' ? 'open' : ''}><summary class="small">Sửa kịch bản (${v.scenes.length} cảnh)</summary>
+        <label>Tiêu đề</label><input id="vt${v.id}" value="${esc(v.title)}">
+        <label>Mô tả đăng kèm</label><textarea id="vds${v.id}" rows="3">${esc(v.description)}</textarea>
+        ${v.scenes.map((s, i) => vdScene(v, s, i)).join('')}
+        <button class="btn" onclick="vdAddScene(${v.id})">+ Thêm cảnh</button>
+      </details>
+      <div class="btns">
+        <button class="btn pri" onclick="vdRender(${v.id})" ${busy ? 'disabled' : ''}>🎬 ${v.has_file ? 'Dựng lại' : 'Dựng clip'}</button>
+        ${v.has_file && !busy ? `<a class="btn" href="/api/videos/${v.id}/file?download=1">⬇ Tải về</a>
+          <button class="btn" onclick="vdPublish(${v.id})">📤 Đăng lên Fanpage</button>` : ''}
+        <button class="btn" onclick="vdDelete(${v.id})" ${busy ? 'disabled' : ''}>Xóa</button>
+      </div></div>`;
+  }).join('') : '<p class="muted">Chưa có clip nào. Chọn bài viết ở trên rồi bấm "AI viết kịch bản".</p>';
+}
+function vdCollect(id) {
+  const v = VIDEOS.find(x => x.id === id);
+  const scenes = v.scenes.map(s => ({ ...s }));
+  document.querySelectorAll(`[data-v="${id}"]`).forEach(el => { scenes[+el.dataset.i][el.dataset.f] = el.value; });
+  return { title: $('vt' + id).value, description: $('vds' + id).value, scenes };
+}
+async function vdSaveOne(id) { return api('/api/videos/' + id, { method: 'PUT', body: vdCollect(id) }); }
+async function vdAddScene(id) {
+  const b = vdCollect(id); b.scenes.push({ headline: '', narration: 'Lời đọc cảnh mới', keyword: '' });
+  await api('/api/videos/' + id, { method: 'PUT', body: b }); vdLoadList();
+}
+async function vdDelScene(id, i) {
+  const b = vdCollect(id); b.scenes.splice(i, 1);
+  await api('/api/videos/' + id, { method: 'PUT', body: b }); vdLoadList();
+}
+async function vdRender(id) {
+  await vdSaveOne(id);
+  await api('/api/videos/' + id + '/render', { method: 'POST' });
+  toast('🎬 Đang dựng clip, khoảng 1-2 phút...'); vdLoadList();
+}
+async function vdPublish(id) {
+  if (!confirm('Đăng clip này lên Fanpage?')) return;
+  await vdSaveOne(id);
+  toast('📤 Đang tải video lên Facebook...');
+  await api('/api/videos/' + id + '/publish', { method: 'POST' });
+  toast('✅ Đã đăng clip lên Fanpage'); vdLoadList();
+}
+async function vdDelete(id) {
+  if (!confirm('Xóa clip này?')) return;
+  await api('/api/videos/' + id, { method: 'DELETE' }); vdLoadList();
+}
 
 // ---------------- Tổng quan
 async function loadStatus() {

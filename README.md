@@ -90,6 +90,8 @@ app/bot.py        # Xử lý bình luận & tin nhắn (từ khóa, SĐT, menu, 
 app/facebook.py   # Gọi Graph API + xác thực chữ ký webhook
 app/content.py    # Tính năng KE-TOAN, kịch bản mặc định, mẫu bài đăng
 app/db.py         # SQLite: bài đăng, khách tiềm năng, cài đặt, nhật ký
+app/newsagent.py  # Agent tin tức: dò bài thuế/kế toán, AI viết lại, đăng web + Fanpage
+app/video.py      # Tạo clip ngắn từ bài viết (kịch bản AI, giọng đọc, phụ đề, FFmpeg)
 static/index.html # Giao diện
 static/seo-writer.html, static/qc-bridge.js  # Công cụ viết bài SEO + nút đẩy bài sang Fanpage
 update.py         # Tự cập nhật phần mềm từ GitHub, chạy mỗi lần bấm start.bat
@@ -145,6 +147,18 @@ trình duyệt như trên. Bài đăng trong nhóm **không có** thống kê/b�
 
 Cả hai dùng chung một Gemini API key (lấy miễn phí tại <https://aistudio.google.com/apikey>),
 nhập một lần là dùng được ở cả hai nơi.
+
+## Tạo clip từ bài viết (tab 🎬 Tạo clip)
+
+Làm theo quy trình của [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTurbo) nhưng gọn hơn:
+Gemini viết kịch bản theo cảnh → giọng đọc tiếng Việt miễn phí (Edge-TTS, cần Internet) →
+ảnh nền (ảnh của bài, ảnh miễn phí Pexels nếu có key, hoặc nền màu thương hiệu) →
+chữ lớn + phụ đề → FFmpeg ghép thành video dọc 9:16 (hoặc ngang 16:9).
+
+- Lần đầu bấm **⬇ Cài công cụ** (cài `pillow`, `edge-tts`, `imageio-ffmpeg` — đã kèm FFmpeg).
+- Chọn bài ở tab *Tin tức AI* / *Bài đăng* hoặc dán nội dung → **✨ AI viết kịch bản** → sửa từng cảnh →
+  **🎬 Dựng clip** → xem thử → **⬇ Tải về** (TikTok, YouTube) hoặc **📤 Đăng lên Fanpage**.
+- Nhạc nền: chép file nhạc **không bản quyền** (.mp3) vào `data/music`, phần mềm chọn ngẫu nhiên và để nhỏ tiếng.
 
 ## Tự động cập nhật
 

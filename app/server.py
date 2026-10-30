@@ -7,15 +7,17 @@ import secrets
 import threading
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Optional
 
 from fastapi import (APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException,
                      Request)
-from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.responses import (FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse,
+                               Response)
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
-from . import autoreply, bot, config, content, db, facebook, newsagent, replies
+from . import autoreply, bot, config, content, db, facebook, newsagent, replies, video
 from .facebook import FacebookError
 
 try:
@@ -767,6 +769,116 @@ def blog_article(slug: str):
     return _blog_page(n["title"], f'<p><a href="/tin-tuc">← Tin tức</a></p><h1>{_h.escape(n["title"])}</h1>'
                                   f'<div class="m">{time.strftime("%d/%m/%Y", time.localtime(n["published_at"] or n["created_at"]))}</div>'
                                   f'{newsagent.article_html(n)}')
+
+
+# ----- tạo clip từ bài viết -----------------------------------------------------
+
+@admin.get("/api/video/config")
+def video_config():
+    return video.public_config()
+
+
+@admin.put("/api/video/config")
+def video_save_config(body: dict):
+    return video.save_config(body)
+
+
+@admin.post("/api/video/install")
+def video_install():
+    try:
+        video.start_install()
+    except video.VideoError as e:
+        raise HTTPException(409, str(e))
+    return video.public_config()
+
+
+class ScriptIn(BaseModel):
+    text: str
+    seconds: int = 45
+    image_url: str = ""
+
+
+@admin.post("/api/videos")
+def video_create(body: ScriptIn):
+    """AI viết kịch bản từ nội dung bài → lưu thành clip nháp để sửa trước khi dựng."""
+    try:
+        sc = video.make_script(body.text, body.seconds)
+    except video.VideoError as e:
+        raise HTTPException(400, str(e))
+    vid = db.video_add(sc["title"], sc["description"], sc["scenes"], body.image_url.strip())
+    return video.to_json(db.video_get(vid))
+
+
+@admin.get("/api/videos")
+def video_list():
+    return [video.to_json(v) for v in db.video_list()]
+
+
+def _video_or_404(vid: int) -> dict:
+    v = db.video_get(vid)
+    if not v:
+        raise HTTPException(404, "Không có clip này")
+    return v
+
+
+class VideoEdit(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    scenes: Optional[list] = None
+
+
+@admin.put("/api/videos/{vid}")
+def video_edit(vid: int, body: VideoEdit):
+    v = _video_or_404(vid)
+    if v["status"] == "rendering":
+        raise HTTPException(409, "Clip đang dựng, đợi xong rồi sửa")
+    fields = body.model_dump(exclude_none=True)
+    if "scenes" in fields:
+        fields["scenes"] = video.clean_scenes(fields["scenes"])
+    db.video_update(vid, **fields)
+    return video.to_json(db.video_get(vid))
+
+
+@admin.post("/api/videos/{vid}/render")
+def video_render(vid: int):
+    _video_or_404(vid)
+    try:
+        video.start_render(vid)
+    except video.VideoError as e:
+        raise HTTPException(409, str(e))
+    return video.to_json(db.video_get(vid))
+
+
+@admin.get("/api/videos/{vid}/file")
+def video_file(vid: int, download: int = 0):
+    v = _video_or_404(vid)
+    if not v["path"] or not Path(v["path"]).exists():
+        raise HTTPException(404, "Clip chưa dựng xong")
+    name = f"clip-{vid}.mp4"
+    return FileResponse(v["path"], media_type="video/mp4", filename=name if download else None)
+
+
+@admin.post("/api/videos/{vid}/publish")
+def video_publish(vid: int):
+    v = _video_or_404(vid)
+    if not v["path"] or not Path(v["path"]).exists():
+        raise HTTPException(400, "Clip chưa dựng xong")
+    try:
+        fb_id = facebook.publish_video(v["path"], v["description"], v["title"])
+    except FacebookError as e:
+        raise _fb_error(e)
+    db.video_update(vid, fb_video_id=fb_id)
+    db.log("video", f"Đăng clip #{vid} lên Fanpage → {fb_id}")
+    return video.to_json(db.video_get(vid))
+
+
+@admin.delete("/api/videos/{vid}")
+def video_delete(vid: int):
+    v = _video_or_404(vid)
+    if v["status"] == "rendering":
+        raise HTTPException(409, "Clip đang dựng, đợi xong rồi xóa")
+    video.delete(vid)
+    return {"ok": True}
 
 
 # ----- lịch đăng nhóm (nhắc đăng tay) -------------------------------------------

@@ -104,6 +104,20 @@ CREATE TABLE IF NOT EXISTS news_items (
     created_at   INTEGER NOT NULL,
     published_at INTEGER
 );
+CREATE TABLE IF NOT EXISTS videos (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    title        TEXT DEFAULT '',
+    description  TEXT DEFAULT '',
+    scenes       TEXT NOT NULL DEFAULT '[]',   -- JSON [{headline, narration, keyword}]
+    image_url    TEXT DEFAULT '',
+    status       TEXT NOT NULL DEFAULT 'draft', -- draft|rendering|done|failed
+    progress     TEXT DEFAULT '',
+    path         TEXT DEFAULT '',
+    duration     REAL DEFAULT 0,
+    fb_video_id  TEXT DEFAULT '',
+    error        TEXT DEFAULT '',
+    created_at   INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS activity (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at INTEGER NOT NULL,
@@ -138,6 +152,9 @@ def init():
             c.execute("UPDATE comments SET seen=1")
         if "reply_by" not in ccols:
             c.execute("ALTER TABLE comments ADD COLUMN reply_by TEXT NOT NULL DEFAULT ''")
+        # phần mềm bị tắt giữa lúc dựng clip → đừng để clip kẹt mãi ở "đang dựng"
+        c.execute("UPDATE videos SET status='failed', progress='', "
+                  "error='Phần mềm bị tắt khi đang dựng — bấm Dựng clip lại' WHERE status='rendering'")
 
 
 def now() -> int:
@@ -575,3 +592,46 @@ def news_list(status=None, limit=100):
 def news_delete(item_id):
     with conn() as c:
         c.execute("DELETE FROM news_items WHERE id=?", (item_id,))
+
+
+# ---------- clip video tạo từ bài viết ----------
+
+def _video_row(row):
+    if not row:
+        return None
+    d = dict(row)
+    d["scenes"] = json.loads(d["scenes"] or "[]")
+    return d
+
+
+def video_add(title, description, scenes, image_url="") -> int:
+    with conn() as c:
+        return c.execute(
+            "INSERT INTO videos(title, description, scenes, image_url, created_at) VALUES(?, ?, ?, ?, ?)",
+            (title, description, json.dumps(scenes, ensure_ascii=False), image_url, now())).lastrowid
+
+
+def video_update(video_id, **fields):
+    if "scenes" in fields:
+        fields["scenes"] = json.dumps(fields["scenes"], ensure_ascii=False)
+    if not fields:
+        return
+    with conn() as c:
+        c.execute(f"UPDATE videos SET {', '.join(k + '=?' for k in fields)} WHERE id=?",
+                  list(fields.values()) + [video_id])
+
+
+def video_get(video_id):
+    with conn() as c:
+        return _video_row(c.execute("SELECT * FROM videos WHERE id=?", (video_id,)).fetchone())
+
+
+def video_list(limit=50):
+    with conn() as c:
+        rows = c.execute("SELECT * FROM videos ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+    return [_video_row(r) for r in rows]
+
+
+def video_delete(video_id):
+    with conn() as c:
+        c.execute("DELETE FROM videos WHERE id=?", (video_id,))
