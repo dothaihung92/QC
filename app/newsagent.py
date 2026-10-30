@@ -29,7 +29,7 @@ DEFAULTS = {
     "feeds": [],                   # thêm RSS của báo/website bạn tin cậy
     "interval_hours": 6,
     "max_per_run": 3,
-    "max_age_days": 14,
+    "max_age_days": 2,            # chỉ lấy bài trong N ngày gần nhất (1 = hôm nay/hôm qua)
     "post_to_web": True,
     "post_to_fb": True,
     "use_images": True,
@@ -191,7 +191,7 @@ def _get(url: str, timeout=20):
     return r
 
 
-def search(keywords, feeds, max_age_days=14) -> list:
+def search(keywords, feeds, max_age_days=2) -> list:
     urls = [f"https://www.bing.com/news/search?q={quote_plus(k)}&format=rss&setlang=vi&cc=VN"
             for k in keywords] + list(feeds)
     found, seen = [], set()
@@ -208,6 +208,7 @@ def search(keywords, feeds, max_age_days=14) -> list:
                 continue
             seen.add(it["url"])
             found.append(it)
+    found.sort(key=lambda it: it["published"], reverse=True)      # bài mới nhất trước, bài không rõ ngày xuống cuối
     return found
 
 

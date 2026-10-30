@@ -525,6 +525,8 @@
           <div><label>Chạy mỗi (giờ)</label><input id="nwInterval" type="number" min="1"></div>
           <div><label>Tối đa bài / lượt</label><input id="nwMax" type="number" min="1"></div>
         </div>
+        <label>Chỉ lấy bài trong N ngày gần nhất (1-2 = tin mới nhất)</label>
+        <input id="nwAge" type="number" min="1">
         <label style="font-weight:400"><input type="checkbox" id="nwWeb" style="width:auto"> Đăng lên web</label>
         <label style="font-weight:400"><input type="checkbox" id="nwFb" style="width:auto"> Đăng lên Fanpage</label>
         <label style="font-weight:400"><input type="checkbox" id="nwImg" style="width:auto"> Dùng ảnh của bài nguồn (chú ý bản quyền ảnh)</label>
@@ -599,7 +601,7 @@ async function loadNews() {
   $('nwKeywords').value = c.keywords.join('\n'); $('nwFeeds').value = c.feeds.join('\n');
   $('nwBrand').value = c.brand_note; $('nwPublic').value = c.public_url;
   $('nwWpUrl').value = c.wp_url; $('nwWpUser').value = c.wp_user;
-  $('nwInterval').value = c.interval_hours; $('nwMax').value = c.max_per_run;
+  $('nwInterval').value = c.interval_hours; $('nwMax').value = c.max_per_run; $('nwAge').value = c.max_age_days;
   $('nwWeb').checked = c.post_to_web; $('nwFb').checked = c.post_to_fb; $('nwImg').checked = c.use_images;
   $('nwEnabled').checked = c.enabled; $('nwAuto').checked = c.auto_publish;
   $('nwKeyState').textContent = c.has_gemini_key ? '— đã lưu' : '— chưa có';
@@ -631,7 +633,7 @@ async function newsSave() {
   await api('/api/news/config', { method: 'PUT', body: {
     keywords: nl('nwKeywords'), feeds: nl('nwFeeds'), gemini_key: $('nwKey').value, brand_note: $('nwBrand').value,
     public_url: $('nwPublic').value, wp_url: $('nwWpUrl').value, wp_user: $('nwWpUser').value,
-    wp_app_password: $('nwWpPass').value, interval_hours: $('nwInterval').value, max_per_run: $('nwMax').value,
+    wp_app_password: $('nwWpPass').value, interval_hours: $('nwInterval').value, max_per_run: $('nwMax').value, max_age_days: $('nwAge').value,
     post_to_web: $('nwWeb').checked, post_to_fb: $('nwFb').checked, use_images: $('nwImg').checked,
     enabled: $('nwEnabled').checked, auto_publish: $('nwAuto').checked } });
   $('nwKey').value = ''; $('nwWpPass').value = '';

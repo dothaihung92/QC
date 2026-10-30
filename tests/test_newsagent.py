@@ -95,3 +95,20 @@ def test_fetch_article_falls_back_to_div_text(monkeypatch):
         def raise_for_status(self): pass
     monkeypatch.setattr(newsagent.requests, "get", lambda *a, **k: R())
     assert "hộ kinh doanh" in newsagent.fetch_article("https://x.vn/a")["text"]
+
+
+def test_search_returns_newest_first_and_drops_old(monkeypatch):
+    import time as _t
+    now = _t.time()
+    def fake_get(url, timeout=20):
+        class R:
+            url = "https://x.vn/f"
+            text = ""
+        return R()
+    items = [{"title": "cũ", "url": "u1", "source": "", "published": int(now - 10 * 86400)},
+             {"title": "hôm qua", "url": "u2", "source": "", "published": int(now - 86400)},
+             {"title": "nay", "url": "u3", "source": "", "published": int(now - 600)}]
+    monkeypatch.setattr(newsagent, "_get", fake_get)
+    monkeypatch.setattr(newsagent, "parse_feed", lambda t: list(items))
+    out = newsagent.search(["k"], [], 2)
+    assert [i["url"] for i in out] == ["u3", "u2"]
