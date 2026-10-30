@@ -13,7 +13,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
-from urllib.parse import parse_qs, quote_plus, urlparse
+from urllib.parse import parse_qs, quote_plus, urljoin, urlparse
 
 import requests
 
@@ -129,6 +129,40 @@ def parse_feed(xml_text: str) -> list:
     return out
 
 
+class _Links(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.links, self._href, self._buf = [], None, []
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "a":
+            self._href, self._buf = dict(attrs).get("href"), []
+
+    def handle_endtag(self, tag):
+        if tag == "a" and self._href:
+            self.links.append((self._href, re.sub(r"\s+", " ", "".join(self._buf)).strip()))
+            self._href = None
+
+    def handle_data(self, data):
+        if self._href:
+            self._buf.append(data)
+
+
+def parse_page_links(html_text: str, base_url: str) -> list:
+    """Trang danh sách tin (không có RSS) → các link bài viết cùng website, tiêu đề dài >= 25 ký tự."""
+    p = _Links()
+    p.feed(html_text)
+    host, out, seen = urlparse(base_url).netloc, [], set()
+    for href, text in p.links:
+        url = urljoin(base_url, href.strip())
+        if (len(text) < 25 or urlparse(url).scheme not in ("http", "https")
+                or urlparse(url).netloc != host or url in seen or url.rstrip("/") == base_url.rstrip("/")):
+            continue
+        seen.add(url)
+        out.append({"title": text, "url": url, "source": host, "published": 0})
+    return out
+
+
 def _get(url: str, timeout=20):
     r = requests.get(url, headers={"User-Agent": UA, "Accept-Language": "vi,en;q=0.8"}, timeout=timeout)
     r.raise_for_status()
@@ -144,7 +178,8 @@ def search(keywords, feeds, max_age_days=14) -> list:
     cutoff = time.time() - max_age_days * 86400
     for u in urls:
         try:
-            items = parse_feed(_get(u).text)
+            r = _get(u)
+            items = parse_feed(r.text) or parse_page_links(r.text, r.url)   # RSS, không phải thì coi là trang danh sách
         except (requests.RequestException, ValueError) as e:
             log.warning("feed lỗi %s: %s", u, e)
             continue

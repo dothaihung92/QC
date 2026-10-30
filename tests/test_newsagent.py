@@ -70,3 +70,11 @@ def test_irrelevant_article_is_skipped_and_key_is_masked(monkeypatch):
     monkeypatch.setattr(newsagent, "gemini_json", lambda p, c: {**AI, "relevant": False})
     newsagent.process_url({"title": "Bóng đá", "url": "https://bao.vn/bd"}, newsagent.get_config())
     assert db.news_list()[0]["status"] == "skipped"
+
+
+def test_page_links_fallback_for_pages_without_rss():
+    page = ('<a href="/a/1">Thông tư mới hướng dẫn thuế thu nhập cá nhân 2026</a>'
+            '<a href="/menu">Trang chủ</a><a href="https://other.vn/x">Một bài viết ở website khác rất dài</a>'
+            '<a href="/a/1">Thông tư mới hướng dẫn thuế thu nhập cá nhân 2026</a>')
+    items = newsagent.parse_page_links(page, "https://www.gdt.gov.vn/tin")
+    assert [i["url"] for i in items] == ["https://www.gdt.gov.vn/a/1"]
