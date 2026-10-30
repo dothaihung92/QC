@@ -78,3 +78,20 @@ def test_page_links_fallback_for_pages_without_rss():
             '<a href="/a/1">Thông tư mới hướng dẫn thuế thu nhập cá nhân 2026</a>')
     items = newsagent.parse_page_links(page, "https://www.gdt.gov.vn/tin")
     assert [i["url"] for i in items] == ["https://www.gdt.gov.vn/a/1"]
+
+
+def test_page_links_use_date_after_link_and_drop_undated_menu_items():
+    page = ('<a href="/menu/ung-dung">Ứng dụng hỗ trợ người nộp thuế cho doanh nghiệp</a>'
+            '<div><a href="/a/1">Nghị định mới về chi phí y tế được giảm trừ thuế</a><br>'
+            '<span>Ngày 30/10/2026</span></div>')
+    items = newsagent.parse_page_links(page, "https://www.gdt.gov.vn/tin")
+    assert len(items) == 1 and items[0]["url"].endswith("/a/1") and items[0]["published"] > 0
+
+
+def test_fetch_article_falls_back_to_div_text(monkeypatch):
+    long = "Nội dung chi tiết của thông báo về chính sách thuế mới áp dụng cho hộ kinh doanh. " * 5
+    class R:
+        text, url, encoding = f"<html><body><div>{long}</div></body></html>", "https://x.vn/a", "utf-8"
+        def raise_for_status(self): pass
+    monkeypatch.setattr(newsagent.requests, "get", lambda *a, **k: R())
+    assert "hộ kinh doanh" in newsagent.fetch_article("https://x.vn/a")["text"]

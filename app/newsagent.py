@@ -137,29 +137,49 @@ class _Links(HTMLParser):
     def handle_starttag(self, tag, attrs):
         if tag == "a":
             self._href, self._buf = dict(attrs).get("href"), []
+            self.links.append(None)          # đánh dấu: các chữ sau đây thuộc link trước đó (chứa ngày đăng)
 
     def handle_endtag(self, tag):
         if tag == "a" and self._href:
-            self.links.append((self._href, re.sub(r"\s+", " ", "".join(self._buf)).strip()))
+            self.links[-1] = [self._href, re.sub(r"\s+", " ", "".join(self._buf)).strip(), ""]
             self._href = None
 
     def handle_data(self, data):
         if self._href:
             self._buf.append(data)
+        elif self.links and self.links[-1]:
+            self.links[-1][2] += data
+
+
+_DATE_RE = re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4})")
 
 
 def parse_page_links(html_text: str, base_url: str) -> list:
-    """Trang danh sách tin (không có RSS) → các link bài viết cùng website, tiêu đề dài >= 25 ký tự."""
+    """Trang danh sách tin (không có RSS) → các link bài viết cùng website, tiêu đề dài >= 25 ký tự.
+    Ngày đăng lấy từ chữ "Ngày dd/mm/yyyy" ngay sau link; trang có ghi ngày thì chỉ lấy link có ngày
+    (bỏ menu, ứng dụng...)."""
     p = _Links()
     p.feed(html_text)
     host, out, seen = urlparse(base_url).netloc, [], set()
-    for href, text in p.links:
-        url = urljoin(base_url, href.strip())
+    for entry in p.links:
+        if not entry:
+            continue
+        href, text, after = entry
+        url = urljoin(base_url, html.unescape(href.strip()))
         if (len(text) < 25 or urlparse(url).scheme not in ("http", "https")
                 or urlparse(url).netloc != host or url in seen or url.rstrip("/") == base_url.rstrip("/")):
             continue
+        ts = 0
+        m = _DATE_RE.search(after[:80])
+        if m:
+            try:
+                ts = int(datetime(int(m[3]), int(m[2]), int(m[1])).timestamp())
+            except ValueError:
+                pass
         seen.add(url)
-        out.append({"title": text, "url": url, "source": host, "published": 0})
+        out.append({"title": text, "url": url, "source": host, "published": ts})
+    if any(i["published"] for i in out):
+        out = [i for i in out if i["published"]]
     return out
 
 
@@ -197,6 +217,7 @@ class _Extract(HTMLParser):
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.meta, self.paras, self._buf, self._skip, self._p = {}, [], [], 0, False
+        self.chunks = []                    # văn bản dài nằm ngoài thẻ <p> (website dùng div/span/td)
 
     def handle_starttag(self, tag, attrs):
         a = dict(attrs)
@@ -221,6 +242,10 @@ class _Extract(HTMLParser):
     def handle_data(self, data):
         if self._p and not self._skip:
             self._buf.append(data)
+        elif not self._skip:
+            text = re.sub(r"\s+", " ", data).strip()
+            if len(text) >= 80:
+                self.chunks.append(text)
 
 
 def fetch_article(url: str) -> dict:
@@ -228,8 +253,10 @@ def fetch_article(url: str) -> dict:
     ex = _Extract()
     ex.feed(r.text)
     image = ex.meta.get("og:image") or ex.meta.get("twitter:image") or ""
-    return {"url": r.url, "title": ex.meta.get("og:title", ""), "image": image,
-            "text": "\n\n".join(ex.paras)[:7000]}
+    text = "\n\n".join(ex.paras)
+    if len(text) < 300:
+        text = "\n\n".join(ex.paras + ex.chunks)
+    return {"url": r.url, "title": ex.meta.get("og:title", ""), "image": image, "text": text[:7000]}
 
 
 # ---------------------------------------------------------------- AI viết lại
