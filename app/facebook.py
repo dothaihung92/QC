@@ -60,15 +60,70 @@ def page_info() -> dict:
     return _call("GET", config.PAGE_ID, params={"fields": "id,name,fan_count,link"})
 
 
+MEDIA_DIR = config.DATA_DIR / "media"
+
+
+def local_media(ref: str):
+    """'/media/abc.jpg' (ảnh tải lên từ máy) → đường dẫn file; link http thì None."""
+    if not ref.startswith("/media/"):
+        return None
+    name = ref.rsplit("/", 1)[-1]
+    path = MEDIA_DIR / name
+    return path if name and path.is_file() else None
+
+
+def _upload_photo(ref: str, published: bool, caption: str = "") -> dict:
+    """Ảnh từ link → gửi url cho Facebook tự tải; ảnh trên máy → tải file lên."""
+    path = local_media(ref)
+    if not path:
+        body = {"url": ref, "published": published}
+        if caption:
+            body["caption"] = caption
+        return _call("POST", f"{config.PAGE_ID}/photos", json=body)
+    if config.DRY_RUN:
+        db.log("dry_run", f"POST {config.PAGE_ID}/photos (file {path.name})")
+        return {"id": "dry-run", "dry_run": True}
+    data = {"published": "true" if published else "false", "access_token": config.PAGE_ACCESS_TOKEN}
+    if caption:
+        data["caption"] = caption
+    try:
+        with open(path, "rb") as f:
+            r = requests.post(_url(f"{config.PAGE_ID}/photos"), data=data, timeout=120,
+                              files={"source": (path.name, f)})
+        res = r.json()
+    except (OSError, requests.RequestException, ValueError) as e:
+        raise FacebookError(f"Lỗi tải ảnh lên Facebook: {e}") from e
+    if r.status_code >= 400 or "error" in res:
+        err = res.get("error", {})
+        raise FacebookError(f"{err.get('message', r.text)} (code {err.get('code')})")
+    return res
+
+
+def split_images(image_url: str) -> list:
+    # chỉ tách theo dòng: link ảnh có thể chứa dấu phẩy (vd ảnh Cloudinary "w_500,h_300")
+    return [x.strip() for x in (image_url or "").splitlines() if x.strip()][:10]
+
+
 def publish_post(message: str, link: str = "", image_url: str = "") -> str:
-    if image_url:
-        data = _call("POST", f"{config.PAGE_ID}/photos",
-                     json={"url": image_url, "caption": _with_link(message, link)})
+    """Đăng bài: chỉ chữ (+ link), 1 ảnh, hoặc nhiều ảnh (tối đa 10, mỗi dòng 1 ảnh)."""
+    images = split_images(image_url)
+    if len(images) == 1:
+        data = _upload_photo(images[0], True, _with_link(message, link))
         return data.get("post_id") or data.get("id", "")
     body = {"message": message}
-    if link:
+    if images:
+        # nhiều ảnh: tải từng ảnh ở chế độ ẩn rồi gắn cả bộ vào một bài (giống Postiz)
+        ids = [_upload_photo(img, False).get("id", "") for img in images]
+        body = {"message": _with_link(message, link),
+                "attached_media": [{"media_fbid": i} for i in ids if i]}
+    elif link:
         body["link"] = link
     return _call("POST", f"{config.PAGE_ID}/feed", json=body).get("id", "")
+
+
+def post_reactions(post_id: str) -> int:
+    data = _call("GET", post_id, params={"fields": "reactions.summary(total_count).limit(0)"})
+    return int(((data.get("reactions") or {}).get("summary") or {}).get("total_count", 0))
 
 
 def publish_video(path: str, description: str = "", title: str = "") -> str:

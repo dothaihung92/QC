@@ -66,6 +66,28 @@
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
           padding: 16px 18px; margin-bottom: 16px; }
   .card h2 { font-size: 15px; margin: 0 0 12px; }
+  .fbpv { border: 1px solid var(--line); border-radius: 10px; background: #fff; max-width: 520px; }
+  .fbpv .hd { display: flex; gap: 10px; align-items: center; padding: 12px 14px 6px; }
+  .fbpv .av { width: 40px; height: 40px; border-radius: 50%; background: var(--pri); color: #fff; display: grid;
+              place-items: center; font-weight: 700; }
+  .fbpv .tx { padding: 4px 14px 10px; white-space: pre-wrap; font-size: 15px; }
+  .fbpv .im { display: grid; gap: 2px; grid-template-columns: repeat(2, 1fr); }
+  .fbpv .im img { width: 100%; height: 100%; object-fit: cover; aspect-ratio: 1; display: block; background: #eee; }
+  .fbpv .im.three > div:first-child { grid-column: span 2; } .fbpv .im.three > div:first-child img { aspect-ratio: 2; }
+  .fbpv .im.one { grid-template-columns: 1fr; } .fbpv .im.one img { aspect-ratio: auto; max-height: 420px; }
+  .fbpv .lk { margin: 0 14px 10px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 13px; color: var(--muted); }
+  .fbpv .bar { border-top: 1px solid var(--line); margin: 0 14px; padding: 8px 0; display: flex; justify-content: space-around;
+               color: var(--muted); font-size: 14px; }
+  .fbpv .c1 { background: #f0f2f5; border-radius: 14px; padding: 6px 10px; margin: 0 14px 12px; font-size: 13px; white-space: pre-wrap; }
+  .thumbs { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+  .thumbs img { width: 56px; height: 56px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); }
+  .cal { display: grid; grid-template-columns: repeat(7, minmax(110px, 1fr)); gap: 6px; overflow-x: auto; }
+  .cal .day { border: 1px solid var(--line); border-radius: 8px; min-height: 140px; padding: 6px; background: #fff; }
+  .cal .day.today { border-color: var(--pri); }
+  .cal .day h4 { margin: 0 0 6px; font-size: 12px; color: var(--muted); font-weight: 600; }
+  .cal .ev { font-size: 12px; border-radius: 6px; padding: 4px 6px; margin-bottom: 4px; background: var(--pri-weak); cursor: default; }
+  .cal .ev.posted { background: var(--ok-weak); } .cal .ev.failed { background: var(--err-weak); }
+  .cal .ev.slot { background: none; border: 1px dashed var(--line); color: var(--muted); }
   .row2 { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
   .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
   .stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
@@ -163,15 +185,37 @@
       <div class="card">
         <h2>Soạn bài</h2>
         <label>Nội dung</label>
-        <textarea id="pMsg" style="min-height:260px"></textarea>
-        <div class="row">
-          <div class="col" style="flex-basis:200px"><label>Link (tùy chọn)</label><input id="pLink" placeholder="https://..."></div>
-          <div class="col" style="flex-basis:200px"><label>Link ảnh (tùy chọn)</label><input id="pImg" placeholder="https://.../anh.jpg"></div>
+        <textarea id="pMsg" style="min-height:240px" oninput="pvRender()"></textarea>
+        <div class="row" style="align-items:center;margin-top:6px">
+          <select id="pSig" style="flex:1 1 180px"></select>
+          <button class="btn" onclick="sigInsert()">✍ Chèn chữ ký</button>
         </div>
+        <label>Link (tùy chọn)</label><input id="pLink" placeholder="https://..." oninput="pvRender()">
+        <label>Ảnh — mỗi dòng một link, tối đa 10 ảnh (nhiều ảnh = 1 bài dạng album)</label>
+        <textarea id="pImg" rows="2" placeholder="https://.../anh.jpg" oninput="pvRender()"></textarea>
+        <div class="btns" style="margin-top:6px">
+          <label class="btn" style="cursor:pointer">📁 Tải ảnh từ máy<input type="file" accept="image/*" multiple hidden onchange="mediaUpload(this)"></label>
+          <span class="muted small">Ảnh lưu trong data/media trên máy bạn</span>
+        </div>
+        <label>Bình luận đầu tiên (tùy chọn) — Fanpage tự bình luận ngay dưới bài, hay dùng để đặt link</label>
+        <textarea id="pFirst" rows="2" placeholder="👉 Xem chi tiết: https://..." oninput="pvRender()"></textarea>
+        <details style="margin-top:10px"><summary class="small">⚙ Tùy chọn thêm: đăng lặp lại, tự bình luận khi bài được nhiều tương tác</summary>
+          <label>Đăng lặp lại</label>
+          <select id="pRepeat"><option value="0">Không lặp</option><option value="7">Mỗi 7 ngày</option>
+            <option value="14">Mỗi 14 ngày</option><option value="30">Mỗi 30 ngày</option></select>
+          <div class="row">
+            <div class="col" style="flex-basis:140px"><label>Khi bài đạt (lượt cảm xúc)</label>
+              <input id="pPlugLikes" type="number" min="0" placeholder="0 = tắt"></div>
+            <div class="col" style="flex-basis:260px"><label>… Fanpage tự bình luận</label>
+              <input id="pPlugText" placeholder="🔥 Cảm ơn mọi người! Inbox để nhận tư vấn miễn phí"></div>
+          </div>
+          <p class="muted small">Bình luận mới giúp người đã tương tác nhận thông báo và bài được đẩy lên lại. Kiểm tra mỗi 30 phút, trong 7 ngày sau khi đăng.</p>
+        </details>
         <label>Hẹn giờ đăng</label>
         <input id="pTime" type="datetime-local">
         <div class="btns">
           <button class="btn pri" onclick="savePost('now')">Đăng ngay lên Fanpage</button>
+          <button class="btn" onclick="savePost('queue')" title="Xếp vào khung giờ vàng còn trống gần nhất">➕ Thêm vào hàng đợi <span class="small muted" id="pNextSlot"></span></button>
           <button class="btn" onclick="savePost('schedule')">Hẹn giờ</button>
           <button class="btn" onclick="savePost('draft')">Lưu nháp</button>
           <button class="btn" onclick="copyPost()">📋 Sao chép để đăng nhóm</button>
@@ -182,8 +226,26 @@
           nhắn tin / bình luận ở <b>Fanpage</b> để bot tiếp nhận.
         </p>
       </div>
+      <div class="card">
+        <h2>👁 Xem trước trên Facebook</h2>
+        <div id="pvBox"></div>
+      </div>
     </div>
     <div class="col" style="flex-basis:300px;max-width:420px">
+      <div class="card">
+        <h2>⏰ Khung giờ vàng</h2>
+        <p class="muted small" style="margin-top:0">Giờ khách hay lướt Facebook. Bấm <b>➕ Thêm vào hàng đợi</b> là bài tự xếp vào giờ vàng còn trống gần nhất.</p>
+        <input id="slotIn" placeholder="07:30, 11:45, 20:00">
+        <div class="btns"><button class="btn" onclick="slotSave()">💾 Lưu khung giờ</button>
+          <span class="small muted" id="slotNext"></span></div>
+      </div>
+      <div class="card">
+        <h2>✍ Chữ ký</h2>
+        <p class="muted small" style="margin-top:0">Đoạn hay dùng (hotline, địa chỉ, hashtag). Chữ ký đánh dấu <b>Tự thêm</b> sẽ tự gắn cuối mỗi bài khi đăng.</p>
+        <div id="sigList"></div>
+        <div class="btns"><button class="btn" onclick="sigAdd()">+ Thêm chữ ký</button>
+          <button class="btn pri" onclick="sigSave()">💾 Lưu chữ ký</button></div>
+      </div>
       <div class="card">
         <h2>✨ Viết lại từ bài nguồn</h2>
         <p class="muted small" style="margin-top:0">Thấy bài hay trong group/page khác? Dán nội dung + link vào đây,
@@ -215,11 +277,24 @@
     </div>
   </div>
   <div class="card">
-    <h2>Danh sách bài</h2>
-    <div class="tbl-wrap"><table>
+    <div class="row" style="align-items:center;justify-content:space-between">
+      <h2 style="margin:0">Danh sách bài</h2>
+      <div class="btns" style="margin:0">
+        <button class="btn" id="vwList" onclick="postView('list')">☰ Danh sách</button>
+        <button class="btn" id="vwCal" onclick="postView('cal')">📅 Lịch tuần</button>
+      </div>
+    </div>
+    <div id="postListBox" class="tbl-wrap" style="margin-top:10px"><table>
       <thead><tr><th>#</th><th>Nội dung</th><th>Trạng thái</th><th>Hẹn giờ / Đã đăng</th><th></th></tr></thead>
       <tbody id="postRows"></tbody>
     </table></div>
+    <div id="postCalBox" style="display:none;margin-top:10px">
+      <div class="btns" style="margin:0 0 8px"><button class="btn" onclick="calMove(-1)">‹ Tuần trước</button>
+        <button class="btn" onclick="calMove(0)">Tuần này</button><button class="btn" onclick="calMove(1)">Tuần sau ›</button>
+        <span class="muted small" id="calTitle"></span></div>
+      <div class="cal" id="calGrid"></div>
+      <p class="muted small">Ô viền nét đứt là khung giờ vàng còn trống.</p>
+    </div>
   </div>
 </section>
 
@@ -530,6 +605,7 @@
         <input id="nwAge" type="number" min="1">
         <label style="font-weight:400"><input type="checkbox" id="nwWeb" style="width:auto"> Đăng lên web</label>
         <label style="font-weight:400"><input type="checkbox" id="nwFb" style="width:auto"> Đăng lên Fanpage</label>
+        <label style="font-weight:400"><input type="checkbox" id="nwSlot" style="width:auto"> Bài Fanpage xếp vào <b>khung giờ vàng</b> kế tiếp (không đăng ngay)</label>
         <label style="font-weight:400"><input type="checkbox" id="nwImg" style="width:auto"> Dùng ảnh của bài nguồn (chú ý bản quyền ảnh)</label>
         <label style="font-weight:400"><input type="checkbox" id="nwEnabled" style="width:auto"> Bật chạy tự động theo lịch</label>
         <label style="font-weight:400"><input type="checkbox" id="nwAuto" style="width:auto"> Tự đăng luôn, không cần duyệt (không khuyến nghị)</label>
@@ -648,7 +724,7 @@ async function loadNews() {
   $('nwBrand').value = c.brand_note; $('nwPublic').value = c.public_url;
   $('nwWpUrl').value = c.wp_url; $('nwWpUser').value = c.wp_user;
   $('nwInterval').value = c.interval_hours; $('nwMax').value = c.max_per_run; $('nwAge').value = c.max_age_days;
-  $('nwWeb').checked = c.post_to_web; $('nwFb').checked = c.post_to_fb; $('nwImg').checked = c.use_images;
+  $('nwWeb').checked = c.post_to_web; $('nwFb').checked = c.post_to_fb; $('nwSlot').checked = c.on_slot; $('nwImg').checked = c.use_images;
   $('nwEnabled').checked = c.enabled; $('nwAuto').checked = c.auto_publish;
   $('nwKeyState').textContent = c.has_gemini_key ? '— đã lưu' : '— chưa có';
   $('nwWpState').textContent = c.has_wp_password ? '— đã lưu' : '';
@@ -663,7 +739,8 @@ function renderNews() {
     return `<div class="card" style="margin:0 0 10px">
       <span class="pill ${cls}">${lbl}</span> <b>${esc(n.title || n.orig_title)}</b>
       <div class="muted small">Nguồn: <a href="${esc(n.url)}" target="_blank">${esc(n.source || n.url)}</a> · ${fmt(n.created_at)}
-        ${n.web_url ? ` · <a href="${esc(n.web_url)}" target="_blank">xem trên web</a>` : ''}</div>
+        ${n.web_url ? ` · <a href="${esc(n.web_url)}" target="_blank">xem trên web</a>` : ''}
+        ${(n.fb_post_id || '').startsWith('lich:') ? ` · ⏰ đã xếp lịch Fanpage (<a href="#posts">bài #${esc(n.fb_post_id.slice(5))}</a>)` : ''}</div>
       ${n.error ? `<div class="small" style="color:#b42318">${esc(n.error)}</div>` : ''}
       ${open ? `<label>Tiêu đề</label><input id="nt${n.id}" value="${esc(n.title)}">
         <label>Nội dung bài web</label><textarea id="nb${n.id}" rows="8">${esc(n.body)}</textarea>
@@ -682,7 +759,7 @@ async function newsSave() {
     keywords: nl('nwKeywords'), feeds: nl('nwFeeds'), gemini_key: $('nwKey').value, brand_note: $('nwBrand').value,
     public_url: $('nwPublic').value, wp_url: $('nwWpUrl').value, wp_user: $('nwWpUser').value,
     wp_app_password: $('nwWpPass').value, interval_hours: $('nwInterval').value, max_per_run: $('nwMax').value, max_age_days: $('nwAge').value,
-    post_to_web: $('nwWeb').checked, post_to_fb: $('nwFb').checked, use_images: $('nwImg').checked,
+    post_to_web: $('nwWeb').checked, post_to_fb: $('nwFb').checked, on_slot: $('nwSlot').checked, use_images: $('nwImg').checked,
     enabled: $('nwEnabled').checked, auto_publish: $('nwAuto').checked } });
   $('nwKey').value = ''; $('nwWpPass').value = '';
   toast('✅ Đã lưu cài đặt'); loadNews();
@@ -859,20 +936,34 @@ async function checkConn() {
 // ---------------- Bài đăng
 async function loadPosts() {
   rwShowKeyBox();
+  if (!PAGE_NAME) api('/api/status').then(st => { PAGE_NAME = st.page_name || ''; pvRender(); }).catch(() => {});
+  let v = 'list'; try { v = localStorage.getItem('postView') || 'list'; } catch {}
+  postView(v);
   if (!$('tpls').children.length) {
     const tpls = await api('/api/templates');
     $('tpls').innerHTML = tpls.map((t, i) => `<div class="tpl" data-i="${i}"><b>${esc(t.title)}</b>
       <span class="muted small">${esc(t.text.slice(0, 90))}…</span></div>`).join('');
     $('tpls').querySelectorAll('.tpl').forEach(el => el.onclick = () => {
-      const t = tpls[el.dataset.i]; $('pMsg').value = t.text; $('pMsg').dataset.tpl = t.key; });
+      const t = tpls[el.dataset.i]; $('pMsg').value = t.text; $('pMsg').dataset.tpl = t.key; pvRender(); });
     if (!$('pMsg').value) { $('pMsg').value = tpls[0].text; $('pMsg').dataset.tpl = tpls[0].key; }
   }
-  const posts = await api('/api/posts');
+  const [posts, slots, sigs] = await Promise.all([api('/api/posts'), api('/api/posting-slots'), api('/api/signatures')]);
+  POSTS = posts; SLOTS = slots; SIGS = sigs;
+  $('slotIn').value = slots.slots.join(', ');
+  const nx = slots.next ? fmtSlot(slots.next) : '';
+  $('pNextSlot').textContent = nx ? '(' + nx + ')' : '';
+  $('slotNext').textContent = nx ? 'Giờ trống kế tiếp: ' + nx : 'Chưa có khung giờ';
+  sigRender();
   $('postRows').innerHTML = posts.map(p => {
     const [label, cls] = POST_STATUS[p.status] || [p.status, 'p-info'];
     const canEdit = !['posted', 'posting'].includes(p.status);
+    const tags = [p.image_url && p.image_url.split('\n').filter(Boolean).length > 1 ? `🖼 ${p.image_url.split('\n').filter(Boolean).length} ảnh` : '',
+                  p.first_comment ? '💬 bình luận đầu' : '', p.repeat_days ? `🔁 mỗi ${p.repeat_days} ngày` : '',
+                  p.plug_likes ? `🔥 ${p.plug_likes} cảm xúc → bình luận${p.plug_done ? ' (đã chạy)' : ''}` : '']
+                 .filter(Boolean).map(t => `<span class="pill p-info">${t}</span>`).join(' ');
     return `<tr><td>${p.id}</td>
       <td class="pre" style="max-width:520px">${esc(p.message.slice(0, 220))}${p.message.length > 220 ? '…' : ''}
+        ${tags ? `<div style="margin-top:4px">${tags}</div>` : ''}
         ${p.error ? `<div class="small" style="color:var(--err)">${esc(p.error)}</div>` : ''}</td>
       <td><span class="pill ${cls}">${label}</span></td>
       <td class="small">${p.status === 'posted' ? fmt(p.posted_at) + (p.fb_post_id && p.fb_post_id !== 'dry-run' ?
@@ -881,20 +972,120 @@ async function loadPosts() {
         ${p.status === 'scheduled' ? `<button class="btn" onclick="unschedule(${p.id})">Hủy hẹn</button>` : ''}
         <button class="btn danger" onclick="delPost(${p.id})">Xóa</button></td></tr>`;
   }).join('') || '<tr><td colspan="5" class="muted">Chưa có bài nào.</td></tr>';
+  calRender(); pvRender();
+}
+let POSTS = [], SLOTS = { slots: [] }, SIGS = [], CAL_WEEK = 0, PAGE_NAME = '';
+const fmtSlot = (t) => new Date(t * 1000).toLocaleString('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+function withSignature(msg) {
+  const auto = SIGS.find(x => x.auto);
+  return auto && !msg.includes(auto.text.trim()) ? msg.replace(/\s+$/, '') + '\n\n' + auto.text : msg;
 }
 async function savePost(mode) {
-  const body = { message: $('pMsg').value, link: $('pLink').value.trim(), image_url: $('pImg').value.trim(),
-                 template_key: $('pMsg').dataset.tpl || '' };
+  const body = { message: withSignature($('pMsg').value), link: $('pLink').value.trim(), image_url: $('pImg').value.trim(),
+                 template_key: $('pMsg').dataset.tpl || '', first_comment: $('pFirst').value.trim(),
+                 repeat_days: +$('pRepeat').value || 0, plug_likes: +$('pPlugLikes').value || 0,
+                 plug_text: $('pPlugText').value.trim() };
   if (mode === 'now') { if (!confirm('Đăng bài này lên Fanpage ngay?')) return; body.publish_now = true; }
+  if (mode === 'queue') body.queue = true;
   if (mode === 'schedule') {
     if (!$('pTime').value) return toast('Chọn thời gian hẹn giờ');
     body.scheduled_at = Math.floor(new Date($('pTime').value).getTime() / 1000);
     if (body.scheduled_at < Date.now() / 1000) return toast('Thời gian hẹn phải ở tương lai');
   }
   const p = await api('/api/posts', { method: 'POST', body });
-  toast(p.status === 'posted' ? '✅ Đã đăng' : p.status === 'failed' ? '⚠ Đăng lỗi: ' + p.error :
-        p.status === 'scheduled' ? '⏰ Đã hẹn giờ' : '💾 Đã lưu nháp');
+  toast(p.status === 'posted' ? (p.error ? '⚠ ' + p.error : '✅ Đã đăng') : p.status === 'failed' ? '⚠ Đăng lỗi: ' + p.error :
+        p.status === 'scheduled' ? '⏰ Đã hẹn giờ ' + fmtSlot(p.scheduled_at) : '💾 Đã lưu nháp');
   loadPosts();
+}
+// ---- xem trước kiểu Facebook
+function pvRender() {
+  if (!$('pvBox')) return;
+  const msg = withSignature($('pMsg').value), link = $('pLink').value.trim(), first = $('pFirst').value.trim();
+  const imgs = $('pImg').value.split('\n').map(x => x.trim()).filter(Boolean).slice(0, 10);
+  const name = PAGE_NAME || 'Fanpage của bạn';
+  const shown = imgs.slice(0, 4);
+  $('pvBox').innerHTML = `<div class="fbpv">
+    <div class="hd"><div class="av">${esc(name[0] || 'F')}</div><div><b>${esc(name)}</b><div class="small muted">Vừa xong · 🌎</div></div></div>
+    <div class="tx">${esc(imgs.length && link && !msg.includes(link) ? msg + '\n\n👉 ' + link : msg) || '<span class="muted">Nội dung bài viết...</span>'}</div>
+    ${shown.length ? `<div class="im ${shown.length === 1 ? 'one' : shown.length === 3 ? 'three' : ''}">${shown.map((u, i) =>
+        `<div style="position:relative"><img src="${esc(u)}" referrerpolicy="no-referrer" onerror="this.style.opacity=.2">
+        ${i === 3 && imgs.length > 4 ? `<b style="position:absolute;inset:0;display:grid;place-items:center;background:#0006;color:#fff;font-size:28px">+${imgs.length - 4}</b>` : ''}</div>`).join('')}</div>`
+      : link ? `<div class="lk">🔗 ${esc(link)}</div>` : ''}
+    <div class="bar"><span>👍 Thích</span><span>💬 Bình luận</span><span>↗ Chia sẻ</span></div>
+    ${first ? `<div class="c1"><b>${esc(name)}</b><br>${esc(first)}</div>` : ''}
+  </div>`;
+}
+// ---- tải ảnh từ máy
+async function mediaUpload(input) {
+  const files = [...input.files].slice(0, 10);
+  for (const f of files) {
+    if (f.size > 8 * 1024 * 1024) { toast('⚠ ' + f.name + ' lớn hơn 8 MB'); continue; }
+    const data = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(f); });
+    const r = await api('/api/media', { method: 'POST', body: { data } });
+    $('pImg').value = ($('pImg').value.trim() ? $('pImg').value.trim() + '\n' : '') + r.url;
+  }
+  input.value = ''; pvRender(); toast('✅ Đã thêm ảnh');
+}
+// ---- khung giờ vàng
+async function slotSave() {
+  const slots = $('slotIn').value.split(/[,;\s]+/).map(x => x.trim()).filter(Boolean);
+  await api('/api/posting-slots', { method: 'PUT', body: { slots } });
+  toast('✅ Đã lưu khung giờ vàng'); loadPosts();
+}
+// ---- chữ ký
+function sigRender() {
+  $('pSig').innerHTML = SIGS.length ? SIGS.map((x, i) => `<option value="${i}">${esc(x.name)}${x.auto ? ' (tự thêm)' : ''}</option>`).join('')
+    : '<option value="">— chưa có chữ ký —</option>';
+  $('sigList').innerHTML = SIGS.map((x, i) => `<div style="border-left:3px solid var(--line);padding-left:8px;margin-bottom:8px">
+      <input data-sig="${i}" data-f="name" value="${esc(x.name)}" placeholder="Tên (vd Hotline)">
+      <textarea data-sig="${i}" data-f="text" rows="2" placeholder="📞 0909 xxx xxx · #ketoan #thue">${esc(x.text)}</textarea>
+      <label style="font-weight:400"><input type="radio" name="sigAuto" value="${i}" ${x.auto ? 'checked' : ''} style="width:auto"> Tự thêm vào cuối bài</label>
+      <button class="btn danger" style="padding:2px 8px" onclick="sigDel(${i})">Xóa</button></div>`).join('')
+    || '<p class="muted small">Chưa có chữ ký.</p>';
+}
+function sigCollect() {
+  const items = SIGS.map(x => ({ ...x }));
+  document.querySelectorAll('[data-sig]').forEach(el => { items[+el.dataset.sig][el.dataset.f] = el.value; });
+  const auto = document.querySelector('input[name=sigAuto]:checked');
+  items.forEach((x, i) => x.auto = !!auto && +auto.value === i);
+  return items;
+}
+function sigAdd() { SIGS = sigCollect(); SIGS.push({ name: '', text: '', auto: false }); sigRender(); }
+function sigDel(i) { SIGS = sigCollect(); SIGS.splice(i, 1); sigRender(); }
+async function sigSave() { SIGS = await api('/api/signatures', { method: 'PUT', body: { items: sigCollect() } }); sigRender(); pvRender(); toast('✅ Đã lưu chữ ký'); }
+function sigInsert() {
+  const x = SIGS[+$('pSig').value]; if (!x) return toast('Chưa có chữ ký — thêm ở khung ✍ Chữ ký');
+  $('pMsg').value = $('pMsg').value.replace(/\s+$/, '') + '\n\n' + x.text; pvRender();
+}
+// ---- lịch tuần
+function postView(v) {
+  $('postListBox').style.display = v === 'list' ? '' : 'none';
+  $('postCalBox').style.display = v === 'cal' ? '' : 'none';
+  $('vwList').classList.toggle('pri', v === 'list'); $('vwCal').classList.toggle('pri', v === 'cal');
+  try { localStorage.setItem('postView', v); } catch {}
+  if (v === 'cal') calRender();
+}
+function calMove(d) { CAL_WEEK = d ? CAL_WEEK + d : 0; calRender(); }
+function calRender() {
+  if (!$('calGrid')) return;
+  const now = new Date(), start = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7) + CAL_WEEK * 7);       // thứ Hai
+  const days = [...Array(7)].map((_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
+  $('calTitle').textContent = days[0].toLocaleDateString('vi-VN') + ' – ' + days[6].toLocaleDateString('vi-VN');
+  const evs = POSTS.map(p => ({ p, t: p.status === 'posted' ? p.posted_at : p.scheduled_at })).filter(e => e.t);
+  const hm = (t) => new Date(t * 1000).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  $('calGrid').innerHTML = days.map(d => {
+    const a = d.getTime() / 1000, b = a + 86400;
+    const mine = evs.filter(e => e.t >= a && e.t < b).sort((x, y) => x.t - y.t);
+    const free = (SLOTS.slots || []).map(s => { const [h, m] = s.split(':'); return a + h * 3600 + m * 60; })
+      .filter(t => t > Date.now() / 1000 && !mine.some(e => Math.abs(e.t - t) < 600));
+    const items = [...mine.map(e => ({ t: e.t, html: `<div class="ev ${e.p.status}" title="${esc(e.p.message.slice(0, 300))}">
+        <b>${hm(e.t)}</b> ${esc(e.p.message.slice(0, 50))}</div>` })),
+      ...free.map(t => ({ t, html: `<div class="ev slot">${hm(t)} trống</div>` }))].sort((x, y) => x.t - y.t);
+    const today = d.toDateString() === now.toDateString();
+    return `<div class="day ${today ? 'today' : ''}"><h4>${d.toLocaleDateString('vi-VN', { weekday: 'short', day: '2-digit', month: '2-digit' })}</h4>
+      ${items.map(x => x.html).join('')}</div>`;
+  }).join('');
 }
 async function publishPost(id) { if (!confirm('Đăng bài #' + id + ' ngay?')) return;
   const p = await api(`/api/posts/${id}/publish`, { method: 'POST' });

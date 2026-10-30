@@ -148,6 +148,22 @@ trình duyệt như trên. Bài đăng trong nhóm **không có** thống kê/b�
 Cả hai dùng chung một Gemini API key (lấy miễn phí tại <https://aistudio.google.com/apikey>),
 nhập một lần là dùng được ở cả hai nơi.
 
+## Lên lịch & tăng tương tác (ý tưởng từ Postiz)
+
+Lấy ý tưởng từ [Postiz](https://github.com/gitroomhq/postiz-app) (công cụ lên lịch mạng xã hội mã nguồn mở,
+giấy phép AGPL — chỉ học ý tưởng, mã viết lại riêng cho phần mềm này):
+
+- **⏰ Khung giờ vàng + hàng đợi**: đặt các giờ đăng (vd 07:30, 11:45, 20:00), bấm **➕ Thêm vào hàng đợi**
+  là bài tự xếp vào giờ còn trống gần nhất. Agent tin tức cũng xếp bài Fanpage vào giờ vàng (tắt được).
+- **📅 Lịch tuần**: xem bài đã đăng / đã hẹn theo từng ngày, thấy luôn giờ vàng còn trống.
+- **💬 Bình luận đầu tiên**: Fanpage tự bình luận ngay dưới bài vừa đăng (hay dùng để đặt link).
+- **🔁 Đăng lặp lại** mỗi 7 / 14 / 30 ngày.
+- **🔥 Tự bình luận khi bài hot**: bài đạt N lượt cảm xúc thì Fanpage tự bình luận thêm 1 lần
+  (người đã tương tác nhận thông báo). Kiểm tra mỗi 30 phút trong 7 ngày sau khi đăng.
+- **🖼 Nhiều ảnh trong 1 bài** (tối đa 10, mỗi dòng 1 link) và **tải ảnh từ máy** (lưu ở `data/media`).
+- **✍ Chữ ký**: đoạn hotline / hashtag hay dùng, 1 chữ ký có thể tự gắn cuối mọi bài.
+- **👁 Xem trước** bài giống trên Facebook khi đang soạn.
+
 ## Tạo clip từ bài viết (tab 🎬 Tạo clip)
 
 Làm theo quy trình của [MoneyPrinterTurbo](https://github.com/harry0703/MoneyPrinterTurbo) nhưng gọn hơn:

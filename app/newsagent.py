@@ -32,6 +32,7 @@ DEFAULTS = {
     "max_age_days": 2,            # chỉ lấy bài trong N ngày gần nhất (1 = hôm nay/hôm qua)
     "post_to_web": True,
     "post_to_fb": True,
+    "on_slot": True,              # bài Facebook xếp vào khung giờ vàng kế tiếp thay vì đăng ngay
     "use_images": True,
     "public_url": "",             # địa chỉ web của bạn, vd https://dailythuehungphuc.com
     "brand_note": "",             # câu giới thiệu dịch vụ/phần mềm chèn cuối bài
@@ -428,7 +429,11 @@ def publish_item(item_id: int, cfg=None) -> dict:
         if not web_url and cfg["public_url"]:
             web_url = f"{cfg['public_url']}/tin-tuc/{slug}"
     fb_id = ""
-    if cfg["post_to_fb"]:
+    slot = db.next_free_slot() if cfg["post_to_fb"] and cfg["on_slot"] else None
+    if slot:
+        pid = db.create_post(item["fb_text"] or item["title"], web_url, item["image_url"], "news", slot)
+        fb_id = f"lich:{pid}"                       # bài Fanpage đã xếp lịch ở tab Bài đăng
+    elif cfg["post_to_fb"]:
         try:
             fb_id = facebook.publish_post(item["fb_text"] or item["title"], web_url, item["image_url"])
         except FacebookError as e:

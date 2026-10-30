@@ -37,12 +37,57 @@ _stop = threading.Event()
 def publish(post: dict) -> dict:
     try:
         fb_id = facebook.publish_post(post["message"], post.get("link", ""), post.get("image_url", ""))
-        db.update_post(post["id"], status="posted", fb_post_id=fb_id, error="", posted_at=db.now())
-        db.log("post", f"#{post['id']} → {fb_id}")
     except FacebookError as e:
         db.update_post(post["id"], status="failed", error=str(e))
         db.log("error", f"post #{post['id']}: {e}")
+        return db.get_post(post["id"])
+    note = ""
+    if post.get("first_comment", "").strip() and fb_id:
+        try:                                   # bình luận đầu tiên (vd để link ở đây cho bài không bị giảm tiếp cận)
+            facebook.reply_comment(fb_id, post["first_comment"].strip())
+        except FacebookError as e:
+            note = f"Đã đăng, nhưng bình luận đầu tiên lỗi: {e}"
+            db.log("error", f"post #{post['id']} first comment: {e}")
+    db.update_post(post["id"], status="posted", fb_post_id=fb_id, error=note, posted_at=db.now())
+    db.log("post", f"#{post['id']} → {fb_id}")
+    if post.get("repeat_days"):
+        _schedule_repeat(post)
     return db.get_post(post["id"])
+
+
+def _schedule_repeat(post: dict):
+    """Đăng lặp lại: tạo bản sao hẹn giờ sau N ngày (giống "repeat post" của Postiz)."""
+    base = post.get("scheduled_at") or db.now()
+    nxt = base + post["repeat_days"] * 86400
+    while nxt <= db.now():
+        nxt += post["repeat_days"] * 86400
+    pid = db.create_post(post["message"], post.get("link", ""), post.get("image_url", ""),
+                         post.get("template_key", ""), nxt, first_comment=post.get("first_comment", ""),
+                         repeat_days=post["repeat_days"], plug_likes=post.get("plug_likes", 0),
+                         plug_text=post.get("plug_text", ""))
+    db.log("post", f"#{post['id']} lặp lại → bài #{pid} lúc {time.strftime('%d/%m %H:%M', time.localtime(nxt))}")
+
+
+PLUG_EVERY = 1800        # giây giữa 2 lần kiểm tra lượt cảm xúc
+
+
+def run_plugs(force=False):
+    """Bài đạt đủ lượt cảm xúc → Fanpage tự bình luận thêm (giống "auto plug" của Postiz),
+    để người đã tương tác nhận thông báo và bài được đẩy lên lại."""
+    last = db.get_setting("plug_last_check", 0) or 0
+    if not force and db.now() - last < PLUG_EVERY:
+        return
+    db.set_setting("plug_last_check", db.now())
+    if config.DRY_RUN:
+        return
+    for post in db.posts_to_plug():
+        try:
+            if facebook.post_reactions(post["fb_post_id"]) >= post["plug_likes"]:
+                facebook.reply_comment(post["fb_post_id"], post["plug_text"])
+                db.update_post(post["id"], plug_done=1)
+                db.log("post", f"#{post['id']} đạt {post['plug_likes']} cảm xúc → đã tự bình luận")
+        except FacebookError as e:
+            db.log("error", f"auto plug #{post['id']}: {e}")
 
 
 def scheduler_loop(interval=20):
@@ -50,6 +95,7 @@ def scheduler_loop(interval=20):
         try:
             for post in db.claim_due_posts():
                 publish(post)
+            run_plugs()
             newsagent.tick()
             if groupbot:
                 groupbot.run_due_auto_jobs()
@@ -169,6 +215,7 @@ def status():
         "has_app_secret": bool(config.APP_SECRET),
         "has_verify_token": bool(config.VERIFY_TOKEN),
         "graph_version": config.GRAPH_API_VERSION,
+        "page_name": _page_name(),
         "stats": db.stats(),
     }
 
@@ -253,10 +300,30 @@ def simulate(body: SimulateIn):
 class PostIn(BaseModel):
     message: str
     link: str = ""
-    image_url: str = ""
+    image_url: str = ""                  # mỗi dòng 1 ảnh (link hoặc /media/... tải từ máy), tối đa 10
     template_key: str = ""
     scheduled_at: Optional[int] = None   # epoch giây; None = lưu nháp
     publish_now: bool = False
+    queue: bool = False                  # xếp vào khung giờ vàng trống gần nhất
+    first_comment: str = ""
+    repeat_days: int = 0
+    plug_likes: int = 0
+    plug_text: str = ""
+
+
+def _post_extras(body) -> dict:
+    out = {}
+    for k in ("first_comment", "plug_text"):
+        v = getattr(body, k, None)
+        if v is not None:
+            out[k] = v.strip()[:2000]
+    for k, hi in (("repeat_days", 365), ("plug_likes", 100000)):
+        v = getattr(body, k, None)
+        if v is not None:
+            out[k] = max(0, min(hi, int(v)))
+    if out.get("plug_likes") and not out.get("plug_text", "x"):
+        raise HTTPException(400, "Nhập nội dung bình luận tự động khi đạt lượt cảm xúc")
+    return out
 
 
 @admin.get("/api/posts")
@@ -268,8 +335,13 @@ def list_posts():
 def create_post(body: PostIn):
     if not body.message.strip():
         raise HTTPException(400, "Nội dung trống")
-    pid = db.create_post(body.message, body.link, body.image_url, body.template_key,
-                         None if body.publish_now else body.scheduled_at)
+    when = None if body.publish_now else body.scheduled_at
+    if body.queue and not body.publish_now:
+        when = db.next_free_slot()
+        if not when:
+            raise HTTPException(400, "Chưa đặt khung giờ vàng nào (Bài đăng → Khung giờ vàng)")
+    pid = db.create_post(body.message, body.link, body.image_url, body.template_key, when,
+                         **_post_extras(body))
     if body.publish_now:
         return publish(db.get_post(pid))
     return db.get_post(pid)
@@ -281,6 +353,10 @@ class PostUpdate(BaseModel):
     image_url: Optional[str] = None
     scheduled_at: Optional[int] = None
     unschedule: bool = False
+    first_comment: Optional[str] = None
+    repeat_days: Optional[int] = None
+    plug_likes: Optional[int] = None
+    plug_text: Optional[str] = None
 
 
 @admin.put("/api/posts/{post_id}")
@@ -292,6 +368,7 @@ def update_post(post_id: int, body: PostUpdate):
         raise HTTPException(400, "Bài đã đăng, không sửa được")
     fields = {k: v for k, v in body.model_dump().items()
               if v is not None and k in ("message", "link", "image_url", "scheduled_at")}
+    fields.update(_post_extras(body))
     if body.scheduled_at:
         fields["status"] = "scheduled"
         fields["error"] = ""
@@ -315,6 +392,103 @@ def publish_now(post_id: int):
 @admin.delete("/api/posts/{post_id}")
 def delete_post(post_id: int):
     db.delete_post(post_id)
+    return {"ok": True}
+
+
+# ----- khung giờ vàng, chữ ký, thư viện ảnh (ý tưởng từ Postiz)
+
+class SlotsIn(BaseModel):
+    slots: list
+
+
+@admin.get("/api/posting-slots")
+def get_slots():
+    return {"slots": db.posting_slots(), "next": db.next_free_slot()}
+
+
+@admin.put("/api/posting-slots")
+def save_slots(body: SlotsIn):
+    slots = set()
+    for raw in body.slots:
+        m = re.fullmatch(r"\s*(\d{1,2})[:hH.](\d{2})\s*", str(raw))
+        if not m or int(m[1]) > 23 or int(m[2]) > 59:
+            raise HTTPException(400, f"Giờ không hợp lệ: {raw} (viết dạng 07:30)")
+        slots.add(f"{int(m[1]):02d}:{m[2]}")
+    db.set_setting("posting_slots", sorted(slots))
+    return get_slots()
+
+
+class SignaturesIn(BaseModel):
+    items: list
+
+
+@admin.get("/api/signatures")
+def get_signatures():
+    return db.get_setting("signatures", []) or []
+
+
+@admin.put("/api/signatures")
+def save_signatures(body: SignaturesIn):
+    items, auto_seen = [], False
+    for it in body.items[:20]:
+        text = str((it or {}).get("text", "")).strip()[:1000]
+        if not text:
+            continue
+        auto = bool(it.get("auto")) and not auto_seen          # chỉ 1 chữ ký tự thêm
+        auto_seen = auto_seen or auto
+        items.append({"name": str(it.get("name", "")).strip()[:60] or text[:30], "text": text, "auto": auto})
+    db.set_setting("signatures", items)
+    return items
+
+
+MEDIA_TYPES = {"image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp"}
+MEDIA_MAX = 8 * 1024 * 1024
+
+
+class MediaIn(BaseModel):
+    data: str            # data URL: "data:image/jpeg;base64,...."
+
+
+@admin.post("/api/media")
+def upload_media(body: MediaIn):
+    import base64
+    import uuid
+    m = re.match(r"data:([\w/+.-]+);base64,(.*)$", body.data, re.S)
+    if not m or m[1] not in MEDIA_TYPES:
+        raise HTTPException(400, "Chỉ nhận ảnh JPG, PNG, GIF, WEBP")
+    try:
+        raw = base64.b64decode(m[2], validate=False)
+    except ValueError:
+        raise HTTPException(400, "Ảnh hỏng")
+    if len(raw) > MEDIA_MAX:
+        raise HTTPException(400, "Ảnh lớn hơn 8 MB")
+    facebook.MEDIA_DIR.mkdir(parents=True, exist_ok=True)
+    name = f"{uuid.uuid4().hex[:16]}.{MEDIA_TYPES[m[1]]}"
+    (facebook.MEDIA_DIR / name).write_bytes(raw)
+    return {"url": f"/media/{name}"}
+
+
+@admin.get("/api/media")
+def list_media():
+    d = facebook.MEDIA_DIR
+    files = sorted(d.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True) if d.is_dir() else []
+    return [{"url": f"/media/{p.name}", "size": p.stat().st_size} for p in files
+            if p.suffix.lstrip(".") in MEDIA_TYPES.values()][:200]
+
+
+@admin.get("/media/{name}")
+def get_media(name: str):
+    path = facebook.local_media(f"/media/{name}")
+    if not path or not re.fullmatch(r"[\w-]+\.\w+", name):
+        raise HTTPException(404, "Không có ảnh này")
+    return FileResponse(path)
+
+
+@admin.delete("/api/media/{name}")
+def delete_media(name: str):
+    path = facebook.local_media(f"/media/{name}")
+    if path and re.fullmatch(r"[\w-]+\.\w+", name):
+        path.unlink(missing_ok=True)
     return {"ok": True}
 
 

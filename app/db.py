@@ -152,9 +152,22 @@ def init():
             c.execute("UPDATE comments SET seen=1")
         if "reply_by" not in ccols:
             c.execute("ALTER TABLE comments ADD COLUMN reply_by TEXT NOT NULL DEFAULT ''")
+        pcols = {r["name"] for r in c.execute("PRAGMA table_info(posts)")}
+        for col, ddl in POST_EXTRA_COLS.items():           # tính năng thêm theo kiểu Postiz
+            if col not in pcols:
+                c.execute(f"ALTER TABLE posts ADD COLUMN {col} {ddl}")
         # phần mềm bị tắt giữa lúc dựng clip → đừng để clip kẹt mãi ở "đang dựng"
         c.execute("UPDATE videos SET status='failed', progress='', "
                   "error='Phần mềm bị tắt khi đang dựng — bấm Dựng clip lại' WHERE status='rendering'")
+
+
+POST_EXTRA_COLS = {
+    "first_comment": "TEXT NOT NULL DEFAULT ''",   # Fanpage tự bình luận ngay dưới bài vừa đăng
+    "repeat_days":   "INTEGER NOT NULL DEFAULT 0",  # đăng lại sau N ngày (0 = không lặp)
+    "plug_likes":    "INTEGER NOT NULL DEFAULT 0",  # đạt N lượt cảm xúc thì tự bình luận plug_text
+    "plug_text":     "TEXT NOT NULL DEFAULT ''",
+    "plug_done":     "INTEGER NOT NULL DEFAULT 0",
+}
 
 
 def now() -> int:
@@ -264,13 +277,14 @@ def _lead_dict(row):
 
 # ---------- posts ----------
 
-def create_post(message, link="", image_url="", template_key="", scheduled_at=None):
+def create_post(message, link="", image_url="", template_key="", scheduled_at=None, **extra):
     status = "scheduled" if scheduled_at else "draft"
+    extra = {k: v for k, v in extra.items() if k in POST_EXTRA_COLS and v is not None}
+    cols = ["message", "link", "image_url", "template_key", "status", "scheduled_at", "created_at", *extra]
     with conn() as c:
         cur = c.execute(
-            "INSERT INTO posts(message, link, image_url, template_key, status, scheduled_at, created_at) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?)",
-            (message, link, image_url, template_key, status, scheduled_at, now()),
+            f"INSERT INTO posts({', '.join(cols)}) VALUES({', '.join('?' * len(cols))})",
+            (message, link, image_url, template_key, status, scheduled_at, now(), *extra.values()),
         )
         return cur.lastrowid
 
@@ -289,7 +303,7 @@ def list_posts():
 
 def update_post(post_id: int, **fields):
     allowed = {"message", "link", "image_url", "status", "scheduled_at",
-               "fb_post_id", "error", "posted_at"}
+               "fb_post_id", "error", "posted_at", *POST_EXTRA_COLS}
     fields = {k: v for k, v in fields.items() if k in allowed}
     if not fields:
         return
@@ -635,3 +649,41 @@ def video_list(limit=50):
 def video_delete(video_id):
     with conn() as c:
         c.execute("DELETE FROM videos WHERE id=?", (video_id,))
+
+
+# ---------- khung giờ vàng (giống "posting times" của Postiz) ----------
+
+DEFAULT_SLOTS = ["07:30", "11:45", "20:00"]
+
+
+def posting_slots() -> list:
+    return get_setting("posting_slots", DEFAULT_SLOTS) or []
+
+
+def next_free_slot(after=None, slots=None, gap=600):
+    """Khung giờ vàng gần nhất còn trống (không có bài hẹn trong ±10 phút). Giờ theo máy tính."""
+    from datetime import datetime, timedelta
+    slots = slots if slots is not None else posting_slots()
+    if not slots:
+        return None
+    after = (after or now()) + 60
+    with conn() as c:
+        taken = [r[0] for r in c.execute(
+            "SELECT scheduled_at FROM posts WHERE status IN ('scheduled', 'posting') AND scheduled_at IS NOT NULL")]
+    day = datetime.fromtimestamp(after).replace(hour=0, minute=0, second=0, microsecond=0)
+    for d in range(60):
+        base = day + timedelta(days=d)
+        for hhmm in sorted(slots):
+            h, m = map(int, hhmm.split(":"))
+            ts = int((base + timedelta(hours=h, minutes=m)).timestamp())
+            if ts >= after and all(abs(ts - t) >= gap for t in taken):
+                return ts
+    return None
+
+
+def posts_to_plug(max_age=7 * 86400) -> list:
+    with conn() as c:
+        rows = c.execute(
+            "SELECT * FROM posts WHERE status='posted' AND plug_likes > 0 AND plug_done=0 "
+            "AND fb_post_id != '' AND posted_at >= ?", (now() - max_age,)).fetchall()
+    return [dict(r) for r in rows]

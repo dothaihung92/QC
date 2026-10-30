@@ -39,7 +39,7 @@ def test_fetch_article_extracts_text_and_image(monkeypatch):
 
 
 def test_run_publish_flow_and_blog_escapes_html(monkeypatch, client, fb_calls):
-    newsagent.save_config({"gemini_key": "k", "public_url": "https://site.vn"})
+    newsagent.save_config({"gemini_key": "k", "public_url": "https://site.vn", "on_slot": False})
     monkeypatch.setattr(newsagent, "search", lambda *a, **k: [
         {"title": "Thuế mới", "url": "https://bao.vn/thue-moi", "source": "Báo A", "published": 0}])
     monkeypatch.setattr(newsagent, "fetch_article", lambda u: {
@@ -112,3 +112,16 @@ def test_search_returns_newest_first_and_drops_old(monkeypatch):
     monkeypatch.setattr(newsagent, "parse_feed", lambda t: list(items))
     out = newsagent.search(["k"], [], 2)
     assert [i["url"] for i in out] == ["u3", "u2"]
+
+
+def test_publish_on_slot_queues_facebook_post_instead_of_posting(monkeypatch):
+    newsagent.save_config({"gemini_key": "k", "public_url": "https://site.vn"})      # on_slot mặc định bật
+    db.set_setting("posting_slots", ["07:30", "20:00"])
+    iid = db.news_add("https://bao.vn/x", "Báo", "Gốc", status="pending", title="Tin thuế",
+                      body="Đoạn", fb_text="Bài FB", image_url="https://bao.vn/a.jpg")
+    monkeypatch.setattr(facebook, "publish_post", lambda *a: pytest.fail("không được đăng ngay"))
+    item = newsagent.publish_item(iid)
+    assert item["status"] == "published" and item["fb_post_id"].startswith("lich:")
+    post = db.get_post(int(item["fb_post_id"][5:]))
+    assert post["status"] == "scheduled" and post["message"] == "Bài FB"
+    assert post["link"].startswith("https://site.vn/tin-tuc/") and post["scheduled_at"] > db.now()
