@@ -86,6 +86,24 @@ CREATE TABLE IF NOT EXISTS group_jobs (
     created_at   INTEGER NOT NULL,
     auto         INTEGER NOT NULL DEFAULT 0        -- 1 = đến giờ tự đăng bằng trình duyệt
 );
+CREATE TABLE IF NOT EXISTS news_items (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    url          TEXT NOT NULL UNIQUE,
+    source       TEXT DEFAULT '',
+    orig_title   TEXT DEFAULT '',
+    status       TEXT NOT NULL DEFAULT 'new',  -- pending|published|rejected|skipped|failed
+    title        TEXT DEFAULT '',
+    summary      TEXT DEFAULT '',
+    body         TEXT DEFAULT '',
+    fb_text      TEXT DEFAULT '',
+    image_url    TEXT DEFAULT '',
+    slug         TEXT DEFAULT '',
+    web_url      TEXT DEFAULT '',
+    fb_post_id   TEXT DEFAULT '',
+    error        TEXT DEFAULT '',
+    created_at   INTEGER NOT NULL,
+    published_at INTEGER
+);
 CREATE TABLE IF NOT EXISTS activity (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at INTEGER NOT NULL,
@@ -505,3 +523,55 @@ def post_message(fb_post_id) -> str:
     with conn() as c:
         row = c.execute("SELECT message FROM posts WHERE fb_post_id=?", (fb_post_id,)).fetchone()
     return row["message"] if row else ""
+
+
+# ---------- tin tức do AI agent tìm & viết lại ----------
+
+def news_seen(url) -> bool:
+    with conn() as c:
+        return c.execute("SELECT 1 FROM news_items WHERE url=?", (url,)).fetchone() is not None
+
+
+def news_add(url, source="", orig_title="", status="new", **fields) -> int:
+    cols = ["url", "source", "orig_title", "status", "created_at"] + list(fields)
+    vals = [url, source, orig_title, status, now()] + list(fields.values())
+    with conn() as c:
+        cur = c.execute(f"INSERT OR IGNORE INTO news_items({','.join(cols)}) "
+                        f"VALUES({','.join('?' * len(cols))})", vals)
+        return cur.lastrowid if cur.rowcount else 0
+
+
+def news_update(item_id, **fields):
+    if not fields:
+        return
+    with conn() as c:
+        c.execute(f"UPDATE news_items SET {', '.join(k + '=?' for k in fields)} WHERE id=?",
+                  list(fields.values()) + [item_id])
+
+
+def news_get(item_id):
+    with conn() as c:
+        row = c.execute("SELECT * FROM news_items WHERE id=?", (item_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def news_get_by_slug(slug):
+    with conn() as c:
+        row = c.execute("SELECT * FROM news_items WHERE slug=? AND status='published'", (slug,)).fetchone()
+    return dict(row) if row else None
+
+
+def news_list(status=None, limit=100):
+    q, args = "SELECT * FROM news_items", []
+    if status:
+        q += " WHERE status=?"
+        args.append(status)
+    q += " ORDER BY created_at DESC, id DESC LIMIT ?"
+    args.append(limit)
+    with conn() as c:
+        return [dict(r) for r in c.execute(q, args).fetchall()]
+
+
+def news_delete(item_id):
+    with conn() as c:
+        c.execute("DELETE FROM news_items WHERE id=?", (item_id,))

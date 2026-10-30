@@ -66,6 +66,7 @@
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px;
           padding: 16px 18px; margin-bottom: 16px; }
   .card h2 { font-size: 15px; margin: 0 0 12px; }
+  .row2 { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
   .grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); }
   .stat { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }
   .stat b { display: block; font-size: 26px; font-variant-numeric: tabular-nums; }
@@ -121,6 +122,7 @@
     <button data-s="posts">Bài đăng</button>
     <button data-s="groups" data-label="Đăng nhóm">Đăng nhóm</button>
     <button data-s="comments" data-label="Bình luận">Bình luận</button>
+    <button data-s="news">🤖 Tin tức AI</button>
     <button data-s="stats">Thống kê</button>
     <button data-s="script">Kịch bản trả lời</button>
     <button data-s="sim">Thử kịch bản</button>
@@ -492,6 +494,56 @@
   </div>
 </section>
 
+<!-- ============================ TIN TỨC AI -->
+<section id="news">
+  <div class="card">
+    <h2>🤖 Agent tin tức kế toán - thuế</h2>
+    <p class="muted small">Agent tự dò báo/website theo từ khóa, AI viết lại bằng lời mới (giữ đúng số liệu, ghi nguồn),
+      rồi đưa vào hàng chờ để bạn duyệt. Bấm <b>Đăng</b> là lên web + Fanpage.</p>
+    <div class="row2">
+      <div>
+        <label>Từ khóa tìm bài (mỗi dòng một từ khóa)</label>
+        <textarea id="nwKeywords" rows="5"></textarea>
+        <label>RSS thêm (báo / website tin cậy, mỗi dòng một link — tùy chọn)</label>
+        <textarea id="nwFeeds" rows="3" placeholder="https://.../rss"></textarea>
+        <label>Gemini API key <a class="small" href="https://aistudio.google.com/apikey" target="_blank">(lấy miễn phí)</a>
+          <span id="nwKeyState" class="small muted"></span></label>
+        <input id="nwKey" type="password" placeholder="để trống = giữ key cũ">
+        <label>Câu giới thiệu dịch vụ chèn cuối bài (tùy chọn)</label>
+        <textarea id="nwBrand" rows="2" placeholder="Cần hỗ trợ kế toán - thuế? Liên hệ ... / dùng phần mềm ..."></textarea>
+      </div>
+      <div>
+        <label>Địa chỉ website của bạn (để link từ bài Facebook trỏ về)</label>
+        <input id="nwPublic" placeholder="https://dailythuehungphuc.com">
+        <p class="muted small" style="margin:4px 0 10px">Phần mềm có sẵn trang <code>/tin-tuc</code>. Nếu website là WordPress, điền thêm 3 ô dưới để đăng thẳng lên đó
+          (WordPress → Người dùng → Hồ sơ → Mật khẩu ứng dụng).</p>
+        <label>WordPress: địa chỉ</label><input id="nwWpUrl" placeholder="https://dailythuehungphuc.com">
+        <label>WordPress: tên đăng nhập</label><input id="nwWpUser">
+        <label>WordPress: mật khẩu ứng dụng <span id="nwWpState" class="small muted"></span></label>
+        <input id="nwWpPass" type="password" placeholder="để trống = giữ cũ">
+        <div class="row2">
+          <div><label>Chạy mỗi (giờ)</label><input id="nwInterval" type="number" min="1"></div>
+          <div><label>Tối đa bài / lượt</label><input id="nwMax" type="number" min="1"></div>
+        </div>
+        <label style="font-weight:400"><input type="checkbox" id="nwWeb" style="width:auto"> Đăng lên web</label>
+        <label style="font-weight:400"><input type="checkbox" id="nwFb" style="width:auto"> Đăng lên Fanpage</label>
+        <label style="font-weight:400"><input type="checkbox" id="nwImg" style="width:auto"> Dùng ảnh của bài nguồn (chú ý bản quyền ảnh)</label>
+        <label style="font-weight:400"><input type="checkbox" id="nwEnabled" style="width:auto"> Bật chạy tự động theo lịch</label>
+        <label style="font-weight:400"><input type="checkbox" id="nwAuto" style="width:auto"> Tự đăng luôn, không cần duyệt (không khuyến nghị)</label>
+      </div>
+    </div>
+    <div class="btns">
+      <button class="btn pri" onclick="newsSave()">💾 Lưu cài đặt</button>
+      <button class="btn" id="nwRun" onclick="newsRun()">🔍 Dò &amp; viết bài ngay</button>
+      <span class="muted small" id="nwLast"></span>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Bài chờ duyệt &amp; lịch sử</h2>
+    <div id="nwList"></div>
+  </div>
+</section>
+
 <!-- ============================ VIẾT BÀI SEO (nạp khi mở tab lần đầu) -->
 <section id="seo">
   <iframe id="seoFrame" title="Viết bài SEO" allow="clipboard-read; clipboard-write"></iframe>
@@ -526,7 +578,7 @@ function openTab(name) {
   document.querySelector('main').classList.toggle('full', name === 'seo');
   if (name === 'seo' && !$('seoFrame').src) $('seoFrame').src = '/seo-writer';
   ({ overview: loadStatus, posts: loadPosts, script: loadScript, leads: loadLeads, activity: loadActivity,
-     groups: loadGroups, comments: loadComments, stats: loadStats })[name]?.();
+     groups: loadGroups, comments: loadComments, stats: loadStats, news: loadNews })[name]?.();
   // Ghi tab vào địa chỉ (vd 127.0.0.1:8787/#seo) để mở lại / lưu dấu trang đúng tab.
   if (location.hash.slice(1) !== name) history.replaceState(null, '', '#' + name);
 }
@@ -536,6 +588,71 @@ window.addEventListener('hashchange', () => openTab(location.hash.slice(1)));
 window.addEventListener('message', e => {
   if (e.origin === location.origin && e.data?.qc === 'post-saved') { loadPosts(); }
 });
+
+// ---------------- Tin tức AI
+const NEWS_ST = { pending: ['Chờ duyệt','p-warn'], published: ['Đã đăng','p-ok'], rejected: ['Đã bỏ','p-info'],
+                  skipped: ['Bỏ qua','p-info'], failed: ['Lỗi','p-err'], new: ['Đang xử lý','p-info'] };
+let NEWS = [];
+const nl = (id) => $(id).value.split('\n').map(x => x.trim()).filter(Boolean);
+async function loadNews() {
+  const c = await api('/api/news/config');
+  $('nwKeywords').value = c.keywords.join('\n'); $('nwFeeds').value = c.feeds.join('\n');
+  $('nwBrand').value = c.brand_note; $('nwPublic').value = c.public_url;
+  $('nwWpUrl').value = c.wp_url; $('nwWpUser').value = c.wp_user;
+  $('nwInterval').value = c.interval_hours; $('nwMax').value = c.max_per_run;
+  $('nwWeb').checked = c.post_to_web; $('nwFb').checked = c.post_to_fb; $('nwImg').checked = c.use_images;
+  $('nwEnabled').checked = c.enabled; $('nwAuto').checked = c.auto_publish;
+  $('nwKeyState').textContent = c.has_gemini_key ? '— đã lưu' : '— chưa có';
+  $('nwWpState').textContent = c.has_wp_password ? '— đã lưu' : '';
+  $('nwLast').textContent = c.last_run ? 'Lần chạy gần nhất: ' + fmt(c.last_run) : '';
+  NEWS = await api('/api/news');
+  renderNews();
+}
+function renderNews() {
+  $('nwList').innerHTML = NEWS.length ? NEWS.map(n => {
+    const [lbl, cls] = NEWS_ST[n.status] || [n.status, 'p-info'];
+    const open = n.status === 'pending' || n.status === 'failed';
+    return `<div class="card" style="margin:0 0 10px">
+      <span class="pill ${cls}">${lbl}</span> <b>${esc(n.title || n.orig_title)}</b>
+      <div class="muted small">Nguồn: <a href="${esc(n.url)}" target="_blank">${esc(n.source || n.url)}</a> · ${fmt(n.created_at)}
+        ${n.web_url ? ` · <a href="${esc(n.web_url)}" target="_blank">xem trên web</a>` : ''}</div>
+      ${n.error ? `<div class="small" style="color:#b42318">${esc(n.error)}</div>` : ''}
+      ${open ? `<label>Tiêu đề</label><input id="nt${n.id}" value="${esc(n.title)}">
+        <label>Nội dung bài web</label><textarea id="nb${n.id}" rows="8">${esc(n.body)}</textarea>
+        <label>Bài Facebook</label><textarea id="nf${n.id}" rows="5">${esc(n.fb_text)}</textarea>
+        ${n.image_url ? `<img src="${esc(n.image_url)}" style="max-height:120px;border-radius:6px" referrerpolicy="no-referrer">` : ''}
+        <div class="btns"><button class="btn pri" onclick="newsPublish(${n.id})">🚀 Đăng web + Fanpage</button>
+        <button class="btn" onclick="newsReject(${n.id})">Bỏ bài này</button></div>`
+        : `<div class="btns"><button class="btn" onclick="newsDel(${n.id})">Xóa</button></div>`}
+    </div>`;
+  }).join('') : '<p class="muted">Chưa có bài nào. Điền Gemini key, lưu rồi bấm "Dò &amp; viết bài ngay".</p>';
+}
+async function newsSave() {
+  await api('/api/news/config', { method: 'PUT', body: {
+    keywords: nl('nwKeywords'), feeds: nl('nwFeeds'), gemini_key: $('nwKey').value, brand_note: $('nwBrand').value,
+    public_url: $('nwPublic').value, wp_url: $('nwWpUrl').value, wp_user: $('nwWpUser').value,
+    wp_app_password: $('nwWpPass').value, interval_hours: $('nwInterval').value, max_per_run: $('nwMax').value,
+    post_to_web: $('nwWeb').checked, post_to_fb: $('nwFb').checked, use_images: $('nwImg').checked,
+    enabled: $('nwEnabled').checked, auto_publish: $('nwAuto').checked } });
+  $('nwKey').value = ''; $('nwWpPass').value = '';
+  toast('✅ Đã lưu cài đặt'); loadNews();
+}
+async function newsRun() {
+  await api('/api/news/run', { method: 'POST' });
+  toast('🔍 Đang dò bài và viết lại, khoảng 1-3 phút...');
+  $('nwRun').disabled = true;
+  const t = setInterval(async () => {
+    const r = await api('/api/news/running').catch(() => ({ running: false }));
+    if (!r.running) { clearInterval(t); $('nwRun').disabled = false; toast('✅ Xong, xem danh sách bên dưới'); loadNews(); }
+  }, 4000);
+}
+async function newsPublish(id) {
+  await api('/api/news/' + id, { method: 'PUT', body: { title: $('nt' + id).value, body: $('nb' + id).value, fb_text: $('nf' + id).value } });
+  const r = await api('/api/news/' + id + '/publish', { method: 'POST' });
+  toast(r.status === 'published' ? '🚀 Đã đăng' : '⚠ ' + (r.error || 'Đăng thất bại')); loadNews();
+}
+async function newsReject(id) { await api('/api/news/' + id + '/reject', { method: 'POST' }); loadNews(); }
+async function newsDel(id) { await api('/api/news/' + id, { method: 'DELETE' }); loadNews(); }
 
 // ---------------- Tổng quan
 async function loadStatus() {

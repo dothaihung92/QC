@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse,
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
-from . import autoreply, bot, config, content, db, facebook, replies
+from . import autoreply, bot, config, content, db, facebook, newsagent, replies
 from .facebook import FacebookError
 
 try:
@@ -48,6 +48,7 @@ def scheduler_loop(interval=20):
         try:
             for post in db.claim_due_posts():
                 publish(post)
+            newsagent.tick()
             if groupbot:
                 groupbot.run_due_auto_jobs()
         except Exception as e:
@@ -646,6 +647,126 @@ def sync_stats(limit: int = 20):
     except FacebookError as e:
         raise _fb_error(e, "stats")
     return _stats_payload()
+
+
+# ----- AI agent tin tức -------------------------------------------------------
+
+_news_lock = threading.Lock()
+
+
+@admin.get("/api/news/config")
+def news_config():
+    return newsagent.public_config()
+
+
+@admin.put("/api/news/config")
+def news_save_config(body: dict):
+    return newsagent.save_config(body)
+
+
+@admin.get("/api/news")
+def news_list(status: str = ""):
+    return db.news_list(status or None)
+
+
+@admin.post("/api/news/run")
+def news_run(background: BackgroundTasks):
+    cfg = newsagent.get_config()
+    if not cfg["gemini_key"]:
+        raise HTTPException(400, "Chưa nhập Gemini API key")
+    if _news_lock.locked():
+        raise HTTPException(409, "Agent đang chạy, đợi một lát")
+
+    def job():
+        with _news_lock:
+            try:
+                newsagent.run_once(cfg)
+            except Exception as e:
+                db.log("error", f"news agent: {e}")
+    background.add_task(job)
+    return {"started": True}
+
+
+@admin.get("/api/news/running")
+def news_running():
+    return {"running": _news_lock.locked()}
+
+
+class NewsEdit(BaseModel):
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    body: Optional[str] = None
+    fb_text: Optional[str] = None
+
+
+def _news_or_404(item_id: int) -> dict:
+    item = db.news_get(item_id)
+    if not item:
+        raise HTTPException(404, "Không có bài này")
+    return item
+
+
+@admin.put("/api/news/{item_id}")
+def news_edit(item_id: int, body: NewsEdit):
+    _news_or_404(item_id)
+    db.news_update(item_id, **body.model_dump(exclude_none=True))
+    return db.news_get(item_id)
+
+
+@admin.post("/api/news/{item_id}/publish")
+def news_publish(item_id: int):
+    _news_or_404(item_id)
+    try:
+        return newsagent.publish_item(item_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@admin.post("/api/news/{item_id}/reject")
+def news_reject(item_id: int):
+    _news_or_404(item_id)
+    db.news_update(item_id, status="rejected")
+    return db.news_get(item_id)
+
+
+@admin.delete("/api/news/{item_id}")
+def news_delete(item_id: int):
+    db.news_delete(item_id)
+    return {"ok": True}
+
+
+# Trang tin tức công khai (không cần đăng nhập) — để link từ bài Facebook trỏ về.
+_BLOG_CSS = ("body{font:17px/1.7 system-ui,sans-serif;max-width:760px;margin:0 auto;padding:20px;color:#222}"
+             "a{color:#1a5fb4}img{max-width:100%;height:auto}h1{line-height:1.25}.m{color:#777;font-size:14px}")
+
+
+def _blog_page(title: str, inner: str) -> HTMLResponse:
+    import html as _h
+    return HTMLResponse(f'<!doctype html><html lang="vi"><head><meta charset="utf-8">'
+                        f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+                        f'<title>{_h.escape(title)}</title><style>{_BLOG_CSS}</style></head>'
+                        f'<body>{inner}</body></html>')
+
+
+@app.get("/tin-tuc", response_class=HTMLResponse)
+def blog_index():
+    import html as _h
+    rows = "".join(
+        f'<li><a href="/tin-tuc/{_h.escape(n["slug"])}">{_h.escape(n["title"])}</a>'
+        f'<div class="m">{_h.escape(n["summary"])}</div></li>'
+        for n in db.news_list("published", 100) if n["slug"])
+    return _blog_page("Tin tức kế toán - thuế", f"<h1>Tin tức kế toán - thuế</h1><ul>{rows}</ul>")
+
+
+@app.get("/tin-tuc/{slug}", response_class=HTMLResponse)
+def blog_article(slug: str):
+    import html as _h
+    n = db.news_get_by_slug(slug)
+    if not n:
+        raise HTTPException(404, "Không tìm thấy bài viết")
+    return _blog_page(n["title"], f'<p><a href="/tin-tuc">← Tin tức</a></p><h1>{_h.escape(n["title"])}</h1>'
+                                  f'<div class="m">{time.strftime("%d/%m/%Y", time.localtime(n["published_at"] or n["created_at"]))}</div>'
+                                  f'{newsagent.article_html(n)}')
 
 
 # ----- lịch đăng nhóm (nhắc đăng tay) -------------------------------------------
