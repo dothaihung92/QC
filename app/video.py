@@ -21,6 +21,7 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata
 from pathlib import Path
 
 import requests
@@ -33,8 +34,9 @@ FPS = 30
 OVERSIZE = 1.10                      # ảnh nền lớn hơn khung 10% để trượt chậm
 SIZES = {"doc": (1080, 1920), "ngang": (1920, 1080)}
 VOICES = {"vi-VN-HoaiMyNeural": "Hoài My (nữ)", "vi-VN-NamMinhNeural": "Nam Minh (nam)"}
-LENGTHS = {30: 4, 45: 6, 60: 7}      # giây → số cảnh
-TOOLS = {"PIL": "pillow", "edge_tts": "edge-tts", "imageio_ffmpeg": "imageio-ffmpeg"}
+LENGTHS = {30: 4, 45: 6, 60: 7, 120: 12, 180: 16}      # giây → số cảnh
+TOOLS = {"PIL": "pillow", "edge_tts": "edge-tts", "imageio_ffmpeg": "imageio-ffmpeg",
+         "gtts": "gTTS"}                                 # gTTS: giọng dự phòng khi Edge-TTS từ chối
 
 DEFAULTS = {
     "voice": "vi-VN-HoaiMyNeural",
@@ -134,17 +136,21 @@ def start_install():
 
 
 def _install():
-    pkgs = missing_tools()
-    if not pkgs:
-        _log("Đã có đủ công cụ.")
-        return
-    _log(f"Đang cài {', '.join(pkgs)} (1-3 phút)...")
-    r = subprocess.run([sys.executable, "-m", "pip", "install", *pkgs],
+    # luôn cài/cập nhật bản mới nhất: Edge-TTS hay phải cập nhật khi Microsoft đổi cách xác thực
+    pkgs = list(TOOLS.values())
+    _log(f"Đang cài / cập nhật {', '.join(pkgs)} (1-3 phút)...")
+    r = subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", *pkgs],
                        capture_output=True, text=True, timeout=900)
     if r.returncode != 0:
         raise VideoError("Cài thất bại: " + (r.stderr or r.stdout)[-400:])
     importlib.invalidate_caches()
-    _log("✅ Đã cài xong công cụ làm video.")
+    for mod in ("edge_tts", "gtts"):                     # dùng bản vừa cập nhật mà không cần khởi động lại
+        if mod in sys.modules:
+            try:
+                importlib.reload(sys.modules[mod])
+            except Exception:  # noqa: BLE001
+                pass
+    _log("✅ Đã cài / cập nhật xong công cụ làm video.")
 
 
 # ---------------------------------------------------------------- 1. kịch bản
@@ -156,7 +162,7 @@ Quy tắc:
 - Cảnh 1: câu mở đầu gây chú ý trong 3 giây đầu (nêu vấn đề / lợi ích cho người xem).
 - Các cảnh giữa: mỗi cảnh MỘT ý quan trọng. Giữ ĐÚNG số liệu, mức thuế, ngày hiệu lực, số hiệu văn bản. Không bịa.
 - Cảnh cuối: kêu gọi theo dõi Fanpage hoặc nhắn tin để được tư vấn miễn phí.
-- narration: lời đọc văn nói tự nhiên, 1-2 câu, tối đa 35 từ.
+- narration: lời đọc văn nói tự nhiên, {sentences}, tối đa {words} từ. Không dùng emoji, ký hiệu markdown.
 - headline: chữ lớn trên màn hình, tối đa 8 từ, không lặp nguyên văn lời đọc.
 - keyword: 1-3 từ TIẾNG ANH để tìm ảnh minh họa (vd "tax documents", "calculator", "business meeting").
 - description: lời giới thiệu đăng kèm video, 2-3 câu, kết bằng 3 hashtag.
@@ -179,7 +185,7 @@ def clean_scenes(scenes) -> list:
         out.append({"headline": str(s.get("headline", "")).strip()[:120],
                     "narration": narration[:600],
                     "keyword": str(s.get("keyword", "")).strip()[:60]})
-    return out[:12]
+    return out[:24]
 
 
 def make_script(text: str, seconds: int = 45) -> dict:
@@ -191,7 +197,9 @@ def make_script(text: str, seconds: int = 45) -> dict:
     brand = f'- Cảnh cuối nhắc tên: "{cfg["brand"]}"\n' if cfg["brand"] else ""
     try:
         out = newsagent.gemini_json(SCRIPT_PROMPT.format(
-            seconds=seconds, n=LENGTHS[seconds], brand=brand, text=text[:6000]), newsagent.get_config())
+            seconds=seconds, n=LENGTHS[seconds], brand=brand, text=text[:9000],
+            sentences="2-3 câu" if seconds >= 120 else "1-2 câu", words=50 if seconds >= 120 else 35),
+            newsagent.get_config())
     except RuntimeError as e:
         raise VideoError(str(e)) from e
     scenes = clean_scenes(out.get("scenes"))
@@ -235,17 +243,51 @@ def pexels_photo(keyword: str, key: str, vertical: bool, dest: Path) -> bool:
 
 # ---------------------------------------------------------------- 3. giọng đọc
 
-def tts(text: str, voice: str, rate: int, dest: Path):
+def clean_tts_text(text: str) -> str:
+    """Bỏ emoji, ký hiệu markdown... — Edge-TTS hay trả "No audio was received" khi gặp chúng."""
+    text = re.sub(r"[#*_`>|~^=\[\]{}<]+", " ", text)
+    text = "".join(ch for ch in text if unicodedata.category(ch) not in ("So", "Sk", "Cs", "Co", "Cn", "Cf"))
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _edge(text: str, voice: str, rate: str, dest: Path):
     import edge_tts
 
     async def go():
-        await edge_tts.Communicate(text, voice, rate=f"{int(rate):+d}%").save(str(dest))
-    try:
-        asyncio.run(go())
-    except Exception as e:  # noqa: BLE001
-        raise VideoError(f"Không tạo được giọng đọc (cần Internet): {e}") from e
-    if not dest.exists() or dest.stat().st_size == 0:
-        raise VideoError("Không tạo được giọng đọc")
+        await edge_tts.Communicate(text, voice, rate=rate).save(str(dest))
+    asyncio.run(go())
+
+
+def _gtts(text: str, dest: Path):
+    from gtts import gTTS
+    gTTS(text=text, lang="vi").save(str(dest))
+
+
+def tts(text: str, voice: str, rate: int, dest: Path) -> str:
+    """Tạo giọng đọc, thử lần lượt: Edge-TTS (giọng đã chọn) → Edge-TTS tốc độ chuẩn → giọng Edge còn lại
+    → Google (gTTS). Trả về tên giọng đã dùng."""
+    text = clean_tts_text(text)
+    if not text:
+        raise VideoError("Lời đọc trống sau khi bỏ ký tự đặc biệt")
+    other = next(v for v in VOICES if v != voice) if voice in VOICES else "vi-VN-HoaiMyNeural"
+    attempts = [(VOICES.get(voice, voice), lambda: _edge(text, voice, f"{int(rate):+d}%", dest)),
+                (VOICES.get(voice, voice), lambda: _edge(text, voice, "+0%", dest)),
+                (VOICES.get(other, other), lambda: _edge(text, other, "+0%", dest)),
+                ("Google", lambda: _gtts(text, dest))]
+    errors = []
+    for i, (name, fn) in enumerate(attempts):
+        if i:
+            time.sleep(1.5)
+        dest.unlink(missing_ok=True)
+        try:
+            fn()
+            if dest.exists() and dest.stat().st_size > 0:
+                return name
+            errors.append(f"{name}: tệp rỗng")
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"{name}: {str(e)[:120]}")
+    raise VideoError("Không tạo được giọng đọc (cần Internet). Bấm 'Cài / cập nhật công cụ' rồi thử lại. "
+                     "Chi tiết: " + " | ".join(errors))
 
 
 # ---------------------------------------------------------------- 4. vẽ khung hình
@@ -466,7 +508,9 @@ def render(video_id: int):
     durations = []
     for i, sc in enumerate(scenes):
         step(f"Cảnh {i + 1}/{total}: giọng đọc")
-        tts(sc["narration"], cfg["voice"], cfg["rate"], work / f"voice{i}.mp3")
+        used = tts(sc["narration"], cfg["voice"], cfg["rate"], work / f"voice{i}.mp3")
+        if used != VOICES.get(cfg["voice"]):
+            _log(f"Cảnh {i + 1}: giọng {VOICES.get(cfg['voice'])} lỗi, đã dùng giọng {used}")
         dur = media_duration(work / f"voice{i}.mp3") + 0.6
         step(f"Cảnh {i + 1}/{total}: hình ảnh")
         img = None

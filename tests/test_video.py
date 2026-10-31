@@ -76,3 +76,29 @@ def test_render_refused_without_tools(client, monkeypatch):
     r = client.post(f"/api/videos/{vid}/render")
     assert r.status_code == 409 and "Cài công cụ" in r.json()["detail"]
     assert db.video_get(vid)["status"] == "draft"
+
+
+def test_tts_cleans_text_and_falls_back_to_google(monkeypatch, tmp_path):
+    assert video.clean_tts_text("## Giảm 30% thuế 🎉 **ngay**!") == "Giảm 30% thuế ngay !"
+    tried = []
+
+    def edge_fail(text, voice, rate, dest):
+        tried.append((voice, rate))
+        raise RuntimeError("No audio was received")
+    monkeypatch.setattr(video, "_edge", edge_fail)
+    monkeypatch.setattr(video, "_gtts", lambda text, dest: dest.write_bytes(b"mp3"))
+    monkeypatch.setattr(video.time, "sleep", lambda s: None)
+    assert video.tts("Xin chào 👋", "vi-VN-HoaiMyNeural", 5, tmp_path / "a.mp3") == "Google"
+    assert tried == [("vi-VN-HoaiMyNeural", "+5%"), ("vi-VN-HoaiMyNeural", "+0%"), ("vi-VN-NamMinhNeural", "+0%")]
+
+    monkeypatch.setattr(video, "_gtts", lambda text, dest: (_ for _ in ()).throw(RuntimeError("offline")))
+    with pytest.raises(video.VideoError, match="Google: offline"):
+        video.tts("Xin chào", "vi-VN-HoaiMyNeural", 0, tmp_path / "b.mp3")
+
+
+def test_long_clip_script_keeps_many_scenes(client, monkeypatch):
+    prompts = []
+    scenes = [{"headline": f"Ý {i}", "narration": f"Lời đọc {i}.", "keyword": "tax"} for i in range(16)]
+    monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: prompts.append(p) or {"scenes": scenes})
+    v = client.post("/api/videos", json={"text": "Nội dung bài viết về thuế. " * 10, "seconds": 180}).json()
+    assert len(v["scenes"]) == 16 and "16 cảnh" in prompts[0] and "2-3 câu" in prompts[0]

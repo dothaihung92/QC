@@ -637,7 +637,8 @@
       <input id="vdImg" placeholder="https://...jpg">
       <label>Độ dài</label>
       <select id="vdLen"><option value="30">~30 giây (4 cảnh)</option><option value="45" selected>~45 giây (6 cảnh)</option>
-        <option value="60">~60 giây (7 cảnh)</option></select>
+        <option value="60">~60 giây (7 cảnh)</option><option value="120">~2 phút (12 cảnh)</option>
+        <option value="180">~3 phút (16 cảnh)</option></select>
       <div class="btns"><button class="btn pri" id="vdMake" onclick="vdCreate()">✨ AI viết kịch bản</button></div>
       <p class="muted small" id="vdKeyHint"></p>
     </div>
@@ -808,7 +809,8 @@ function vdRenderTools() {
   const miss = VCFG.missing.length;
   $('vdTools').innerHTML = (miss ? `<p class="note small">Cần cài thêm: <b>${VCFG.missing.join(', ')}</b> (giọng đọc, vẽ chữ, FFmpeg).
       <button class="btn pri" onclick="vdInstall()" ${VCFG.busy ? 'disabled' : ''}>⬇ Cài công cụ</button></p>`
-      : '<p class="small"><span class="pill p-ok">Đã có đủ công cụ</span></p>') +
+      : `<p class="small"><span class="pill p-ok">Đã có đủ công cụ</span>
+          <button class="btn" onclick="vdInstall()" ${VCFG.busy ? 'disabled' : ''} title="Cập nhật giọng đọc khi gặp lỗi">🔄 Cập nhật công cụ</button></p>`) +
     (VCFG.log.length ? `<pre class="small" style="white-space:pre-wrap;max-height:120px;overflow:auto">${esc(VCFG.log.join('\n'))}</pre>` : '');
 }
 async function vdInstall() {
@@ -894,7 +896,7 @@ async function vdDelScene(id, i) {
 async function vdRender(id) {
   await vdSaveOne(id);
   await api('/api/videos/' + id + '/render', { method: 'POST' });
-  toast('🎬 Đang dựng clip, khoảng 1-2 phút...'); vdLoadList();
+  toast('🎬 Đang dựng clip, clip dài 2-3 phút có thể mất 3-6 phút...'); vdLoadList();
 }
 async function vdPublish(id) {
   if (!confirm('Đăng clip này lên Fanpage?')) return;
