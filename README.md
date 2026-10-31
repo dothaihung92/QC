@@ -174,6 +174,9 @@ chữ lớn + phụ đề → FFmpeg ghép thành video dọc 9:16 (hoặc ngang
 - **Kiểu clip "Vẽ tay" (mặc định)**: nền giấy kem, nhãn + tiêu đề góc trái, 2-4 hình minh họa phác thảo do Gemini vẽ
   được "vẽ" lộ dần bởi một bàn tay cầm bút, phụ đề có tô vàng từ khóa. Kịch bản chi tiết, giải thích thuật ngữ và có
   **ví dụ cụ thể có số liệu**. Dựng ở 720p cho nhanh; mỗi hình AI khoảng 0,04 USD, hình nào lỗi thì dùng thẻ phác thảo vẽ tay.
+- **Vẽ từng nét (tùy chọn)**: chọn "Vẽ từng nét như người thật" ở Cài đặt clip để dùng
+  [whiteboard-animator](https://github.com/masihsultani/whiteboard-animator) (MIT, chạy CPU): chữ được viết từng từ, nét mực
+  vẽ theo đường, hình tô màu được tô bằng nét cọ. Cần cài thêm (~200 MB) và dựng lâu hơn; lỗi thì tự quay về kiểu quét nhanh.
 - **Giọng VieNeu-TTS** ([pnnbao97/VieNeu-TTS](https://github.com/pnnbao97/VieNeu-TTS), Apache-2.0): chạy hoàn toàn trên CPU
   bằng ONNX, không cần card đồ họa, 10 giọng Bắc/Trung/Nam. Cài bằng nút **Cài / cập nhật công cụ**; lần đầu tự tải mô hình.
 - **Kiểu clip "Giải thích"** (mặc định, học theo clip công nghệ bạn gửi): nền xanh đậm có vầng sáng, tiêu đề 2 dòng

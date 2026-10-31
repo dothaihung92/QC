@@ -363,3 +363,30 @@ def test_icons_pick_by_keyword_and_imagen_fallback(monkeypatch):
         raise aimedia.AIError("no access (HTTP 403)")
     monkeypatch.setattr(aimedia, "_post", fake_post)
     assert aimedia.image("p", "1:1", "k") == b"IMG" and any("imagen" in p for p in seq)
+
+
+@pytest.mark.skipif(not HAS_TOOLS, reason="cần pillow + imageio-ffmpeg")
+def test_doodle_stroke_engine_overlays_video_and_falls_back(monkeypatch):
+    from app import doodle
+    video.save_config({"look": "doodle", "pen": "strokes", "voice": "vi-VN-HoaiMyNeural"})
+    scenes = [{"type": "doodle", "tag": "A", "headline": "B", "narration": "Chị Lan nộp thuế hai trăm triệu đồng.",
+               "panels": [{"label": "x", "visual": ""}, {"label": "y", "visual": ""}, {"label": "z", "visual": ""}]}]
+    vid = db.video_add("T", "", video.clean_scenes(scenes))
+    monkeypatch.setattr(video, "tts", lambda text, voice, rate, dest, style="": (video._ffmpeg(
+        ["-f", "lavfi", "-i", "sine=duration=3", "-c:a", "libmp3lame", str(dest)], dest.parent), "x")[1])
+    monkeypatch.setattr(doodle, "wba_available", lambda: True)
+    calls = []
+
+    def fake_stroke(png, seconds, dest, timeout=0):
+        calls.append((png.name, round(seconds, 1)))
+        if png.name == "pw0_2.png":
+            return False                                           # hình thứ 3 lỗi → quay về kiểu quét nhanh
+        video._ffmpeg(["-f", "lavfi", "-i", "color=c=white:s=300x200:r=25:d=1.5", "-c:v", "libx264",
+                       "-pix_fmt", "yuv420p", str(dest)], dest.parent)
+        return True
+    monkeypatch.setattr(doodle, "stroke_clip", fake_stroke)
+    video.render(vid)
+    v = db.video_get(vid)
+    assert v["status"] == "done" and 3 < v["duration"] < 5
+    assert sorted(c[0] for c in calls) == ["pw0_0.png", "pw0_1.png", "pw0_2.png"] and all(c[1] >= 1.0 for c in calls)
+    assert any("không vẽ từng nét được" in l for l in video.state["log"])

@@ -72,6 +72,7 @@ DEFAULTS = {
     "tts_style": "nang_dong",         # phong cách đọc (chỉ giọng Gemini)
     "rate": 8,                        # tốc độ đọc, % (-30..+30)
     "look": "doodle",                 # doodle = vẽ tay trên giấy (hình AI vẽ lộ dần); explainer = sơ đồ thẻ kính; classic = cũ
+    "pen": "wipe",                    # wipe = quét lộ dần kèm bàn tay; strokes = vẽ từng nét (whiteboard-animator, cài thêm)
     "visual": "stock",                # stock = video/ảnh Pexels hoặc nền màu; ai = ảnh AI riêng cho từng cảnh
     "veo_scenes": 0,                  # số cảnh dùng video AI Veo (TRẢ PHÍ ~0,8 USD/cảnh); 0 = tắt
     "format": "doc",                  # doc = 9:16 (Reels/TikTok), ngang = 16:9 (YouTube)
@@ -126,6 +127,8 @@ def save_config(body: dict) -> dict:
         cur["tts_style"] = DEFAULTS["tts_style"]
     if cur["look"] not in ("doodle", "explainer", "classic"):
         cur["look"] = DEFAULTS["look"]
+    if cur["pen"] not in ("wipe", "strokes"):
+        cur["pen"] = DEFAULTS["pen"]
     if cur["visual"] not in ("stock", "ai"):
         cur["visual"] = DEFAULTS["visual"]
     if cur["format"] not in SIZES:
@@ -148,6 +151,7 @@ def public_config() -> dict:
     cfg["veo_cost"] = round(aimedia.VEO_SECONDS * aimedia.VEO_PRICE_PER_SEC, 2)
     cfg["piper"] = piper_available()
     cfg["vieneu"] = vieneu_available()
+    cfg["wba"] = importlib.util.find_spec("whiteboard_animator") is not None
     cfg["piper_downloaded"] = sorted(p.name[:-5] for p in PIPER_DIR.glob("*.onnx")) if PIPER_DIR.is_dir() else []
     cfg["lengths"] = list(LENGTHS)
     cfg["missing"] = missing_tools()
@@ -201,6 +205,12 @@ def _install():
         r = _pip([pkg])
         if r.returncode != 0:
             _log(f"⚠ Không cài được {pkg} — vẫn dùng giọng Gemini / Microsoft / Google được. "
+                 + (r.stderr or r.stdout)[-300:])
+    if get_config()["pen"] == "strokes":
+        _log("Đang cài whiteboard-animator (vẽ từng nét, khoảng 200 MB gồm opencv, scipy, mô hình nhận chữ)...")
+        r = _pip(["whiteboard-animator"])
+        if r.returncode != 0:
+            _log("⚠ Không cài được whiteboard-animator — clip vẫn dựng được bằng kiểu quét nhanh. "
                  + (r.stderr or r.stdout)[-300:])
     importlib.invalidate_caches()
     for mod in ("edge_tts", "gtts"):                     # dùng bản vừa cập nhật mà không cần khởi động lại
@@ -1132,7 +1142,7 @@ def render(video_id: int):
 
         if paper:
             step(f"Trang {i + 1}/{total}: vẽ hình minh họa" + (" (AI)" if gkey else ""))
-            panels = doodle.make_panels(sc, size, work, i, gkey, _log, True, ai_state)
+            panels = doodle.make_panels(sc, size, work, i, gkey, _log, True, ai_state, cfg["pen"], dur)
             step(f"Trang {i + 1}/{total}: dựng video")
             doodle.render_page(L, sc, i, total, work, dur, voice_len, cfg["brand"], panels, hand, FPS, "f7f3e2")
             durations.append(dur)

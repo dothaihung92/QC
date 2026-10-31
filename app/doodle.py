@@ -67,10 +67,10 @@ def _wobbly_rect(d, box, color, width, rng, amp=3):
     d.line(pts, fill=color, width=width, joint="curve")
 
 
-def panel_image(art: bytes | None, label: str, size, seed: int, visual: str = "") -> Image.Image:
+def panel_image(art: bytes | None, label: str, size, seed: int, visual: str = "", bg=PAPER) -> Image.Image:
     """Ảnh đặc (nền giấy) của 1 khung: hình minh họa + nhãn bên dưới."""
     w, h = size
-    canvas = Image.new("RGB", (w, h), PAPER)
+    canvas = Image.new("RGB", (w, h), bg)
     d = ImageDraw.Draw(canvas)
     base = min(w, h)
     label_h = int(base * 0.17) if label else 0
@@ -81,14 +81,14 @@ def panel_image(art: bytes | None, label: str, size, seed: int, visual: str = ""
             import io
             src = Image.open(io.BytesIO(art)).convert("RGB")
             src = ImageOps.contain(src, (int(area[0] * 0.98), int(area[1] * 0.98)))
-            tile = Image.new("RGB", src.size, PAPER)
+            tile = Image.new("RGB", src.size, bg)
             canvas.paste(ImageChops.multiply(src, tile), ((w - src.width) // 2, (area[1] - src.height) // 2))
             placed = True
         except Exception:  # noqa: BLE001 — ảnh hỏng thì dùng thẻ phác thảo
             placed = False
     if not placed:                                       # không có hình AI: tự vẽ bằng bộ biểu tượng phác thảo
         side = int(min(area) * 0.98)
-        canvas.paste(doodle_icons.draw_scene(side, label, visual, seed), ((w - side) // 2, (area[1] - side) // 2))
+        canvas.paste(doodle_icons.draw_scene(side, label, visual, seed, bg), ((w - side) // 2, (area[1] - side) // 2))
     if label:
         f = V._font(int(base * 0.062), bold=True)
         lines = V._wrap(d, label, f, w - 20)[:2]
@@ -237,6 +237,49 @@ def caption_layer(L, words: list, dest: Path):
 
 # ---------------------------------------------------------------- dựng 1 trang
 
+def timing(dur: float, n: int):
+    """Thời điểm bắt đầu và độ dài "vẽ" của từng hình trong 1 trang: trả về (t0, span, dd)."""
+    t0 = 0.5
+    span = max(1.2, (dur - 0.9 - t0) / max(1, n))
+    return t0, span, min(3.6, max(1.0, span * 0.78))
+
+
+def wba_available() -> bool:
+    import importlib.util
+    return importlib.util.find_spec("whiteboard_animator") is not None
+
+
+def _ffmpeg_shim_dir() -> Path:
+    """whiteboard-animator gọi lệnh `ffmpeg` trong PATH: tạo bản sao FFmpeg đi kèm phần mềm với đúng tên đó."""
+    import shutil
+    from . import config
+    d = config.DATA_DIR / "bin"
+    d.mkdir(exist_ok=True)
+    exe = d / ("ffmpeg.exe" if V.os.name == "nt" else "ffmpeg")
+    if not exe.exists():
+        shutil.copy2(V.ffmpeg_exe(), exe)
+        exe.chmod(0o755)
+    return d
+
+
+def stroke_clip(png: Path, seconds: float, dest: Path, timeout: int = 300) -> bool:
+    """Vẽ hình theo từng nét (thư viện whiteboard-animator, MIT, chạy CPU): trả về True nếu tạo được video."""
+    import subprocess
+    import sys
+    if not wba_available():
+        return False
+    env = dict(V.os.environ)
+    env["PATH"] = str(_ffmpeg_shim_dir()) + V.os.pathsep + env.get("PATH", "")
+    kw = {"creationflags": subprocess.CREATE_NO_WINDOW} if V.os.name == "nt" else {}
+    try:
+        r = subprocess.run([sys.executable, "-m", "whiteboard_animator.cli", str(png), "-o", str(dest),
+                            "--duration", f"{seconds:.2f}", "--quality", "low"],
+                           capture_output=True, text=True, timeout=timeout, env=env, **kw)
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+    return r.returncode == 0 and dest.exists() and dest.stat().st_size > 0
+
+
 class AIState:
     """Dùng chung cho cả clip: lỗi vẽ AI "cứng" (hết hạn mức, sai quyền...) thì dừng thử các hình sau, khỏi chờ vô ích."""
     def __init__(self):
@@ -252,7 +295,8 @@ def _is_hard_error(e: Exception) -> bool:
                                   "http 400", "http 401", "http 403", "http 404"))
 
 
-def make_panels(sc, size, work: Path, i: int, gkey: str, log, use_ai: bool, state: AIState = None):
+def make_panels(sc, size, work: Path, i: int, gkey: str, log, use_ai: bool, state: AIState = None,
+                pen: str = "wipe", dur: float = 0.0):
     """Tạo ảnh các khung của 1 trang (vẽ AI song song nếu có key). Trả về [(file, (x,y,w,h), label)]."""
     state = state or AIState()
     panels = sc["panels"][:4] or [{"label": t, "visual": ""} for t in sc["items"][:3]] or \
@@ -275,16 +319,25 @@ def make_panels(sc, size, work: Path, i: int, gkey: str, log, use_ai: bool, stat
                     log(f"⚠ Gemini không vẽ được hình ({str(e)[:200]}) — các hình còn lại dùng bộ hình phác thảo có sẵn.")
                 else:
                     log(f"Trang {i + 1}, hình {k + 1}: vẽ AI lỗi, dùng hình phác thảo có sẵn — {str(e)[:140]}")
-        return panel_image(art, pv.get("label", ""), boxes[k][2:], seed=i * 10 + k, visual=pv.get("visual", ""))
+        im = panel_image(art, pv.get("label", ""), boxes[k][2:], seed=i * 10 + k, visual=pv.get("visual", ""))
+        vid = None
+        if pen == "strokes" and wba_available() and dur:             # vẽ từng nét: cần ảnh nền trắng tinh
+            white = panel_image(art, pv.get("label", ""), boxes[k][2:], seed=i * 10 + k, visual=pv.get("visual", ""), bg=(255, 255, 255))
+            white.save(work / f"pw{i}_{k}.png", "PNG")
+            if stroke_clip(work / f"pw{i}_{k}.png", timing(dur, len(panels))[2], work / f"pv{i}_{k}.mp4"):
+                vid = f"pv{i}_{k}.mp4"
+            else:
+                log(f"Trang {i + 1}, hình {k + 1}: không vẽ từng nét được, dùng kiểu quét nhanh")
+        return im, vid
 
-    with ThreadPoolExecutor(max_workers=3 if use_ai and gkey and not state.off else 1) as ex:
+    with ThreadPoolExecutor(max_workers=3 if (use_ai and gkey and not state.off) or pen == "strokes" else 1) as ex:
         imgs = list(ex.map(one, range(len(panels))))
     out = []
-    for k, (im, box) in enumerate(zip(imgs, boxes)):
+    for k, ((im, vid), box) in enumerate(zip(imgs, boxes)):
         name = f"pn{i}_{k}.png"
         im.save(work / name, "PNG")
         reveal_mask(box[2], box[3], work / f"mk{i}_{k}.png")
-        out.append((name, box, panels[k].get("label", "")))
+        out.append((name, box, panels[k].get("label", ""), vid))
     return out
 
 
@@ -301,12 +354,21 @@ def render_page(L, sc, i, total, work: Path, dur: float, voice_len: float, brand
         flt.append(f"[{cur}][l{n}]overlay=x={pos[0]}:y={pos[1]}:eof_action=repeat[s{n}]")
         cur, n = f"s{n}", n + 1
     k_panels = len(panels)
-    t0 = 0.5
-    span = max(1.2, (dur - 0.9 - t0) / k_panels)
+    t0, span, dd = timing(dur, k_panels)
     hx, hy = hand[1]
-    for k, (name, (x, y, w, h), _label) in enumerate(panels):
+    hand_ks = []                                   # các hình vẽ kiểu quét mới cần bàn tay của phần mềm
+    paper = "r='val*{:.4f}':g='val*{:.4f}':b='val*{:.4f}'".format(*(c / 255 for c in PAPER))
+    for k, (name, (x, y, w, h), _label, vid) in enumerate(panels):
         s = t0 + k * span
-        dd = min(3.6, max(1.0, span * 0.78))
+        if vid:                                    # video do whiteboard-animator vẽ từng nét (tự có bàn tay trong video)
+            inputs += ["-i", vid]
+            flt.append(f"[{n}:v]fps={fps},scale={w}:{h}:force_original_aspect_ratio=decrease,"
+                       f"pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:white,setsar=1,setpts=PTS-STARTPTS+{s:.2f}/TB,"
+                       f"tpad=stop_mode=clone:stop_duration=60,format=rgb24,lutrgb={paper}[pv{n}]")
+            flt.append(f"[{cur}][pv{n}]overlay=x={x}:y={y}:enable='gte(t,{s:.2f})':eof_action=repeat[s{n}]")
+            cur, n = f"s{n}", n + 1
+            continue
+        hand_ks.append(k)
         inputs += ["-framerate", str(fps), "-loop", "1", "-t", d, "-i", name,
                    "-framerate", str(fps), "-loop", "1", "-t", d, "-i", f"mk{i}_{k}.png"]
         p = f"min(1,max(0,(t-{s:.2f})/{dd:.2f}))"
@@ -316,16 +378,16 @@ def render_page(L, sc, i, total, work: Path, dur: float, voice_len: float, brand
         flt.append(f"[{cur}][pk{n}]overlay=x={x}:y={y}:eof_action=repeat:format=auto[s{n}]")
         cur, n = f"s{n}", n + 2
     hand_at = n                                    # mỗi lớp bàn tay có 1 đầu vào riêng (tránh bộ tách `split` gây treo FFmpeg)
-    for _ in panels:
+    for _ in hand_ks:
         inputs += ["-framerate", str(fps), "-loop", "1", "-t", d, "-i", hand[0]]
         n += 1
-    for k, (name, (x, y, w, h), _label) in enumerate(panels):      # bàn tay đi theo mép lộ dần, nguệch ngoạc lên xuống
+    for j, k in enumerate(hand_ks):                # bàn tay đi theo mép lộ dần, nguệch ngoạc lên xuống
+        name, (x, y, w, h), _label, _vid = panels[k]
         s0 = t0 + k * span
-        dd = min(3.6, max(1.0, span * 0.78))
         p = f"min(1,max(0,(t-{s0:.2f})/{dd:.2f}))"
         hxx = f"{x}+{w}*{p}-{hx}"
         hyy = f"{y}+{h}*(0.5+0.36*sin((t-{s0:.2f})*9))-{hy}"
-        flt.append(f"[{hand_at + k}:v]format=rgba[hd{k}]")
+        flt.append(f"[{hand_at + j}:v]format=rgba[hd{k}]")
         flt.append(f"[{cur}][hd{k}]overlay=x='{hxx}':y='{hyy}':enable='between(t,{s0:.2f},{s0 + dd + 0.12:.2f})':eof_action=repeat[ho{k}]")
         cur = f"ho{k}"
     captions, chunks = [], V.caption_chunks(sc["narration"], 7)

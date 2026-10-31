@@ -663,6 +663,10 @@
       <select id="vdLook"><option value="doodle">Vẽ tay trên giấy (hình AI vẽ lộ dần, có bàn tay cầm bút) — cần Gemini key</option>
         <option value="explainer">Giải thích (sơ đồ, thẻ kính, phụ đề vàng) — kiểu clip công nghệ</option>
         <option value="classic">Cổ điển (khung tiêu đề + ảnh nền)</option></select>
+      <label>Cách "vẽ" hình (kiểu Vẽ tay)</label>
+      <select id="vdPen"><option value="wipe">Quét lộ dần kèm bàn tay cầm bút (nhanh, mặc định)</option>
+        <option value="strokes">Vẽ từng nét như người thật — thư viện whiteboard-animator (cài thêm ~200 MB, dựng lâu hơn)</option></select>
+      <p class="muted small" style="margin:2px 0 8px" id="vdPenNote"></p>
       <div class="row2">
         <div><label>Hình nền mỗi cảnh</label>
           <select id="vdVisual"><option value="stock">Video/ảnh Pexels hoặc nền màu (miễn phí)</option>
@@ -810,7 +814,8 @@ async function loadVideo() {
     .map(([pre, lbl]) => `<optgroup label="${lbl}">${Object.entries(VCFG.voices).filter(([k]) => k.startsWith(pre))
       .map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</optgroup>`).join('');
   $('vdStyle').innerHTML = Object.entries(VCFG.styles).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
-  $('vdStyle').value = VCFG.tts_style; $('vdLook').value = VCFG.look; $('vdVisual').value = VCFG.visual; $('vdVeo').value = VCFG.veo_scenes;
+  $('vdStyle').value = VCFG.tts_style; $('vdLook').value = VCFG.look; $('vdPen').value = VCFG.pen;
+  $('vdPenNote').textContent = VCFG.pen === 'strokes' ? (VCFG.wba ? '✅ Đã cài whiteboard-animator.' : '⚠ Chưa cài — bấm Lưu cài đặt rồi "Cập nhật công cụ".') : ''; $('vdVisual').value = VCFG.visual; $('vdVeo').value = VCFG.veo_scenes;
   $('vdVeoCost').textContent = `(≈ ${VCFG.veo_cost} USD / cảnh)`;
   $('vdVoice').value = VCFG.voice; $('vdRate').value = VCFG.rate;
   [...$('vdVoice').options].forEach(o => { if ((o.value.startsWith('piper:') && !VCFG.piper) || (o.value.startsWith('vieneu:') && !VCFG.vieneu)) o.textContent += ' (chưa cài)'; }); $('vdFormat').value = VCFG.format;
@@ -869,7 +874,7 @@ function vdPick() {
   if (x) { $('vdText').value = x.text; $('vdImg').value = x.img || ''; }
 }
 async function vdSave() {
-  VCFG = await api('/api/video/config', { method: 'PUT', body: { look: $('vdLook').value, voice: $('vdVoice').value, tts_style: $('vdStyle').value, visual: $('vdVisual').value, veo_scenes: $('vdVeo').value, rate: $('vdRate').value,
+  VCFG = await api('/api/video/config', { method: 'PUT', body: { look: $('vdLook').value, pen: $('vdPen').value, voice: $('vdVoice').value, tts_style: $('vdStyle').value, visual: $('vdVisual').value, veo_scenes: $('vdVeo').value, rate: $('vdRate').value,
     format: $('vdFormat').value, color: $('vdColor').value, brand: $('vdBrand').value, pexels_key: $('vdPexels').value,
     music: $('vdMusic').checked } });
   $('vdPexels').value = ''; toast('✅ Đã lưu cài đặt clip'); loadVideo();
