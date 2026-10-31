@@ -171,7 +171,10 @@ Gemini viết kịch bản theo cảnh → giọng đọc tiếng Việt miễn 
 ảnh nền (ảnh của bài, ảnh miễn phí Pexels nếu có key, hoặc nền màu thương hiệu) →
 chữ lớn + phụ đề → FFmpeg ghép thành video dọc 9:16 (hoặc ngang 16:9).
 
-- Mỗi cảnh gồm: nền chuyển động (video Pexels nếu có key, ảnh của bài làm mờ, hoặc nền màu có hiệu ứng),
+- **Kiểu clip "Giải thích"** (mặc định, học theo clip công nghệ bạn gửi): nền xanh đậm có vầng sáng, tiêu đề 2 dòng
+  chữ hẹp đậm (dòng 2 chuyển màu), thẻ kính mờ dựng dần — **sơ đồ cây, các bước nối nhau, danh sách, số lớn** —
+  phụ đề vàng với từ khóa nổi nền tím. Chọn "Cổ điển" ở Cài đặt clip nếu muốn kiểu cũ.
+- Mỗi cảnh (kiểu cổ điển) gồm: nền chuyển động (video Pexels nếu có key, ảnh của bài làm mờ, hoặc nền màu có hiệu ứng),
   tiêu đề trượt vào, thẻ **con số nổi bật** hoặc **gạch đầu dòng hiện lần lượt**, phụ đề chạy theo lời đọc
   (số liệu tô vàng), chuyển cảnh mượt giữa các cảnh. Kịch bản 2–3 phút được AI viết đủ số từ (thiếu thì tự viết lại).
 - Lần đầu bấm **⬇ Cài công cụ** (cài `pillow`, `edge-tts`, `imageio-ffmpeg` — đã kèm FFmpeg).

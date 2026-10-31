@@ -657,6 +657,9 @@
           <option value="ngang">Ngang 16:9 (YouTube)</option></select></div>
         <div><label>Màu thương hiệu</label><input id="vdColor" type="color" style="height:38px"></div>
       </div>
+      <label>Kiểu clip</label>
+      <select id="vdLook"><option value="explainer">Giải thích (sơ đồ, thẻ kính, phụ đề vàng) — kiểu clip công nghệ</option>
+        <option value="classic">Cổ điển (khung tiêu đề + ảnh nền)</option></select>
       <div class="row2">
         <div><label>Hình nền mỗi cảnh</label>
           <select id="vdVisual"><option value="stock">Video/ảnh Pexels hoặc nền màu (miễn phí)</option>
@@ -804,7 +807,7 @@ async function loadVideo() {
     .map(([pre, lbl]) => `<optgroup label="${lbl}">${Object.entries(VCFG.voices).filter(([k]) => k.startsWith(pre))
       .map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</optgroup>`).join('');
   $('vdStyle').innerHTML = Object.entries(VCFG.styles).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
-  $('vdStyle').value = VCFG.tts_style; $('vdVisual').value = VCFG.visual; $('vdVeo').value = VCFG.veo_scenes;
+  $('vdStyle').value = VCFG.tts_style; $('vdLook').value = VCFG.look; $('vdVisual').value = VCFG.visual; $('vdVeo').value = VCFG.veo_scenes;
   $('vdVeoCost').textContent = `(≈ ${VCFG.veo_cost} USD / cảnh)`;
   $('vdVoice').value = VCFG.voice; $('vdRate').value = VCFG.rate;
   if (!VCFG.piper) [...$('vdVoice').options].forEach(o => { if (o.value.startsWith('piper:')) o.textContent += ' (chưa cài)'; }); $('vdFormat').value = VCFG.format;
@@ -853,7 +856,7 @@ function vdPick() {
   if (x) { $('vdText').value = x.text; $('vdImg').value = x.img || ''; }
 }
 async function vdSave() {
-  VCFG = await api('/api/video/config', { method: 'PUT', body: { voice: $('vdVoice').value, tts_style: $('vdStyle').value, visual: $('vdVisual').value, veo_scenes: $('vdVeo').value, rate: $('vdRate').value,
+  VCFG = await api('/api/video/config', { method: 'PUT', body: { look: $('vdLook').value, voice: $('vdVoice').value, tts_style: $('vdStyle').value, visual: $('vdVisual').value, veo_scenes: $('vdVeo').value, rate: $('vdRate').value,
     format: $('vdFormat').value, color: $('vdColor').value, brand: $('vdBrand').value, pexels_key: $('vdPexels').value,
     music: $('vdMusic').checked } });
   $('vdPexels').value = ''; toast('✅ Đã lưu cài đặt clip'); loadVideo();
@@ -873,7 +876,7 @@ async function vdLoadList() {
   if (VIDEOS.some(v => v.status === 'rendering') && document.getElementById('video').classList.contains('active'))
     vdTimer = setTimeout(vdLoadList, 3000);
 }
-const VD_TYPES = { hook: 'Mở đầu', stat: 'Con số nổi bật', list: 'Gạch đầu dòng', text: 'Chữ', cta: 'Kêu gọi liên hệ' };
+const VD_TYPES = { hook: 'Mở đầu', stat: 'Con số nổi bật', list: 'Danh sách ý', flow: 'Sơ đồ cây (gốc + nhánh)', steps: 'Các bước nối nhau', text: 'Chỉ tiêu đề', cta: 'Kêu gọi liên hệ' };
 const vdWords = (t) => (t.match(/[\p{L}\p{N}]+/gu) || []).length;
 const vdEst = (scenes) => Math.round(scenes.reduce((n, s) => n + vdWords(s.narration) / 3 + 0.3, 0));
 const vdFmtSec = (n) => n >= 60 ? `${Math.floor(n / 60)} phút ${n % 60} giây` : `${n} giây`;
@@ -883,7 +886,7 @@ function vdScene(v, s, i) {
     <select data-v="${v.id}" data-i="${i}" data-f="type" style="width:auto;display:inline-block">
       ${Object.entries(VD_TYPES).map(([k, l]) => `<option value="${k}" ${s.type === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
     <button class="btn" style="padding:2px 8px" onclick="vdDelScene(${v.id},${i})">✕</button>
-    <input data-v="${v.id}" data-i="${i}" data-f="headline" value="${esc(s.headline)}" placeholder="Tiêu đề lớn trên màn hình">
+    <input data-v="${v.id}" data-i="${i}" data-f="headline" value="${esc(s.headline)}" placeholder="Tiêu đề 2 dòng, ngăn bằng | (vd GIẢM 30% THUẾ|CHO HỘ KINH DOANH)">
     <textarea data-v="${v.id}" data-i="${i}" data-f="narration" rows="3" placeholder="Lời đọc">${esc(s.narration)}</textarea>
     <div class="row">
       <div class="col" style="flex-basis:120px"><input data-v="${v.id}" data-i="${i}" data-f="big" value="${esc(s.big || '')}" placeholder="Số nổi bật (vd 30%)"></div>

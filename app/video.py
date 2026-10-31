@@ -65,6 +65,7 @@ DEFAULTS = {
     "voice": "gemini:Leda",           # giọng Gemini AI tự nhiên nhất; không có Gemini key thì tự dùng giọng Microsoft
     "tts_style": "nang_dong",         # phong cách đọc (chỉ giọng Gemini)
     "rate": 8,                        # tốc độ đọc, % (-30..+30)
+    "look": "explainer",              # explainer = kiểu giải thích (sơ đồ, thẻ kính, phụ đề vàng); classic = kiểu cũ
     "visual": "stock",                # stock = video/ảnh Pexels hoặc nền màu; ai = ảnh AI riêng cho từng cảnh
     "veo_scenes": 0,                  # số cảnh dùng video AI Veo (TRẢ PHÍ ~0,8 USD/cảnh); 0 = tắt
     "format": "doc",                  # doc = 9:16 (Reels/TikTok), ngang = 16:9 (YouTube)
@@ -117,6 +118,8 @@ def save_config(body: dict) -> dict:
         cur["voice"] = DEFAULTS["voice"]
     if cur["tts_style"] not in STYLES:
         cur["tts_style"] = DEFAULTS["tts_style"]
+    if cur["look"] not in ("explainer", "classic"):
+        cur["look"] = DEFAULTS["look"]
     if cur["visual"] not in ("stock", "ai"):
         cur["visual"] = DEFAULTS["visual"]
     if cur["format"] not in SIZES:
@@ -204,7 +207,7 @@ def piper_available() -> bool:
 # ---------------------------------------------------------------- 1. kịch bản
 
 WORDS_PER_SEC = 3.0                  # tốc độ đọc tiếng Việt trung bình của giọng máy (đo từ clip thật)
-SCENE_TYPES = ("hook", "stat", "list", "text", "cta")
+SCENE_TYPES = ("hook", "stat", "list", "flow", "steps", "text", "cta")
 
 SCRIPT_PROMPT = """Bạn là biên tập viên video (Facebook Reels / TikTok / YouTube) cho một công ty dịch vụ kế toán - thuế ở Việt Nam.
 Từ nội dung dưới đây, viết kịch bản video dài khoảng {seconds} giây gồm đúng {n} cảnh.
@@ -224,10 +227,13 @@ Quy tắc lời đọc (narration) — viết như người dẫn chương trìn
 - Ngày tháng viết kiểu nói: "ngày 29 tháng 10 năm 2026". Không emoji, không ký hiệu markdown.
 
 Mỗi cảnh có phần hình trên màn hình:
-- type: "hook" | "stat" | "list" | "text" | "cta"
-- headline: tiêu đề lớn, tối đa 8 từ.
+- type: "hook" | "stat" | "list" | "flow" | "steps" | "text" | "cta"
+  ("flow" = sơ đồ cây: items[0] là ý gốc, các items sau là 2-4 nhánh con, mỗi nhánh dạng "Tiêu đề ngắn | mô tả ngắn";
+   "steps" = các bước nối tiếp nhau; "list" = các ý song song; "stat" = một con số nổi bật. Dùng đa dạng các kiểu.)
+- headline: tiêu đề lớn gồm 2 DÒNG NGẮN ngăn bằng dấu "|", tổng tối đa 7 từ, vd "GIẢM 30% THUẾ|CHO HỘ KINH DOANH".
 - big: (cho "stat") con số / tỷ lệ / mốc thời gian nổi bật, tối đa 12 ký tự, vd "30%", "10 tỷ", "29/10/2026".
-- items: 2-4 ý ngắn (mỗi ý tối đa 9 từ) hiện thành gạch đầu dòng; với "stat" thì items[0] là chú thích cho con số.
+- items: 2-4 ý ngắn (mỗi ý tối đa 9 từ) hiện thành thẻ thông tin; với "stat" thì items[0] là chú thích cho con số
+  (tùy chọn items[1] = nhãn nhỏ, items[2] = nội dung thẻ nguồn, vd "VĂN BẢN" và "Nghị định 398/2026").
   Cảnh nào cũng phải có items (trừ "hook" có thể để trống).
 - keyword: 1-3 từ TIẾNG ANH để tìm video/ảnh minh họa (vd "tax documents", "calculator", "small shop owner").
 - visual: 1 câu TIẾNG ANH mô tả cảnh quay minh họa cho cảnh này (ảnh thật, người Việt Nam, văn phòng / cửa hàng hiện đại,
@@ -667,7 +673,8 @@ def _headline_layer(L, scene, color, dest, center=False):
     ov = Image.new("RGBA", (L.W, L.H), (0, 0, 0, 0))
     d = ImageDraw.Draw(ov)
     hook = scene["type"] == "hook"
-    text = scene["headline"].upper() if hook else scene["headline"]
+    headline = scene["headline"].replace("|", " ")
+    text = headline.upper() if hook else headline
     f = _font(int(L.base * (0.085 if hook else 0.066)), bold=True, black=hook)
     lines = _wrap(d, text, f, L.W - 4 * L.pad)[:3]
     lh = int(f.size * 1.22)
@@ -917,7 +924,8 @@ def _music_files() -> list:
     return [p for p in MUSIC_DIR.iterdir() if p.suffix.lower() in (".mp3", ".m4a", ".wav", ".aac")]
 
 
-def join_scenes(work: Path, durations: list, out: Path, music: Path | None):
+def join_scenes(work: Path, durations: list, out: Path, music: Path | None,
+                trans: float = TRANSITION, names: list = None):
     """Nối các cảnh bằng hiệu ứng chuyển cảnh (xfade) + giọng đọc nối mượt (acrossfade), rồi trộn nhạc nền."""
     n = len(durations)
     joined = "joined.mp4" if music else str(out)
@@ -930,12 +938,12 @@ def join_scenes(work: Path, durations: list, out: Path, music: Path | None):
             flt.append(f"[{k}:v]settb=AVTB,setpts=PTS-STARTPTS,fps={FPS}[v{k}]")
         length, vcur, acur = durations[0], "v0", "0:a"
         for k in range(1, n):
-            off = length - TRANSITION
-            tr = TRANSITIONS[(k - 1) % len(TRANSITIONS)]
-            flt.append(f"[{vcur}][v{k}]xfade=transition={tr}:duration={TRANSITION}:offset={off:.3f}[x{k}]")
-            flt.append(f"[{acur}][{k}:a]acrossfade=d={TRANSITION}[a{k}]")
+            off = length - trans
+            tr = (names or transS)[(k - 1) % len(names or transS)]
+            flt.append(f"[{vcur}][v{k}]xfade=transition={tr}:duration={trans}:offset={off:.3f}[x{k}]")
+            flt.append(f"[{acur}][{k}:a]acrossfade=d={trans}[a{k}]")
             vcur, acur = f"x{k}", f"a{k}"
-            length += durations[k] - TRANSITION
+            length += durations[k] - trans
         flt.append(f"[{vcur}]format=yuv420p[v]")
         _ffmpeg([*inputs, "-filter_complex", ";".join(flt), "-map", "[v]", "-map", f"[{acur}]",
                  "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-c:a", "aac", "-b:a", "160k",
@@ -994,6 +1002,9 @@ def render(video_id: int):
         article_img = work / "article.img"
         if not _download(v["image_url"], article_img):
             article_img = None
+    from . import explainer
+    expl = cfg["look"] == "explainer"
+    trans, tnames = (0.3, ["fade"]) if expl else (TRANSITION, TRANSITIONS)
     used_videos, durations = set(), []
     style = STYLES[cfg["tts_style"]][1]
     gkey = newsagent.get_config()["gemini_key"]
@@ -1032,48 +1043,53 @@ def render(video_id: int):
             except aimedia.AIError as e:
                 _log(f"Cảnh {i + 1}: ảnh AI lỗi, dùng nền thay thế — {str(e)[:160]}")
         if ai_photo:
-            render_background(ai_photo, size, cfg["color"], work / f"bg{i}.png", "photo")
+            render_background(ai_photo, size, cfg["color"], work / f"bg{i}.png", "blur" if expl else "photo")
         elif not bg_video:
             bg_video = pexels_video(sc["keyword"], cfg["pexels_key"], size, work / f"bgv{i}.mp4", used_videos)
         if not bg_video and not ai_photo:
             if pexels_photo(sc["keyword"], cfg["pexels_key"], L.vertical, work / f"photo{i}.img"):
                 render_background(work / f"photo{i}.img", size, cfg["color"], work / f"bg{i}.png", "photo")
-            elif article_img:
+            elif article_img and not expl:
                 mode = "photo" if sc["type"] == "hook" and not sc["headline"] else "blur"
                 render_background(article_img, size, cfg["color"], work / f"bg{i}.png", mode)
+            elif expl:
+                explainer.background(size, work / f"bg{i}.png", seed=video_id * 100 + i)
             else:
                 render_background(None, size, cfg["color"], work / f"bg{i}.png", "none", seed=video_id * 100 + i)
 
-        layers = []
-        pos = _frame_layer(L, cfg["color"], cfg["brand"], i, total, work / f"frame{i}.png")
-        if pos:
-            layers.append((f"frame{i}.png", pos, 0.0, "none"))
-        cards = _card_layers(L, sc, cfg["color"], cfg["brand"], work, i, article_img)
-        center_head = not cards and sc["type"] in ("hook", "text")
-        pos = _headline_layer(L, sc, cfg["color"], work / f"head{i}.png", center=center_head)
-        if pos:
-            layers.append((f"head{i}.png", pos, 0.0, "head"))
-        layers += cards
-        captions, chunks = [], caption_chunks(sc["narration"])
-        weights = [len(c) + 8 for c in chunks]
-        t = 0.0
-        for k, c in enumerate(chunks):
-            end = dur if k == len(chunks) - 1 else t + voice_len * weights[k] / sum(weights)
-            p = _caption_layer(L, c, work / f"cap{i}_{k}.png")
-            if p:
-                captions.append((f"cap{i}_{k}.png", p, t, end))
-            t = end
+        if expl:
+            layers, captions = explainer.build(L, sc, i, total, work, cfg["brand"], dur, voice_len)
+        else:
+            layers = []
+            pos = _frame_layer(L, cfg["color"], cfg["brand"], i, total, work / f"frame{i}.png")
+            if pos:
+                layers.append((f"frame{i}.png", pos, 0.0, "none"))
+            cards = _card_layers(L, sc, cfg["color"], cfg["brand"], work, i, article_img)
+            center_head = not cards and sc["type"] in ("hook", "text")
+            pos = _headline_layer(L, sc, cfg["color"], work / f"head{i}.png", center=center_head)
+            if pos:
+                layers.append((f"head{i}.png", pos, 0.0, "head"))
+            layers += cards
+            captions, chunks = [], caption_chunks(sc["narration"])
+            weights = [len(c) + 8 for c in chunks]
+            t = 0.0
+            for k, c in enumerate(chunks):
+                end = dur if k == len(chunks) - 1 else t + voice_len * weights[k] / sum(weights)
+                p = _caption_layer(L, c, work / f"cap{i}_{k}.png")
+                if p:
+                    captions.append((f"cap{i}_{k}.png", p, t, end))
+                t = end
         step(f"Cảnh {i + 1}/{total}: dựng video")
         render_scene(work, i, size, dur, bg_video, layers, captions)
         durations.append(dur)
     music = random.choice(_music_files()) if cfg["music"] and _music_files() else None
     step("Ghép các cảnh + hiệu ứng chuyển cảnh" + (" + nhạc nền" if music else ""))
     out = work / "clip.mp4"
-    join_scenes(work, durations, out, music)
+    join_scenes(work, durations, out, music, trans, tnames)
     for p in work.iterdir():                          # dọn file tạm, chỉ giữ clip
         if p != out:
             p.unlink(missing_ok=True)
-    length = sum(durations) - TRANSITION * (len(durations) - 1)
+    length = sum(durations) - trans * (len(durations) - 1)
     db.video_update(video_id, status="done", path=str(out), duration=round(length, 1), progress="")
     db.log("video", f"Đã dựng clip #{video_id}: {v['title']} ({length:.0f}s)")
     _log("✅ Xong clip")

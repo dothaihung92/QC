@@ -241,3 +241,26 @@ def test_render_uses_ai_image_and_veo_with_fallbacks(client, monkeypatch, tmp_pa
     assert len(veo_calls) == 2 and veo_calls[0].startswith("scene 0") and veo_calls[1].startswith("scene 2")   # cảnh đầu + cuối
     assert len(img_calls) == 2 and img_calls[0][0].startswith("scene 1") and img_calls[0][1] == "9:16"          # chỉ cảnh còn lại
     assert any("Veo lỗi" in l for l in video.state["log"]) and any("ảnh AI lỗi" in l for l in video.state["log"])
+
+
+def test_explainer_heading_split_key_word_and_layers(tmp_path):
+    from app import explainer
+    assert explainer.split_heading("GIẢM 30% THUẾ|CHO HỘ KINH DOANH") == ["GIẢM 30% THUẾ", "CHO HỘ KINH DOANH"]
+    assert explainer.split_heading("Bốn bước hưởng ưu đãi") == ["Bốn bước", "hưởng ưu đãi"]
+    assert explainer._key_word("Từ ngày 1 tháng 7".split()) == "1"
+    L = video.Layout((1080, 1920))
+    sc = video.clean_scenes([{"type": "flow", "headline": "A B|C D", "narration": "Kiểm tra điều kiện doanh thu.",
+                              "items": ["Gốc", "Nhánh một | mô tả", "Nhánh hai | mô tả hai"]}])[0]
+    layers, caps = explainer.build(L, sc, 0, 1, tmp_path, "Brand", 3.0, 2.5)
+    names = [n for n, *_ in layers]
+    assert "xh0.png" in names and any(n.startswith("xl0_") for n in names) and caps
+    assert all((tmp_path / n).exists() for n in names) and caps[-1][3] == 3.0
+    for typ in ("stat", "steps", "list"):
+        sc2 = dict(sc, type=typ, big="30%" if typ == "stat" else "")
+        assert explainer.build(L, sc2, 1, 1, tmp_path, "", 3.0, 2.5)[0]
+
+
+def test_explainer_is_default_and_classic_still_renders(client, monkeypatch):
+    assert video.get_config()["look"] == "explainer"
+    assert video.save_config({"look": "xx"})["look"] == "explainer"
+    assert video.save_config({"look": "classic"})["look"] == "classic"
