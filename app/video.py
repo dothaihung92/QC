@@ -47,7 +47,13 @@ STYLES = {
     "chuyen_gia": ("Chuyên gia, rõ ràng", "Đọc bằng giọng tự tin, rõ ràng của một chuyên gia thuế, nhịp độ khá nhanh, "
                    "nhấn mạnh ý quan trọng, không kéo dài giọng"),
 }
-VOICES = {f"gemini:{k}": f"{v} — Gemini AI, tự nhiên nhất" for k, v in GEMINI_VOICES.items()}
+VIENEU_VOICES = {"Mai Anh": "Mai Anh (nữ, giọng tin tức, miền Bắc)", "Trúc Ly": "Trúc Ly (nữ, tự nhiên, miền Bắc)",
+                 "Ngọc Huyền": "Ngọc Huyền (nữ, tự nhiên, miền Bắc)", "Thùy Dung": "Thùy Dung (nữ, tin tức, miền Nam)",
+                 "Ngọc Trân": "Ngọc Trân (nữ, tự nhiên, miền Trung)", "Hải Đăng": "Hải Đăng (nam, tự nhiên, miền Bắc)",
+                 "Minh Đức": "Minh Đức (nam, tin tức, miền Bắc)", "Thiện Minh": "Thiện Minh (nam, kể chuyện, miền Bắc)",
+                 "Quang Sơn": "Quang Sơn (nam, tự nhiên, miền Trung)", "Minh Triết": "Minh Triết (nam, tin tức, miền Nam)"}
+VOICES = {f"vieneu:{k}": f"{v} — VieNeu-TTS, offline, miễn phí" for k, v in VIENEU_VOICES.items()}
+VOICES.update({f"gemini:{k}": f"{v} — Gemini AI, tự nhiên nhất" for k, v in GEMINI_VOICES.items()})
 VOICES.update({"vi-VN-HoaiMyNeural": "Hoài My (nữ) — Microsoft, cần Internet",
           "vi-VN-NamMinhNeural": "Nam Minh (nam) — Microsoft, cần Internet",
           # Piper (github.com/OHF-Voice/piper1-gpl): chạy ngay trên máy, không cần Internet sau lần tải đầu
@@ -56,16 +62,16 @@ VOICES.update({"vi-VN-HoaiMyNeural": "Hoài My (nữ) — Microsoft, cần Inter
           "piper:vi_VN-vivos-x_low": "VIVOS (nhiều giọng) — Piper, offline"})
 EDGE_VOICES = [v for v in VOICES if v.startswith("vi-VN-")]
 PIPER_DIR = config.DATA_DIR / "piper-voices"
-OPTIONAL_TOOLS = {"piper": "piper-tts"}                  # cài lỗi (vd Python quá mới) vẫn dùng được giọng khác
+OPTIONAL_TOOLS = {"vieneu": "vieneu", "piper": "piper-tts"}                  # cài lỗi (vd Python quá mới) vẫn dùng được giọng khác
 LENGTHS = {30: 5, 45: 7, 60: 9, 120: 14, 180: 20}      # giây → số cảnh
 TOOLS = {"PIL": "pillow", "edge_tts": "edge-tts", "imageio_ffmpeg": "imageio-ffmpeg",
          "gtts": "gTTS"}                                 # gTTS: giọng dự phòng khi Edge-TTS từ chối
 
 DEFAULTS = {
-    "voice": "gemini:Leda",           # giọng Gemini AI tự nhiên nhất; không có Gemini key thì tự dùng giọng Microsoft
+    "voice": "vieneu:Mai Anh",        # VieNeu-TTS chạy ngay trên máy; chưa cài thì tự dùng giọng khác
     "tts_style": "nang_dong",         # phong cách đọc (chỉ giọng Gemini)
     "rate": 8,                        # tốc độ đọc, % (-30..+30)
-    "look": "explainer",              # explainer = kiểu giải thích (sơ đồ, thẻ kính, phụ đề vàng); classic = kiểu cũ
+    "look": "doodle",                 # doodle = vẽ tay trên giấy (hình AI vẽ lộ dần); explainer = sơ đồ thẻ kính; classic = cũ
     "visual": "stock",                # stock = video/ảnh Pexels hoặc nền màu; ai = ảnh AI riêng cho từng cảnh
     "veo_scenes": 0,                  # số cảnh dùng video AI Veo (TRẢ PHÍ ~0,8 USD/cảnh); 0 = tắt
     "format": "doc",                  # doc = 9:16 (Reels/TikTok), ngang = 16:9 (YouTube)
@@ -118,7 +124,7 @@ def save_config(body: dict) -> dict:
         cur["voice"] = DEFAULTS["voice"]
     if cur["tts_style"] not in STYLES:
         cur["tts_style"] = DEFAULTS["tts_style"]
-    if cur["look"] not in ("explainer", "classic"):
+    if cur["look"] not in ("doodle", "explainer", "classic"):
         cur["look"] = DEFAULTS["look"]
     if cur["visual"] not in ("stock", "ai"):
         cur["visual"] = DEFAULTS["visual"]
@@ -141,6 +147,7 @@ def public_config() -> dict:
     cfg["styles"] = {k: v[0] for k, v in STYLES.items()}
     cfg["veo_cost"] = round(aimedia.VEO_SECONDS * aimedia.VEO_PRICE_PER_SEC, 2)
     cfg["piper"] = piper_available()
+    cfg["vieneu"] = vieneu_available()
     cfg["piper_downloaded"] = sorted(p.name[:-5] for p in PIPER_DIR.glob("*.onnx")) if PIPER_DIR.is_dir() else []
     cfg["lengths"] = list(LENGTHS)
     cfg["missing"] = missing_tools()
@@ -185,11 +192,16 @@ def _install():
     r = _pip(pkgs)
     if r.returncode != 0:
         raise VideoError("Cài thất bại: " + (r.stderr or r.stdout)[-400:])
-    _log("Đang cài giọng đọc offline Piper (tùy chọn)...")
-    r = _pip(list(OPTIONAL_TOOLS.values()))
-    if r.returncode != 0:
-        _log("⚠ Không cài được Piper (giọng offline) — vẫn dùng giọng Microsoft / Google được. "
-             + (r.stderr or r.stdout)[-200:])
+    for mod, pkg in OPTIONAL_TOOLS.items():
+        label = "VieNeu-TTS (giọng Việt offline, khoảng 3-8 phút)" if mod == "vieneu" else "Piper (giọng offline dự phòng)"
+        if sys.version_info >= (3, 14) and mod == "vieneu":
+            _log("ℹ Python 3.14 còn rất mới, nhiều thư viện của VieNeu-TTS có thể chưa có bản cài sẵn; "
+                 "nếu lỗi, cài Python 3.12 rồi xóa thư mục .venv và chạy lại start.bat.")
+        _log(f"Đang cài {label}...")
+        r = _pip([pkg])
+        if r.returncode != 0:
+            _log(f"⚠ Không cài được {pkg} — vẫn dùng giọng Gemini / Microsoft / Google được. "
+                 + (r.stderr or r.stdout)[-300:])
     importlib.invalidate_caches()
     for mod in ("edge_tts", "gtts"):                     # dùng bản vừa cập nhật mà không cần khởi động lại
         if mod in sys.modules:
@@ -200,6 +212,10 @@ def _install():
     _log("✅ Đã cài / cập nhật xong công cụ làm video.")
 
 
+def vieneu_available() -> bool:
+    return importlib.util.find_spec("vieneu") is not None
+
+
 def piper_available() -> bool:
     return importlib.util.find_spec("piper") is not None
 
@@ -207,7 +223,8 @@ def piper_available() -> bool:
 # ---------------------------------------------------------------- 1. kịch bản
 
 WORDS_PER_SEC = 3.0                  # tốc độ đọc tiếng Việt trung bình của giọng máy (đo từ clip thật)
-SCENE_TYPES = ("hook", "stat", "list", "flow", "steps", "text", "cta")
+SCENE_TYPES = ("hook", "stat", "list", "flow", "steps", "text", "cta", "doodle")
+DOODLE_PAGES = {30: 3, 45: 4, 60: 5, 120: 8, 180: 12}   # giây → số trang của clip vẽ tay (~15 giây / trang)
 
 SCRIPT_PROMPT = """Bạn là biên tập viên video (Facebook Reels / TikTok / YouTube) cho một công ty dịch vụ kế toán - thuế ở Việt Nam.
 Từ nội dung dưới đây, viết kịch bản video dài khoảng {seconds} giây gồm đúng {n} cảnh.
@@ -247,7 +264,41 @@ NỘI DUNG:
 {text}
 """
 
-EXPAND = """Video dài nên phải giải thích ĐẦY ĐỦ, không chỉ tóm tắt: ai được áp dụng, điều kiện, mức ưu đãi cụ thể,
+DOODLE_PROMPT = """Bạn là biên tập viên video giải thích (Facebook Reels / TikTok / YouTube) cho một công ty dịch vụ kế toán - thuế ở Việt Nam.
+Từ nội dung dưới đây, viết kịch bản video "vẽ tay trên giấy" dài khoảng {seconds} giây gồm đúng {n} TRANG.
+Mỗi trang là một ý trọn vẹn, có 2-4 hình minh họa phác thảo được vẽ lần lượt trong lúc người dẫn đọc.
+
+ĐỘ DÀI (BẮT BUỘC): tổng lời đọc khoảng {total} từ, mỗi trang {lo}-{hi} từ.
+
+NỘI DUNG PHẢI CHI TIẾT, DỄ HIỂU CHO NGƯỜI KHÔNG CHUYÊN:
+- Giải thích rõ từng thuật ngữ bằng lời đời thường ("hóa đơn đầu vào nghĩa là...").
+- Ít nhất {examples} trang là VÍ DỤ CỤ THỂ có số liệu và tên nhân vật: vd "Chị Lan bán quần áo, doanh thu năm 8 tỷ đồng,
+  thuế phải nộp là 200 triệu, được giảm 30% nên chỉ còn 140 triệu". Tính toán phải đúng; nói rõ đây là ví dụ minh họa.
+- Giữ ĐÚNG số liệu, mức thuế, ngày hiệu lực, số hiệu văn bản trong bài nguồn. Không bịa số liệu pháp lý.
+- Trang đầu: nêu vấn đề / lợi ích gây chú ý. Các trang giữa: điều kiện, cách tính, thủ tục, lưu ý hay sai sót. Trang cuối: tóm tắt và kêu gọi nhắn Fanpage để được tư vấn miễn phí.
+
+Quy tắc lời đọc (narration): như người dẫn chương trình đang nói, câu ngắn tự nhiên, xưng "bạn", có từ nối và câu hỏi gợi mở.
+KHÔNG viết tắt (viết "thu nhập doanh nghiệp" thay "TNDN"), ngày tháng viết kiểu nói ("ngày 29 tháng 10 năm 2026"), số tiền viết
+dạng đọc được ("tám tỷ đồng", "hai trăm triệu"), không emoji, không ký hiệu markdown. Các trang nối nhau thành một câu chuyện liền mạch.
+
+Mỗi trang có:
+- type: luôn là "doodle".
+- tag: nhãn nhỏ phía trên, tối đa 4 từ, viết hoa (vd "BƯỚC 1 · ĐIỀU KIỆN", "VÍ DỤ THỰC TẾ").
+- headline: tiêu đề của trang, tối đa 10 từ, viết thường như một câu.
+- panels: 2-4 hình, mỗi hình gồm "label" (nhãn tiếng Việt tối đa 4 từ, hiện dưới hình) và "visual" (1-2 câu TIẾNG ANH mô tả hình phác thảo
+  hoạt hình dễ thương: nhân vật / đồ vật / biểu tượng, vd "A cute cartoon shop owner holding an invoice, with a calculator").
+  Hình phải minh họa đúng ý đang nói, không chứa chữ.
+- hl: 1-4 từ hoặc cụm quan trọng trong lời đọc (chép đúng từng chữ) để tô vàng ở phụ đề (số liệu, thuật ngữ chính).
+- description: (chỉ một lần ở cuối JSON) lời giới thiệu đăng kèm video, 2-3 câu, kết bằng 3 hashtag.
+{brand}
+Trả về DUY NHẤT JSON: {{"title": "...", "description": "...", "scenes": [{{"type": "doodle", "tag": "...", "headline": "...",
+"narration": "...", "panels": [{{"label": "...", "visual": "..."}}], "hl": ["..."]}}]}}
+
+NỘI DUNG:
+{text}
+"""
+
+EXPAND = """Video dài nên phải giải thích ĐẦY ĐỦ và có VÍ DỤ CỤ THỂ có số liệu (nói rõ là ví dụ), không chỉ tóm tắt: ai được áp dụng, điều kiện, mức ưu đãi cụ thể,
 thời gian hiệu lực, cách tính (có ví dụ minh họa ghi rõ là ví dụ), các bước doanh nghiệp cần làm, hồ sơ / thời hạn,
 lưu ý và sai lầm thường gặp, câu hỏi hay gặp. Dùng nhiều cảnh "stat" và "list" để màn hình luôn có thông tin."""
 
@@ -273,7 +324,20 @@ def clean_scenes(scenes) -> list:
             items = items.splitlines()
         items = [str(x).strip(" -•*\t")[:90] for x in items if str(x).strip(" -•*\t")][:4]
         typ = str(s.get("type", "")).strip().lower()
+        panels = []
+        for pv in (s.get("panels") or [])[:4]:
+            if isinstance(pv, str):
+                pv = {"label": pv}
+            if isinstance(pv, dict) and (str(pv.get("label", "")).strip() or str(pv.get("visual", "")).strip()):
+                panels.append({"label": str(pv.get("label", "")).strip()[:40], "visual": str(pv.get("visual", "")).strip()[:300]})
+        hl = s.get("hl") or []
+        hl = [x.strip() for x in (hl.split(",") if isinstance(hl, str) else map(str, hl)) if x.strip()][:6]
+        if panels and not items:
+            items = [pv["label"] for pv in panels if pv["label"]][:4]
+        if panels and typ not in SCENE_TYPES:
+            typ = "doodle"
         out.append({"type": typ if typ in SCENE_TYPES else ("stat" if s.get("big") else "list" if items else "text"),
+                    "tag": str(s.get("tag", "")).strip()[:40], "panels": panels, "hl": hl,
                     "headline": str(s.get("headline", "")).strip()[:120],
                     "narration": narration[:900],
                     "big": str(s.get("big", "")).strip()[:16],
@@ -288,13 +352,18 @@ def make_script(text: str, seconds: int = 45) -> dict:
     if len(text) < 80:
         raise VideoError("Nội dung quá ngắn để làm clip (cần ít nhất vài câu)")
     seconds = seconds if seconds in LENGTHS else 45
-    n = LENGTHS[seconds]
+    cfg = get_config()
+    doodle = cfg["look"] == "doodle"
+    n = DOODLE_PAGES[seconds] if doodle else LENGTHS[seconds]
     total = int(seconds * WORDS_PER_SEC)
     per = total / n
-    cfg = get_config()
-    brand = f'- Cảnh cuối nhắc tên: "{cfg["brand"]}"\n' if cfg["brand"] else ""
-    prompt = SCRIPT_PROMPT.format(seconds=seconds, n=n, total=total, lo=int(per * 0.8), hi=int(per * 1.25),
-                                  expand=EXPAND if seconds >= 90 else "", brand=brand, text=text[:12000])
+    brand = f'- {"Trang" if doodle else "Cảnh"} cuối nhắc tên: "{cfg["brand"]}"\n' if cfg["brand"] else ""
+    if doodle:
+        prompt = DOODLE_PROMPT.format(seconds=seconds, n=n, total=total, lo=int(per * 0.8), hi=int(per * 1.25),
+                                      examples=max(1, n // 3), brand=brand, text=text[:12000])
+    else:
+        prompt = SCRIPT_PROMPT.format(seconds=seconds, n=n, total=total, lo=int(per * 0.8), hi=int(per * 1.25),
+                                      expand=EXPAND if seconds >= 90 else "", brand=brand, text=text[:12000])
     best = None
     for attempt in range(2):          # AI hay viết quá ngắn: thiếu thì yêu cầu viết lại 1 lần
         try:
@@ -307,9 +376,9 @@ def make_script(text: str, seconds: int = 45) -> dict:
         words = sum(word_count(s["narration"]) for s in scenes)
         if scenes and (not best or words > best[1]):
             best = (out, words, scenes)
-        if scenes and words >= total * 0.8 and len(scenes) >= n * 0.8:
+        if scenes and words >= total * 0.8 and len(scenes) >= n * 0.75:
             break
-        prompt += (f"\n\nLƯU Ý: bản trước chỉ có {len(scenes)} cảnh / {words} từ — QUÁ NGẮN. Viết lại đủ {n} cảnh "
+        prompt += (f"\n\nLƯU Ý: bản trước chỉ có {len(scenes)} {'trang' if doodle else 'cảnh'} / {words} từ — QUÁ NGẮN. Viết lại đủ {n} {'trang' if doodle else 'cảnh'} "
                    f"và khoảng {total} từ lời đọc, giải thích chi tiết hơn.")
     if not best:
         raise VideoError("AI không trả về kịch bản hợp lệ, thử lại")
@@ -431,6 +500,31 @@ def _piper(text: str, voice: str, rate: int, dest: Path):
     wav.unlink(missing_ok=True)
 
 
+_vieneu_model = {}
+
+
+def _vieneu(text: str, voice: str, rate: int, dest: Path):
+    """VieNeu-TTS v3 Turbo (Apache-2.0) chạy hoàn toàn trên CPU bằng ONNX Runtime, không cần card đồ họa.
+    Lần đầu tự tải mô hình từ Hugging Face (vài trăm MB) về thư mục cache của máy."""
+    if not vieneu_available():
+        raise VideoError("Chưa cài VieNeu-TTS — bấm 'Cài / cập nhật công cụ'")
+    if "tts" not in _vieneu_model:
+        _log("Đang nạp VieNeu-TTS (lần đầu tải mô hình, vài phút)...")
+        from vieneu import Vieneu
+        _vieneu_model["tts"] = Vieneu(backend="onnx")
+    import soundfile as sf
+    tts_engine = _vieneu_model["tts"]
+    audio = tts_engine.infer(text, voice=voice)
+    if audio is None or len(audio) == 0:
+        raise VideoError("VieNeu-TTS không tạo được âm thanh")
+    wav = dest.with_suffix(".wav")
+    sf.write(str(wav), audio, tts_engine.sample_rate)
+    trim = "silenceremove=start_periods=1:start_threshold=-45dB"
+    flt = f"{trim},areverse,{trim},areverse,atempo={1 + max(-30, min(30, rate)) / 100:.2f}"
+    _ffmpeg(["-i", wav.name, "-af", flt, "-c:a", "libmp3lame", "-q:a", "3", dest.name], dest.parent)
+    wav.unlink(missing_ok=True)
+
+
 def _gemini_voice(text: str, voice: str, style: str, rate: int, dest: Path):
     import wave
     key = newsagent.get_config()["gemini_key"]
@@ -462,7 +556,12 @@ def tts(text: str, voice: str, rate: int, dest: Path, style: str = "") -> str:
     label = lambda v: VOICES.get(v, v).split(" — ")[0]
     piper_fallback = next((v for v in VOICES if v.startswith("piper:") and
                            (PIPER_DIR / f"{v[6:]}.onnx").exists()), None)
-    if voice.startswith("gemini:"):
+    if voice.startswith("vieneu:"):
+        edge = EDGE_VOICES[0]
+        attempts = [(label(voice), lambda: _vieneu(text, voice[7:], rate, dest)),
+                    (label(voice), lambda: _vieneu(text, voice[7:], rate, dest)),
+                    (label(edge), lambda: _edge(text, edge, f"{int(rate):+d}%", dest))]
+    elif voice.startswith("gemini:"):
         edge = EDGE_VOICES[0]
         attempts = [(label(voice), lambda: _gemini_voice(text, voice[7:], style, rate, dest)),
                     (label(edge), lambda: _edge(text, edge, f"{int(rate):+d}%", dest))]
@@ -986,6 +1085,8 @@ def render(video_id: int):
     v = db.video_get(video_id)
     cfg = get_config()
     size = SIZES[cfg["format"]]
+    if cfg["look"] == "doodle":                  # kiểu vẽ tay có nhiều lớp chồng: dựng 720p cho nhanh (đúng độ phân giải clip mẫu)
+        size = (size[0] * 2 // 3, size[1] * 2 // 3)
     L = Layout(size)
     work = VIDEO_DIR / str(video_id)
     shutil.rmtree(work, ignore_errors=True)
@@ -1002,9 +1103,14 @@ def render(video_id: int):
         article_img = work / "article.img"
         if not _download(v["image_url"], article_img):
             article_img = None
-    from . import explainer
+    from . import doodle, explainer
     expl = cfg["look"] == "explainer"
-    trans, tnames = (0.3, ["fade"]) if expl else (TRANSITION, TRANSITIONS)
+    paper = cfg["look"] == "doodle"
+    trans, tnames = (0.3, ["fade"]) if (expl or paper) else (TRANSITION, TRANSITIONS)
+    hand = None
+    if paper:
+        hand_file = work / "hand.png"
+        hand = (hand_file.name, doodle.hand_image(int(L.base * 0.24), hand_file))
     used_videos, durations = set(), []
     style = STYLES[cfg["tts_style"]][1]
     gkey = newsagent.get_config()["gemini_key"]
@@ -1021,6 +1127,13 @@ def render(video_id: int):
         voice_len = media_duration(work / f"voice{i}.mp3")
         dur = math.ceil((voice_len + 0.35) * FPS) / FPS
 
+        if paper:
+            step(f"Trang {i + 1}/{total}: vẽ hình minh họa" + (" (AI)" if gkey else ""))
+            panels = doodle.make_panels(sc, size, work, i, gkey, _log, True)
+            step(f"Trang {i + 1}/{total}: dựng video")
+            doodle.render_page(L, sc, i, total, work, dur, voice_len, cfg["brand"], panels, hand, FPS, "f7f3e2")
+            durations.append(dur)
+            continue
         step(f"Cảnh {i + 1}/{total}: hình ảnh")
         visual = sc["visual"] or sc["keyword"] or sc["headline"]
         bg_video = False

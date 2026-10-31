@@ -636,9 +636,9 @@
       <label>Ảnh của bài (tùy chọn, dùng cho cảnh đầu và cuối)</label>
       <input id="vdImg" placeholder="https://...jpg">
       <label>Độ dài</label>
-      <select id="vdLen"><option value="30">~30 giây (5 cảnh)</option><option value="45" selected>~45 giây (7 cảnh)</option>
-        <option value="60">~60 giây (9 cảnh)</option><option value="120">~2 phút (14 cảnh)</option>
-        <option value="180">~3 phút (20 cảnh)</option></select>
+      <select id="vdLen"><option value="30">~30 giây</option><option value="45" selected>~45 giây</option>
+        <option value="60">~60 giây</option><option value="120">~2 phút</option>
+        <option value="180">~3 phút</option></select>
       <div class="btns"><button class="btn pri" id="vdMake" onclick="vdCreate()">✨ AI viết kịch bản</button></div>
       <p class="muted small" id="vdKeyHint"></p>
     </div>
@@ -658,7 +658,8 @@
         <div><label>Màu thương hiệu</label><input id="vdColor" type="color" style="height:38px"></div>
       </div>
       <label>Kiểu clip</label>
-      <select id="vdLook"><option value="explainer">Giải thích (sơ đồ, thẻ kính, phụ đề vàng) — kiểu clip công nghệ</option>
+      <select id="vdLook"><option value="doodle">Vẽ tay trên giấy (hình AI vẽ lộ dần, có bàn tay cầm bút) — cần Gemini key</option>
+        <option value="explainer">Giải thích (sơ đồ, thẻ kính, phụ đề vàng) — kiểu clip công nghệ</option>
         <option value="classic">Cổ điển (khung tiêu đề + ảnh nền)</option></select>
       <div class="row2">
         <div><label>Hình nền mỗi cảnh</label>
@@ -803,14 +804,14 @@ const VD_ST = { draft: ['Kịch bản','p-info'], rendering: ['Đang dựng','p-
 function vdFromNews(id) { VPRESET = 'news:' + id; openTab('video'); }
 async function loadVideo() {
   VCFG = await api('/api/video/config');
-  $('vdVoice').innerHTML = [['gemini:', '⭐ Gemini AI — tự nhiên nhất (cần Gemini key)'], ['vi-VN', 'Microsoft — cần Internet'], ['piper:', 'Piper — offline']]
+  $('vdVoice').innerHTML = [['vieneu:', '⭐ VieNeu-TTS — giọng Việt chạy trên máy bạn, miễn phí'], ['gemini:', 'Gemini AI (cần Gemini key)'], ['vi-VN', 'Microsoft — cần Internet'], ['piper:', 'Piper — offline']]
     .map(([pre, lbl]) => `<optgroup label="${lbl}">${Object.entries(VCFG.voices).filter(([k]) => k.startsWith(pre))
       .map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</optgroup>`).join('');
   $('vdStyle').innerHTML = Object.entries(VCFG.styles).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
   $('vdStyle').value = VCFG.tts_style; $('vdLook').value = VCFG.look; $('vdVisual').value = VCFG.visual; $('vdVeo').value = VCFG.veo_scenes;
   $('vdVeoCost').textContent = `(≈ ${VCFG.veo_cost} USD / cảnh)`;
   $('vdVoice').value = VCFG.voice; $('vdRate').value = VCFG.rate;
-  if (!VCFG.piper) [...$('vdVoice').options].forEach(o => { if (o.value.startsWith('piper:')) o.textContent += ' (chưa cài)'; }); $('vdFormat').value = VCFG.format;
+  [...$('vdVoice').options].forEach(o => { if ((o.value.startsWith('piper:') && !VCFG.piper) || (o.value.startsWith('vieneu:') && !VCFG.vieneu)) o.textContent += ' (chưa cài)'; }); $('vdFormat').value = VCFG.format;
   $('vdColor').value = VCFG.color; $('vdBrand').value = VCFG.brand; $('vdMusic').checked = VCFG.music;
   $('vdPexState').textContent = VCFG.has_pexels_key ? '— đã lưu' : '';
   $('vdMusicHint').textContent = VCFG.music_files ? `(${VCFG.music_files} bài trong ${VCFG.music_dir})`
@@ -830,7 +831,7 @@ function vdRenderTools() {
   const miss = VCFG.missing.length;
   $('vdTools').innerHTML = (miss ? `<p class="note small">Cần cài thêm: <b>${VCFG.missing.join(', ')}</b> (giọng đọc, vẽ chữ, FFmpeg).
       <button class="btn pri" onclick="vdInstall()" ${VCFG.busy ? 'disabled' : ''}>⬇ Cài công cụ</button></p>`
-      : `<p class="small"><span class="pill p-ok">Đã có đủ công cụ</span>${VCFG.piper ? '' : ' <span class="pill p-warn">chưa có giọng offline Piper</span>'}
+      : `<p class="small"><span class="pill p-ok">Đã có đủ công cụ</span>${VCFG.vieneu ? '' : ' <span class="pill p-warn">chưa có VieNeu-TTS — bấm Cập nhật công cụ</span>'}
           <button class="btn" onclick="vdInstall()" ${VCFG.busy ? 'disabled' : ''} title="Cập nhật giọng đọc khi gặp lỗi">🔄 Cập nhật công cụ</button></p>`) +
     (VCFG.log.length ? `<pre class="small" style="white-space:pre-wrap;max-height:120px;overflow:auto">${esc(VCFG.log.join('\n'))}</pre>` : '');
 }
@@ -876,11 +877,19 @@ async function vdLoadList() {
   if (VIDEOS.some(v => v.status === 'rendering') && document.getElementById('video').classList.contains('active'))
     vdTimer = setTimeout(vdLoadList, 3000);
 }
-const VD_TYPES = { hook: 'Mở đầu', stat: 'Con số nổi bật', list: 'Danh sách ý', flow: 'Sơ đồ cây (gốc + nhánh)', steps: 'Các bước nối nhau', text: 'Chỉ tiêu đề', cta: 'Kêu gọi liên hệ' };
+const VD_TYPES = { doodle: 'Trang vẽ tay', hook: 'Mở đầu', stat: 'Con số nổi bật', list: 'Danh sách ý', flow: 'Sơ đồ cây (gốc + nhánh)', steps: 'Các bước nối nhau', text: 'Chỉ tiêu đề', cta: 'Kêu gọi liên hệ' };
 const vdWords = (t) => (t.match(/[\p{L}\p{N}]+/gu) || []).length;
 const vdEst = (scenes) => Math.round(scenes.reduce((n, s) => n + vdWords(s.narration) / 3 + 0.3, 0));
 const vdFmtSec = (n) => n >= 60 ? `${Math.floor(n / 60)} phút ${n % 60} giây` : `${n} giây`;
 function vdScene(v, s, i) {
+  if (s.type === 'doodle') return `<div style="border-left:3px solid #ddd;padding-left:10px;margin:8px 0">
+    <b class="small">Trang ${i + 1}</b> <button class="btn" style="padding:2px 8px" onclick="vdDelScene(${v.id},${i})">✕</button>
+    <input data-v="${v.id}" data-i="${i}" data-f="tag" value="${esc(s.tag || '')}" placeholder="Nhãn nhỏ (vd VÍ DỤ THỰC TẾ)">
+    <input data-v="${v.id}" data-i="${i}" data-f="headline" value="${esc(s.headline)}" placeholder="Tiêu đề trang">
+    <textarea data-v="${v.id}" data-i="${i}" data-f="narration" rows="4" placeholder="Lời đọc">${esc(s.narration)}</textarea>
+    <textarea data-v="${v.id}" data-i="${i}" data-f="panels" rows="3" placeholder="Mỗi dòng 1 hình: Nhãn tiếng Việt | mô tả hình bằng tiếng Anh">${esc((s.panels || []).map(p => p.label + ' | ' + p.visual).join('\n'))}</textarea>
+    <input data-v="${v.id}" data-i="${i}" data-f="hl" value="${esc((s.hl || []).join(', '))}" placeholder="Từ khóa tô vàng ở phụ đề (cách nhau dấu phẩy)">
+  </div>`;
   return `<div style="border-left:3px solid #ddd;padding-left:10px;margin:8px 0">
     <b class="small">Cảnh ${i + 1}</b>
     <select data-v="${v.id}" data-i="${i}" data-f="type" style="width:auto;display:inline-block">
@@ -925,7 +934,11 @@ function vdCollect(id) {
   const v = VIDEOS.find(x => x.id === id);
   const scenes = v.scenes.map(s => ({ ...s }));
   document.querySelectorAll(`[data-v="${id}"]`).forEach(el => {
-    scenes[+el.dataset.i][el.dataset.f] = el.dataset.f === 'items' ? el.value.split('\n').map(x => x.trim()).filter(Boolean) : el.value; });
+    const f = el.dataset.f, sc = scenes[+el.dataset.i];
+    if (f === 'items') sc[f] = el.value.split('\n').map(x => x.trim()).filter(Boolean);
+    else if (f === 'hl') sc[f] = el.value.split(',').map(x => x.trim()).filter(Boolean);
+    else if (f === 'panels') sc[f] = el.value.split('\n').map(x => x.trim()).filter(Boolean).map(l => { const [a, ...b] = l.split('|'); return { label: a.trim(), visual: b.join('|').trim() }; });
+    else sc[f] = el.value; });
   return { title: $('vt' + id).value, description: $('vds' + id).value, scenes };
 }
 async function vdSaveOne(id) { return api('/api/videos/' + id, { method: 'PUT', body: vdCollect(id) }); }

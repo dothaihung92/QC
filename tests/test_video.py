@@ -97,6 +97,7 @@ def test_tts_cleans_text_and_falls_back_to_google(monkeypatch, tmp_path):
 
 
 def test_long_clip_script_retries_when_too_short(client, monkeypatch):
+    video.save_config({"look": "explainer"})
     prompts = []
     short = [{"headline": "Ý", "narration": "Ngắn quá.", "items": ["a"]}] * 8
     long_ = [{"type": "stat", "headline": f"Ý {i}", "narration": "Lời đọc khá dài " * 7, "big": "30%",
@@ -220,7 +221,7 @@ def test_aimedia_parses_tts_image_and_retries(monkeypatch):
 def test_render_uses_ai_image_and_veo_with_fallbacks(client, monkeypatch, tmp_path):
     from app import aimedia
     newsagent.save_config({"gemini_key": "k"})
-    video.save_config({"visual": "ai", "veo_scenes": 2, "voice": "vi-VN-HoaiMyNeural"})
+    video.save_config({"visual": "ai", "veo_scenes": 2, "voice": "vi-VN-HoaiMyNeural", "look": "classic"})
     sc = [{"type": "text", "headline": f"H{i}", "narration": "Lời đọc.", "visual": f"scene {i}"} for i in range(3)]
     vid = db.video_add("T", "", sc)
     monkeypatch.setattr(video, "tts", lambda text, voice, rate, dest, style="": (video._ffmpeg(
@@ -261,6 +262,64 @@ def test_explainer_heading_split_key_word_and_layers(tmp_path):
 
 
 def test_explainer_is_default_and_classic_still_renders(client, monkeypatch):
-    assert video.get_config()["look"] == "explainer"
-    assert video.save_config({"look": "xx"})["look"] == "explainer"
+    assert video.get_config()["look"] == "doodle"
+    assert video.save_config({"look": "xx"})["look"] == "doodle"
     assert video.save_config({"look": "classic"})["look"] == "classic"
+
+
+def test_doodle_script_prompt_and_panels(client, monkeypatch):
+    prompts = []
+    page = {"type": "doodle", "tag": "ví dụ thực tế", "headline": "Chị Lan bán quần áo", "hl": "một trăm triệu, 30%",
+            "narration": "Ví dụ chị Lan nộp thuế hai trăm triệu, được giảm ba mươi phần trăm. " * 4,
+            "panels": [{"label": "Doanh thu 8 tỷ", "visual": "A cute shop owner"}, "Giảm 30%", {"foo": 1}, {"label": "Còn 140 triệu"}]}
+    monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: prompts.append(p) or {"scenes": [page] * 8})
+    v = client.post("/api/videos", json={"text": "Nội dung bài viết về thuế. " * 10, "seconds": 120}).json()
+    assert len(v["scenes"]) == 8 and "8 TRANG" in prompts[0] and "VÍ DỤ CỤ THỂ" in prompts[0]
+    sc = v["scenes"][0]
+    assert sc["type"] == "doodle" and sc["hl"] == ["một trăm triệu", "30%"]
+    assert [p["label"] for p in sc["panels"]] == ["Doanh thu 8 tỷ", "Giảm 30%", "Còn 140 triệu"] and sc["items"] == [p["label"] for p in sc["panels"]]
+
+
+def test_doodle_layout_highlight_and_render(client, monkeypatch, tmp_path):
+    from app import aimedia, doodle
+    for n in (1, 2, 3, 4):
+        boxes = doodle.layout((720, 1280), n)
+        assert len(boxes) == n and all(0 <= x and x + w <= 720 and 0 <= y and y + h <= 1280 for x, y, w, h in boxes)
+    w = "Được giảm ba mươi phần trăm, chị chỉ còn nộp một trăm bốn mươi triệu".split()
+    hit = [x for x, f in zip(w, doodle.highlight_flags(w, ["ba mươi phần trăm", "140"])) if f]
+    assert hit == ["ba", "mươi", "phần", "trăm,"]
+    if not HAS_TOOLS:
+        return
+    video.save_config({"look": "doodle", "voice": "vi-VN-HoaiMyNeural"})
+    newsagent.save_config({"gemini_key": "k"})
+    scenes = [{"type": "doodle", "tag": "VÍ DỤ", "headline": "Chị Lan", "narration": "Chị Lan nộp thuế hai trăm triệu.",
+               "panels": [{"label": "A", "visual": "a"}, {"label": "B", "visual": "b"}], "hl": ["hai trăm triệu"]}]
+    vid = db.video_add("T", "", video.clean_scenes(scenes))
+    monkeypatch.setattr(video, "tts", lambda text, voice, rate, dest, style="": (video._ffmpeg(
+        ["-f", "lavfi", "-i", "sine=duration=2", "-c:a", "libmp3lame", str(dest)], dest.parent), "x")[1])
+    calls = []
+
+    def fake_image(prompt, aspect, key):
+        calls.append(prompt)
+        if len(calls) == 2:
+            raise aimedia.AIError("blocked")
+        import io
+        from PIL import Image
+        b = io.BytesIO()
+        Image.new("RGB", (64, 64), "white").save(b, "PNG")
+        return b.getvalue()
+    monkeypatch.setattr(aimedia, "image", fake_image)
+    video.render(vid)
+    v = db.video_get(vid)
+    assert v["status"] == "done" and 2 < v["duration"] < 4 and len(calls) == 2
+    assert calls[0].startswith(doodle.IMG_STYLE) and any("vẽ AI lỗi" in l for l in video.state["log"])
+
+
+def test_vieneu_voice_chain(monkeypatch, tmp_path):
+    seen = []
+    monkeypatch.setattr(video, "_vieneu", lambda text, voice, rate, dest: seen.append(voice) or (_ for _ in ()).throw(RuntimeError("chưa tải mô hình")))
+    monkeypatch.setattr(video, "_edge", lambda text, voice, rate, d: d.write_bytes(b"mp3"))
+    monkeypatch.setattr(video.time, "sleep", lambda s: None)
+    assert video.tts("Xin chào", "vieneu:Mai Anh", 8, tmp_path / "v.mp3") == "Hoài My (nữ)"
+    assert seen == ["Mai Anh", "Mai Anh"]
+    assert video.get_config()["voice"] == "vieneu:Mai Anh" and "vieneu:Mai Anh" in video.VOICES
