@@ -646,7 +646,8 @@
       <h2>Cài đặt clip</h2>
       <div id="vdTools"></div>
       <div class="row2">
-        <div><label>Giọng đọc</label><select id="vdVoice"></select></div>
+        <div><label>Giọng đọc</label><select id="vdVoice"></select>
+          <button class="btn" id="vdTestBtn" onclick="vdVoiceTest()" style="margin-top:6px">🔊 Nghe thử</button></div>
         <div><label>Tốc độ đọc (%)</label><input id="vdRate" type="number" min="-30" max="30"></div>
       </div>
       <div class="row2">
@@ -789,7 +790,8 @@ function vdFromNews(id) { VPRESET = 'news:' + id; openTab('video'); }
 async function loadVideo() {
   VCFG = await api('/api/video/config');
   $('vdVoice').innerHTML = Object.entries(VCFG.voices).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
-  $('vdVoice').value = VCFG.voice; $('vdRate').value = VCFG.rate; $('vdFormat').value = VCFG.format;
+  $('vdVoice').value = VCFG.voice; $('vdRate').value = VCFG.rate;
+  if (!VCFG.piper) [...$('vdVoice').options].forEach(o => { if (o.value.startsWith('piper:')) o.textContent += ' (chưa cài)'; }); $('vdFormat').value = VCFG.format;
   $('vdColor').value = VCFG.color; $('vdBrand').value = VCFG.brand; $('vdMusic').checked = VCFG.music;
   $('vdPexState').textContent = VCFG.has_pexels_key ? '— đã lưu' : '';
   $('vdMusicHint').textContent = VCFG.music_files ? `(${VCFG.music_files} bài trong ${VCFG.music_dir})`
@@ -809,9 +811,19 @@ function vdRenderTools() {
   const miss = VCFG.missing.length;
   $('vdTools').innerHTML = (miss ? `<p class="note small">Cần cài thêm: <b>${VCFG.missing.join(', ')}</b> (giọng đọc, vẽ chữ, FFmpeg).
       <button class="btn pri" onclick="vdInstall()" ${VCFG.busy ? 'disabled' : ''}>⬇ Cài công cụ</button></p>`
-      : `<p class="small"><span class="pill p-ok">Đã có đủ công cụ</span>
+      : `<p class="small"><span class="pill p-ok">Đã có đủ công cụ</span>${VCFG.piper ? '' : ' <span class="pill p-warn">chưa có giọng offline Piper</span>'}
           <button class="btn" onclick="vdInstall()" ${VCFG.busy ? 'disabled' : ''} title="Cập nhật giọng đọc khi gặp lỗi">🔄 Cập nhật công cụ</button></p>`) +
     (VCFG.log.length ? `<pre class="small" style="white-space:pre-wrap;max-height:120px;overflow:auto">${esc(VCFG.log.join('\n'))}</pre>` : '');
+}
+async function vdVoiceTest() {
+  const btn = $('vdTestBtn'), voice = $('vdVoice').value;
+  btn.disabled = true; btn.textContent = voice.startsWith('piper:') ? '⏳ Lần đầu tải giọng, đợi chút...' : '⏳ Đang đọc...';
+  try {
+    const r = await fetch('/api/video/voice-test', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ voice, rate: +$('vdRate').value || 0 }) });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); return toast('⚠ ' + (d.detail || r.statusText)); }
+    new Audio(URL.createObjectURL(await r.blob())).play();
+  } finally { btn.disabled = false; btn.textContent = '🔊 Nghe thử'; }
 }
 async function vdInstall() {
   VCFG = await api('/api/video/install', { method: 'POST' }); vdRenderTools();

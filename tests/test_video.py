@@ -102,3 +102,37 @@ def test_long_clip_script_keeps_many_scenes(client, monkeypatch):
     monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: prompts.append(p) or {"scenes": scenes})
     v = client.post("/api/videos", json={"text": "Nội dung bài viết về thuế. " * 10, "seconds": 180}).json()
     assert len(v["scenes"]) == 16 and "16 cảnh" in prompts[0] and "2-3 câu" in prompts[0]
+
+
+@pytest.mark.skipif(not (HAS_TOOLS and importlib.util.find_spec("piper")), reason="cần piper-tts")
+def test_piper_voice_makes_mp3_and_falls_back(monkeypatch, tmp_path):
+    seen = {}
+
+    class FakeVoice:
+        def synthesize_wav(self, text, f, syn_config=None):
+            seen["scale"] = syn_config.length_scale
+            f.setnchannels(1); f.setsampwidth(2); f.setframerate(22050)
+            f.writeframes(b"\x00\x00" * 22050)
+    monkeypatch.setattr(video, "_piper_voice", lambda name: seen.setdefault("name", name) and FakeVoice())
+    dest = tmp_path / "v.mp3"
+    assert video.tts("Xin chào", "piper:vi_VN-vais1000-medium", 25, dest) == "VAIS1000 (nữ)"
+    assert seen["name"] == "vi_VN-vais1000-medium" and abs(seen["scale"] - 0.8) < 1e-6
+    assert 0.9 < video.media_duration(dest) < 1.2 and not dest.with_suffix(".wav").exists()
+
+    def broken(name):
+        raise video.VideoError("Chưa tải được giọng")
+    monkeypatch.setattr(video, "_piper_voice", broken)
+    monkeypatch.setattr(video, "_edge", lambda text, voice, rate, d: d.write_bytes(b"mp3"))
+    monkeypatch.setattr(video.time, "sleep", lambda s: None)
+    assert video.tts("Xin chào", "piper:vi_VN-vais1000-medium", 0, dest) == "Hoài My (nữ)"
+
+
+def test_voice_test_endpoint(client, monkeypatch):
+    monkeypatch.setattr(video, "missing_tools", lambda: [])
+    monkeypatch.setattr(video, "tts", lambda text, voice, rate, dest: (dest.write_bytes(b"ID3"), "Hoài My (nữ)")[1])
+    r = client.post("/api/video/voice-test", json={"voice": "vi-VN-HoaiMyNeural"})
+    assert r.status_code == 200 and r.headers["content-type"] == "audio/mpeg" and r.content == b"ID3"
+    assert client.post("/api/video/voice-test", json={"voice": "xx"}).status_code == 400
+    monkeypatch.setattr(video, "tts", lambda text, voice, rate, dest: (dest.write_bytes(b"x"), "Google")[1])
+    r = client.post("/api/video/voice-test", json={"voice": "vi-VN-NamMinhNeural"})
+    assert r.status_code == 400 and "Google" in r.json()["detail"]

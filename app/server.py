@@ -966,6 +966,23 @@ def video_install():
     return video.public_config()
 
 
+class VoiceTestIn(BaseModel):
+    voice: str
+    rate: int = 0
+
+
+@admin.post("/api/video/voice-test")
+def video_voice_test(body: VoiceTestIn):
+    """Đọc thử 1 câu mẫu để so sánh các giọng (giọng Piper lần đầu sẽ tải mô hình về máy)."""
+    if video.missing_tools():
+        raise HTTPException(409, "Chưa cài công cụ làm video — bấm 'Cài công cụ' trước")
+    try:
+        path = video.voice_sample(body.voice, body.rate)
+    except video.VideoError as e:
+        raise HTTPException(400, str(e))
+    return FileResponse(path, media_type="audio/mpeg", headers=NO_STORE)
+
+
 class ScriptIn(BaseModel):
     text: str
     seconds: int = 45

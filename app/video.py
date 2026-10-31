@@ -33,7 +33,15 @@ MUSIC_DIR = config.DATA_DIR / "music"
 FPS = 30
 OVERSIZE = 1.10                      # ảnh nền lớn hơn khung 10% để trượt chậm
 SIZES = {"doc": (1080, 1920), "ngang": (1920, 1080)}
-VOICES = {"vi-VN-HoaiMyNeural": "Hoài My (nữ)", "vi-VN-NamMinhNeural": "Nam Minh (nam)"}
+VOICES = {"vi-VN-HoaiMyNeural": "Hoài My (nữ) — Microsoft, cần Internet",
+          "vi-VN-NamMinhNeural": "Nam Minh (nam) — Microsoft, cần Internet",
+          # Piper (github.com/OHF-Voice/piper1-gpl): chạy ngay trên máy, không cần Internet sau lần tải đầu
+          "piper:vi_VN-vais1000-medium": "VAIS1000 (nữ) — Piper, offline",
+          "piper:vi_VN-25hours_single-low": "25hours (nữ) — Piper, offline",
+          "piper:vi_VN-vivos-x_low": "VIVOS (nhiều giọng) — Piper, offline"}
+EDGE_VOICES = [v for v in VOICES if not v.startswith("piper:")]
+PIPER_DIR = config.DATA_DIR / "piper-voices"
+OPTIONAL_TOOLS = {"piper": "piper-tts"}                  # cài lỗi (vd Python quá mới) vẫn dùng được giọng khác
 LENGTHS = {30: 4, 45: 6, 60: 7, 120: 12, 180: 16}      # giây → số cảnh
 TOOLS = {"PIL": "pillow", "edge_tts": "edge-tts", "imageio_ffmpeg": "imageio-ffmpeg",
          "gtts": "gTTS"}                                 # gTTS: giọng dự phòng khi Edge-TTS từ chối
@@ -104,6 +112,8 @@ def public_config() -> dict:
     cfg = get_config()
     cfg["has_pexels_key"] = bool(cfg.pop("pexels_key"))
     cfg["voices"] = VOICES
+    cfg["piper"] = piper_available()
+    cfg["piper_downloaded"] = sorted(p.name[:-5] for p in PIPER_DIR.glob("*.onnx")) if PIPER_DIR.is_dir() else []
     cfg["lengths"] = list(LENGTHS)
     cfg["missing"] = missing_tools()
     cfg["has_gemini_key"] = bool(newsagent.get_config()["gemini_key"])
@@ -135,14 +145,23 @@ def start_install():
     _run_bg(_install)
 
 
+def _pip(pkgs: list):
+    return subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", *pkgs],
+                          capture_output=True, text=True, timeout=900)
+
+
 def _install():
     # luôn cài/cập nhật bản mới nhất: Edge-TTS hay phải cập nhật khi Microsoft đổi cách xác thực
     pkgs = list(TOOLS.values())
     _log(f"Đang cài / cập nhật {', '.join(pkgs)} (1-3 phút)...")
-    r = subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", *pkgs],
-                       capture_output=True, text=True, timeout=900)
+    r = _pip(pkgs)
     if r.returncode != 0:
         raise VideoError("Cài thất bại: " + (r.stderr or r.stdout)[-400:])
+    _log("Đang cài giọng đọc offline Piper (tùy chọn)...")
+    r = _pip(list(OPTIONAL_TOOLS.values()))
+    if r.returncode != 0:
+        _log("⚠ Không cài được Piper (giọng offline) — vẫn dùng giọng Microsoft / Google được. "
+             + (r.stderr or r.stdout)[-200:])
     importlib.invalidate_caches()
     for mod in ("edge_tts", "gtts"):                     # dùng bản vừa cập nhật mà không cần khởi động lại
         if mod in sys.modules:
@@ -151,6 +170,10 @@ def _install():
             except Exception:  # noqa: BLE001
                 pass
     _log("✅ Đã cài / cập nhật xong công cụ làm video.")
+
+
+def piper_available() -> bool:
+    return importlib.util.find_spec("piper") is not None
 
 
 # ---------------------------------------------------------------- 1. kịch bản
@@ -263,17 +286,59 @@ def _gtts(text: str, dest: Path):
     gTTS(text=text, lang="vi").save(str(dest))
 
 
+_piper_cache = {}
+
+
+def _piper_voice(name: str):
+    """Nạp giọng Piper; lần đầu tự tải mô hình (~20-60 MB) từ Hugging Face về data/piper-voices."""
+    if name in _piper_cache:
+        return _piper_cache[name]
+    if not piper_available():
+        raise VideoError("Chưa cài Piper — bấm 'Cài / cập nhật công cụ'")
+    from piper import PiperVoice
+    from piper.download_voices import download_voice
+    PIPER_DIR.mkdir(parents=True, exist_ok=True)
+    model = PIPER_DIR / f"{name}.onnx"
+    if not model.exists() or not (PIPER_DIR / f"{name}.onnx.json").exists():
+        _log(f"Đang tải giọng {name} lần đầu (vài chục MB)...")
+        download_voice(name, PIPER_DIR)
+    _piper_cache[name] = PiperVoice.load(str(model))
+    return _piper_cache[name]
+
+
+def _piper(text: str, voice: str, rate: int, dest: Path):
+    import wave
+    from piper import SynthesisConfig
+    v = _piper_voice(voice.split(":", 1)[1])
+    wav = dest.with_suffix(".wav")
+    cfg = SynthesisConfig(length_scale=1 / (1 + max(-30, min(30, rate)) / 100))
+    with wave.open(str(wav), "wb") as f:
+        v.synthesize_wav(text, f, syn_config=cfg)
+    _ffmpeg(["-i", wav.name, "-c:a", "libmp3lame", "-q:a", "3", dest.name], dest.parent)
+    wav.unlink(missing_ok=True)
+
+
 def tts(text: str, voice: str, rate: int, dest: Path) -> str:
-    """Tạo giọng đọc, thử lần lượt: Edge-TTS (giọng đã chọn) → Edge-TTS tốc độ chuẩn → giọng Edge còn lại
-    → Google (gTTS). Trả về tên giọng đã dùng."""
+    """Tạo giọng đọc, thử lần lượt tới khi được. Giọng Microsoft: giọng đã chọn → tốc độ chuẩn →
+    giọng Microsoft còn lại → Piper offline (nếu đã cài) → Google. Giọng Piper: Piper → Microsoft → Google.
+    Trả về tên giọng đã dùng."""
     text = clean_tts_text(text)
     if not text:
         raise VideoError("Lời đọc trống sau khi bỏ ký tự đặc biệt")
-    other = next(v for v in VOICES if v != voice) if voice in VOICES else "vi-VN-HoaiMyNeural"
-    attempts = [(VOICES.get(voice, voice), lambda: _edge(text, voice, f"{int(rate):+d}%", dest)),
-                (VOICES.get(voice, voice), lambda: _edge(text, voice, "+0%", dest)),
-                (VOICES.get(other, other), lambda: _edge(text, other, "+0%", dest)),
-                ("Google", lambda: _gtts(text, dest))]
+    label = lambda v: VOICES.get(v, v).split(" — ")[0]
+    piper_fallback = next((v for v in VOICES if v.startswith("piper:") and
+                           (PIPER_DIR / f"{v[6:]}.onnx").exists()), None)
+    if voice.startswith("piper:"):
+        attempts = [(label(voice), lambda: _piper(text, voice, rate, dest)),
+                    (label(EDGE_VOICES[0]), lambda: _edge(text, EDGE_VOICES[0], "+0%", dest))]
+    else:
+        other = next((v for v in EDGE_VOICES if v != voice), EDGE_VOICES[0])
+        attempts = [(label(voice), lambda: _edge(text, voice, f"{int(rate):+d}%", dest)),
+                    (label(voice), lambda: _edge(text, voice, "+0%", dest)),
+                    (label(other), lambda: _edge(text, other, "+0%", dest))]
+        if piper_fallback and piper_available():
+            attempts.append((label(piper_fallback), lambda: _piper(text, piper_fallback, rate, dest)))
+    attempts.append(("Google", lambda: _gtts(text, dest)))
     errors = []
     for i, (name, fn) in enumerate(attempts):
         if i:
@@ -286,8 +351,24 @@ def tts(text: str, voice: str, rate: int, dest: Path) -> str:
             errors.append(f"{name}: tệp rỗng")
         except Exception as e:  # noqa: BLE001
             errors.append(f"{name}: {str(e)[:120]}")
-    raise VideoError("Không tạo được giọng đọc (cần Internet). Bấm 'Cài / cập nhật công cụ' rồi thử lại. "
-                     "Chi tiết: " + " | ".join(errors))
+    raise VideoError("Không tạo được giọng đọc. Bấm 'Cài / cập nhật công cụ' rồi thử lại, hoặc chọn giọng "
+                     "Piper (offline). Chi tiết: " + " | ".join(errors))
+
+
+SAMPLE = ("Xin chào, đây là giọng đọc thử cho Fanpage kế toán. Từ ngày một tháng bảy năm hai nghìn "
+          "không trăm hai mươi sáu, doanh nghiệp nhỏ được giảm thuế.")
+
+
+def voice_sample(voice: str, rate: int) -> Path:
+    if voice not in VOICES:
+        raise VideoError("Giọng không hợp lệ")
+    d = VIDEO_DIR / "_nghe-thu"
+    d.mkdir(parents=True, exist_ok=True)
+    dest = d / f"{re.sub(r'[^A-Za-z0-9_-]', '_', voice)}.mp3"
+    used = tts(SAMPLE, voice, rate, dest)
+    if used != VOICES[voice].split(" — ")[0]:
+        raise VideoError(f"Giọng này đang lỗi (đã phải dùng {used}) — xem thông báo ở ô Cài đặt clip")
+    return dest
 
 
 # ---------------------------------------------------------------- 4. vẽ khung hình
@@ -509,8 +590,8 @@ def render(video_id: int):
     for i, sc in enumerate(scenes):
         step(f"Cảnh {i + 1}/{total}: giọng đọc")
         used = tts(sc["narration"], cfg["voice"], cfg["rate"], work / f"voice{i}.mp3")
-        if used != VOICES.get(cfg["voice"]):
-            _log(f"Cảnh {i + 1}: giọng {VOICES.get(cfg['voice'])} lỗi, đã dùng giọng {used}")
+        if used != VOICES.get(cfg["voice"], "").split(" — ")[0]:
+            _log(f"Cảnh {i + 1}: giọng đã chọn lỗi, đã dùng giọng {used}")
         dur = media_duration(work / f"voice{i}.mp3") + 0.6
         step(f"Cảnh {i + 1}/{total}: hình ảnh")
         img = None
