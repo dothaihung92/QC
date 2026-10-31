@@ -244,8 +244,22 @@ def timing(dur: float, n: int):
     return t0, span, min(3.6, max(1.0, span * 0.78))
 
 
+def wba_python() -> str:
+    """Python dùng để chạy whiteboard-animator. Mặc định là Python của phần mềm; đặt biến QC_WBA_PYTHON trong .env
+    để trỏ tới một môi trường Python khác (vd Python 3.12) nếu bản Python hiện tại không cài được thư viện này."""
+    import sys
+    return V.os.environ.get("QC_WBA_PYTHON", "").strip() or sys.executable
+
+
 def wba_available() -> bool:
     import importlib.util
+    import subprocess
+    if V.os.environ.get("QC_WBA_PYTHON", "").strip():
+        try:
+            return subprocess.run([wba_python(), "-c", "import whiteboard_animator"], capture_output=True,
+                                  timeout=60).returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
     return importlib.util.find_spec("whiteboard_animator") is not None
 
 
@@ -265,14 +279,13 @@ def _ffmpeg_shim_dir() -> Path:
 def stroke_clip(png: Path, seconds: float, dest: Path, timeout: int = 300) -> bool:
     """Vẽ hình theo từng nét (thư viện whiteboard-animator, MIT, chạy CPU): trả về True nếu tạo được video."""
     import subprocess
-    import sys
     if not wba_available():
         return False
     env = dict(V.os.environ)
     env["PATH"] = str(_ffmpeg_shim_dir()) + V.os.pathsep + env.get("PATH", "")
     kw = {"creationflags": subprocess.CREATE_NO_WINDOW} if V.os.name == "nt" else {}
     try:
-        r = subprocess.run([sys.executable, "-m", "whiteboard_animator.cli", str(png), "-o", str(dest),
+        r = subprocess.run([wba_python(), "-m", "whiteboard_animator.cli", str(png), "-o", str(dest),
                             "--duration", f"{seconds:.2f}", "--quality", "low"],
                            capture_output=True, text=True, timeout=timeout, env=env, **kw)
     except (subprocess.TimeoutExpired, OSError):
@@ -356,7 +369,7 @@ def render_page(L, sc, i, total, work: Path, dur: float, voice_len: float, brand
     k_panels = len(panels)
     t0, span, dd = timing(dur, k_panels)
     hx, hy = hand[1]
-    hand_ks = []                                   # các hình vẽ kiểu quét mới cần bàn tay của phần mềm
+    hand_ks, hand_free = [], set()                 # hình cần bàn tay; hand_free = hình vẽ từng nét (tay đi tự do trong khung)
     paper = "r='val*{:.4f}':g='val*{:.4f}':b='val*{:.4f}'".format(*(c / 255 for c in PAPER))
     for k, (name, (x, y, w, h), _label, vid) in enumerate(panels):
         s = t0 + k * span
@@ -367,6 +380,8 @@ def render_page(L, sc, i, total, work: Path, dur: float, voice_len: float, brand
                        f"tpad=stop_mode=clone:stop_duration=60,format=rgb24,lutrgb={paper}[pv{n}]")
             flt.append(f"[{cur}][pv{n}]overlay=x={x}:y={y}:enable='gte(t,{s:.2f})':eof_action=repeat[s{n}]")
             cur, n = f"s{n}", n + 1
+            hand_ks.append(k)                      # video của công cụ không có bàn tay: thêm bàn tay nguệch ngoạc trong khung
+            hand_free.add(k)
             continue
         hand_ks.append(k)
         inputs += ["-framerate", str(fps), "-loop", "1", "-t", d, "-i", name,
@@ -385,8 +400,13 @@ def render_page(L, sc, i, total, work: Path, dur: float, voice_len: float, brand
         name, (x, y, w, h), _label, _vid = panels[k]
         s0 = t0 + k * span
         p = f"min(1,max(0,(t-{s0:.2f})/{dd:.2f}))"
-        hxx = f"{x}+{w}*{p}-{hx}"
-        hyy = f"{y}+{h}*(0.5+0.36*sin((t-{s0:.2f})*9))-{hy}"
+        if k in hand_free:
+            q = f"(t-{s0:.2f})"
+            hxx = f"{x}+{w}*(0.5+0.38*sin({q}*2.3+1))-{hx}"
+            hyy = f"{y}+{h}*(0.5+0.34*sin({q}*3.1))-{hy}"
+        else:
+            hxx = f"{x}+{w}*{p}-{hx}"
+            hyy = f"{y}+{h}*(0.5+0.36*sin((t-{s0:.2f})*9))-{hy}"
         flt.append(f"[{hand_at + j}:v]format=rgba[hd{k}]")
         flt.append(f"[{cur}][hd{k}]overlay=x='{hxx}':y='{hyy}':enable='between(t,{s0:.2f},{s0 + dd + 0.12:.2f})':eof_action=repeat[ho{k}]")
         cur = f"ho{k}"
