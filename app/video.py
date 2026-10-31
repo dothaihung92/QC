@@ -285,8 +285,10 @@ Mỗi trang có:
 - type: luôn là "doodle".
 - tag: nhãn nhỏ phía trên, tối đa 4 từ, viết hoa (vd "BƯỚC 1 · ĐIỀU KIỆN", "VÍ DỤ THỰC TẾ").
 - headline: tiêu đề của trang, tối đa 10 từ, viết thường như một câu.
-- panels: 2-4 hình, mỗi hình gồm "label" (nhãn tiếng Việt tối đa 4 từ, hiện dưới hình) và "visual" (1-2 câu TIẾNG ANH mô tả hình phác thảo
-  hoạt hình dễ thương: nhân vật / đồ vật / biểu tượng, vd "A cute cartoon shop owner holding an invoice, with a calculator").
+- panels: ĐÚNG 4 hình mỗi trang (tối thiểu 3), được vẽ lần lượt theo đúng thứ tự lời đọc. Mỗi hình gồm "label" (nhãn tiếng Việt
+  tối đa 4 từ, hiện dưới hình) và "visual" (2-3 câu TIẾNG ANH mô tả một CẢNH NHỎ chi tiết gồm 3-5 yếu tố: nhân vật hoạt hình
+  dễ thương có biểu cảm + đồ vật + biểu tượng + mũi tên / tia sáng, vd "A cute cartoon shop owner with a happy face holding
+  a tax invoice, a calculator and a stack of coins beside her, a small percent badge and sparkles around").
   Hình phải minh họa đúng ý đang nói, không chứa chữ.
 - hl: 1-4 từ hoặc cụm quan trọng trong lời đọc (chép đúng từng chữ) để tô vàng ở phụ đề (số liệu, thuật ngữ chính).
 - description: (chỉ một lần ở cuối JSON) lời giới thiệu đăng kèm video, 2-3 câu, kết bằng 3 hashtag.
@@ -1107,6 +1109,7 @@ def render(video_id: int):
     expl = cfg["look"] == "explainer"
     paper = cfg["look"] == "doodle"
     trans, tnames = (0.3, ["fade"]) if (expl or paper) else (TRANSITION, TRANSITIONS)
+    ai_state = doodle.AIState()
     hand = None
     if paper:
         hand_file = work / "hand.png"
@@ -1129,7 +1132,7 @@ def render(video_id: int):
 
         if paper:
             step(f"Trang {i + 1}/{total}: vẽ hình minh họa" + (" (AI)" if gkey else ""))
-            panels = doodle.make_panels(sc, size, work, i, gkey, _log, True)
+            panels = doodle.make_panels(sc, size, work, i, gkey, _log, True, ai_state)
             step(f"Trang {i + 1}/{total}: dựng video")
             doodle.render_page(L, sc, i, total, work, dur, voice_len, cfg["brand"], panels, hand, FPS, "f7f3e2")
             durations.append(dur)
@@ -1203,7 +1206,13 @@ def render(video_id: int):
         if p != out:
             p.unlink(missing_ok=True)
     length = sum(durations) - trans * (len(durations) - 1)
-    db.video_update(video_id, status="done", path=str(out), duration=round(length, 1), progress="")
+    note = ""
+    if paper and not gkey:
+        note = "Chưa có Gemini key nên dùng bộ hình phác thảo có sẵn. Nhập key ở tab Tin tức AI để AI vẽ hình riêng cho từng cảnh."
+    elif paper and ai_state.fails:
+        note = (f"AI vẽ được {ai_state.ok} hình, {ai_state.fails} hình lỗi nên dùng hình phác thảo có sẵn. "
+                f"Lý do: {ai_state.reason}")
+    db.video_update(video_id, status="done", path=str(out), duration=round(length, 1), progress="", error=note)
     db.log("video", f"Đã dựng clip #{video_id}: {v['title']} ({length:.0f}s)")
     _log("✅ Xong clip")
 

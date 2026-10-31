@@ -983,6 +983,20 @@ def video_voice_test(body: VoiceTestIn):
     return FileResponse(path, media_type="audio/mpeg", headers=NO_STORE)
 
 
+@admin.post("/api/video/image-test")
+def video_image_test():
+    """Thử nhờ Gemini vẽ 1 hình để biết key / hạn mức có dùng được cho vẽ hình AI không (hiện đúng lý do nếu lỗi)."""
+    from . import aimedia, doodle
+    key = newsagent.get_config()["gemini_key"]
+    if not key:
+        raise HTTPException(400, "Chưa có Gemini API key (nhập ở tab Tin tức AI)")
+    try:
+        data = aimedia.image(doodle.IMG_STYLE + "a cute cartoon shop owner holding an invoice and a calculator", "1:1", key)
+    except aimedia.AIError as e:
+        raise HTTPException(400, str(e)[:500])
+    return Response(data, media_type="image/png", headers=NO_STORE)
+
+
 class ScriptIn(BaseModel):
     text: str
     seconds: int = 45

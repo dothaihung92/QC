@@ -11,7 +11,7 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageOps
 
-from . import aimedia
+from . import aimedia, doodle_icons
 from . import video as V
 
 PAPER = (247, 243, 226)
@@ -20,8 +20,9 @@ ORANGE = (222, 104, 52)
 HIGHLIGHT = (255, 232, 70)
 SKIN = (240, 196, 158)
 SOFT = 70                                   # độ rộng (px) của mép mờ khi "vẽ" lộ dần
-IMG_STYLE = ("Hand-drawn whiteboard doodle illustration, black ink outline sketch with a few flat pastel colour accents "
-             "(orange, teal, yellow), cute friendly cartoon style, centered on a plain pure white background with "
+IMG_STYLE = ("Detailed hand-drawn whiteboard doodle illustration, a small rich scene with 3-5 related elements "
+             "(characters with expressive faces, objects, icons, arrows, sparkles), black ink outline sketch with flat pastel colour accents "
+             "(orange, teal, yellow, pink), cute friendly cartoon style, centered on a plain pure white background with "
              "generous margin, no text, no letters, no numbers, no watermark: ")
 
 
@@ -66,7 +67,7 @@ def _wobbly_rect(d, box, color, width, rng, amp=3):
     d.line(pts, fill=color, width=width, joint="curve")
 
 
-def panel_image(art: bytes | None, label: str, size, seed: int) -> Image.Image:
+def panel_image(art: bytes | None, label: str, size, seed: int, visual: str = "") -> Image.Image:
     """Ảnh đặc (nền giấy) của 1 khung: hình minh họa + nhãn bên dưới."""
     w, h = size
     canvas = Image.new("RGB", (w, h), PAPER)
@@ -85,21 +86,9 @@ def panel_image(art: bytes | None, label: str, size, seed: int) -> Image.Image:
             placed = True
         except Exception:  # noqa: BLE001 — ảnh hỏng thì dùng thẻ phác thảo
             placed = False
-    if not placed:                                       # thẻ phác thảo: khung vẽ tay + dấu nhấn
-        rng = random.Random(seed)
-        m = int(base * 0.07)
-        for k in range(2):
-            _wobbly_rect(d, (m, m, area[0] - m, area[1] - m), INK, max(3, base // 90), rng, amp=base * 0.008)
-        d.ellipse((m * 1.6, m * 1.6, m * 1.6 + base * 0.13, m * 1.6 + base * 0.13), outline=ORANGE, width=max(4, base // 70))
-        f = V._font(int(base * 0.1), bold=True)
-        text = label or "?"
-        lines = V._wrap(d, text, f, area[0] - 4 * m)[:3]
-        lh = int(f.size * 1.25)
-        y = area[1] / 2 - lh * len(lines) / 2 + lh / 2
-        for line in lines:
-            d.text((area[0] / 2, y), line, font=f, fill=INK, anchor="mm")
-            y += lh
-        label = ""
+    if not placed:                                       # không có hình AI: tự vẽ bằng bộ biểu tượng phác thảo
+        side = int(min(area) * 0.98)
+        canvas.paste(doodle_icons.draw_scene(side, label, visual, seed), ((w - side) // 2, (area[1] - side) // 2))
     if label:
         f = V._font(int(base * 0.062), bold=True)
         lines = V._wrap(d, label, f, w - 20)[:2]
@@ -248,8 +237,24 @@ def caption_layer(L, words: list, dest: Path):
 
 # ---------------------------------------------------------------- dựng 1 trang
 
-def make_panels(sc, size, work: Path, i: int, gkey: str, log, use_ai: bool):
+class AIState:
+    """Dùng chung cho cả clip: lỗi vẽ AI "cứng" (hết hạn mức, sai quyền...) thì dừng thử các hình sau, khỏi chờ vô ích."""
+    def __init__(self):
+        self.off = False
+        self.fails = 0
+        self.reason = ""
+        self.ok = 0
+
+
+def _is_hard_error(e: Exception) -> bool:
+    msg = str(e).lower()
+    return any(k in msg for k in ("quota", "limit: 0", "permission", "api key", "billing", "not found", "not supported",
+                                  "http 400", "http 401", "http 403", "http 404"))
+
+
+def make_panels(sc, size, work: Path, i: int, gkey: str, log, use_ai: bool, state: AIState = None):
     """Tạo ảnh các khung của 1 trang (vẽ AI song song nếu có key). Trả về [(file, (x,y,w,h), label)]."""
+    state = state or AIState()
     panels = sc["panels"][:4] or [{"label": t, "visual": ""} for t in sc["items"][:3]] or \
         [{"label": sc["headline"].replace("|", " "), "visual": sc["visual"]}]
     boxes = layout(size, len(panels))
@@ -257,14 +262,22 @@ def make_panels(sc, size, work: Path, i: int, gkey: str, log, use_ai: bool):
     def one(k):
         art = None
         pv = panels[k]
-        if use_ai and gkey and pv.get("visual"):
+        if use_ai and gkey and pv.get("visual") and not state.off:
             try:
                 art = aimedia.image(IMG_STYLE + pv["visual"], "1:1", gkey)
+                state.ok += 1
             except aimedia.AIError as e:
-                log(f"Trang {i + 1}, hình {k + 1}: vẽ AI lỗi, dùng thẻ phác thảo — {str(e)[:140]}")
-        return panel_image(art, pv.get("label", ""), boxes[k][2:], seed=i * 10 + k)
+                state.fails += 1
+                if not state.reason:
+                    state.reason = str(e)[:300]
+                if _is_hard_error(e) and not state.ok:
+                    state.off = True
+                    log(f"⚠ Gemini không vẽ được hình ({str(e)[:200]}) — các hình còn lại dùng bộ hình phác thảo có sẵn.")
+                else:
+                    log(f"Trang {i + 1}, hình {k + 1}: vẽ AI lỗi, dùng hình phác thảo có sẵn — {str(e)[:140]}")
+        return panel_image(art, pv.get("label", ""), boxes[k][2:], seed=i * 10 + k, visual=pv.get("visual", ""))
 
-    with ThreadPoolExecutor(max_workers=3 if use_ai and gkey else 1) as ex:
+    with ThreadPoolExecutor(max_workers=3 if use_ai and gkey and not state.off else 1) as ex:
         imgs = list(ex.map(one, range(len(panels))))
     out = []
     for k, (im, box) in enumerate(zip(imgs, boxes)):

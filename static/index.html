@@ -647,9 +647,11 @@
       <div id="vdTools"></div>
       <div class="row2">
         <div><label>Giọng đọc</label><select id="vdVoice"></select>
+          <div id="vdImgPrev"></div>
           <label style="margin-top:8px">Phong cách đọc <span class="small muted">(giọng Gemini AI)</span></label>
           <select id="vdStyle"></select>
-          <button class="btn" id="vdTestBtn" onclick="vdVoiceTest()" style="margin-top:6px">🔊 Nghe thử</button></div>
+          <button class="btn" id="vdTestBtn" onclick="vdVoiceTest()" style="margin-top:6px">🔊 Nghe thử</button>
+          <button class="btn" id="vdImgBtn" onclick="vdImageTest()" style="margin-top:6px">🖼 Thử vẽ 1 hình AI</button></div>
         <div><label>Tốc độ đọc (%)</label><input id="vdRate" type="number" min="-30" max="30"></div>
       </div>
       <div class="row2">
@@ -844,6 +846,16 @@ async function vdVoiceTest() {
     if (!r.ok) { const d = await r.json().catch(() => ({})); return toast('⚠ ' + (d.detail || r.statusText)); }
     new Audio(URL.createObjectURL(await r.blob())).play();
   } finally { btn.disabled = false; btn.textContent = '🔊 Nghe thử'; }
+}
+async function vdImageTest() {
+  const btn = $('vdImgBtn'); btn.disabled = true; btn.textContent = '⏳ Đang nhờ Gemini vẽ...';
+  try {
+    const r = await fetch('/api/video/image-test', { method: 'POST' });
+    if (!r.ok) { const d = await r.json().catch(() => ({})); return alert('Gemini KHÔNG vẽ được hình:\n\n' + (d.detail || r.statusText) +
+      '\n\nKhi đó clip vẽ tay sẽ dùng bộ hình phác thảo có sẵn. Thường do tài khoản Gemini miễn phí chưa có hạn mức tạo ảnh — bật thanh toán ở Google AI Studio để dùng.'); }
+    const url = URL.createObjectURL(await r.blob());
+    $('vdImgPrev').innerHTML = `<img src="${url}" style="max-width:220px;border:1px solid #ddd;border-radius:8px;margin-top:6px"><div class="small muted">✅ Gemini vẽ được — clip sẽ dùng hình như vậy.</div>`;
+  } finally { btn.disabled = false; btn.textContent = '🖼 Thử vẽ 1 hình AI'; }
 }
 async function vdInstall() {
   VCFG = await api('/api/video/install', { method: 'POST' }); vdRenderTools();

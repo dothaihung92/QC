@@ -14,6 +14,7 @@ import requests
 API = "https://generativelanguage.googleapis.com/v1beta"
 TTS_MODELS = ["gemini-2.5-flash-preview-tts", "gemini-2.5-flash-tts", "gemini-2.5-pro-preview-tts"]
 IMAGE_MODELS = ["gemini-2.5-flash-image", "gemini-2.5-flash-image-preview"]
+IMAGEN_MODELS = ["imagen-4.0-fast-generate-001", "imagen-4.0-generate-001"]      # chỉ có khi tài khoản đã bật thanh toán
 VEO_MODELS = ["veo-3.1-fast-generate-preview", "veo-3.0-fast-generate-001"]
 VEO_PRICE_PER_SEC = 0.10            # USD, Veo 3.1 Fast 720p (giá tham khảo, kiểm tra lại trên trang giá của Google)
 VEO_SECONDS = 8
@@ -44,7 +45,8 @@ def _post(path: str, key: str, body: dict, timeout=120, retries=3):
         msg = (data.get("error") or {}).get("message") or r.text[:200]
         last = AIError(f"{msg[:220]} (HTTP {r.status_code})")
         last.status = r.status_code
-        if r.status_code in (429, 503) and attempt < retries:
+        hard = r.status_code == 429 and ("limit: 0" in msg or "billing" in msg.lower() or "per day" in msg.lower())
+        if r.status_code in (429, 503) and attempt < retries and not hard:
             m = re.search(r"retry in ([\d.]+)s", msg)
             time.sleep(min(70, float(m[1]) + 1) if m else 12 * (attempt + 1))
             continue
@@ -90,7 +92,7 @@ def tts_pcm(text: str, voice: str, style: str, key: str):
 
 
 def image(prompt: str, aspect: str, key: str):
-    """Trả về bytes ảnh (PNG/JPEG)."""
+    """Trả về bytes ảnh (PNG/JPEG). Thử Gemini Flash Image trước, không được thì Imagen."""
     def call(model):
         body = {"contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {"responseModalities": ["IMAGE"], "imageConfig": {"aspectRatio": aspect}}}
@@ -105,7 +107,21 @@ def image(prompt: str, aspect: str, key: str):
         if not img:
             raise AIError("Google không trả ảnh (có thể bị chặn nội dung)")
         return img
-    return _first_working(IMAGE_MODELS, call)
+
+    def imagen(model):
+        data = _post(f"models/{model}:predict", key, {"instances": [{"prompt": prompt}],
+                                                      "parameters": {"sampleCount": 1, "aspectRatio": aspect}})
+        pred = (data.get("predictions") or [{}])[0]
+        if not pred.get("bytesBase64Encoded"):
+            raise AIError("Imagen không trả ảnh")
+        return base64.b64decode(pred["bytesBase64Encoded"])
+    try:
+        return _first_working(IMAGE_MODELS, call)
+    except AIError as first:
+        try:
+            return _first_working(IMAGEN_MODELS, imagen)
+        except AIError as second:
+            raise AIError(f"{first} || Imagen: {second}") from second
 
 
 def veo(prompt: str, aspect: str, key: str, dest, wait=420) -> None:

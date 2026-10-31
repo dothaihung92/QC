@@ -323,3 +323,43 @@ def test_vieneu_voice_chain(monkeypatch, tmp_path):
     assert video.tts("Xin chào", "vieneu:Mai Anh", 8, tmp_path / "v.mp3") == "Hoài My (nữ)"
     assert seen == ["Mai Anh", "Mai Anh"]
     assert video.get_config()["voice"] == "vieneu:Mai Anh" and "vieneu:Mai Anh" in video.VOICES
+
+
+def test_doodle_ai_circuit_breaker_and_icon_fallback(tmp_path):
+    from app import aimedia, doodle
+    calls = []
+
+    def hard_fail(prompt, aspect, key):
+        calls.append(prompt)
+        raise aimedia.AIError("Quota exceeded, limit: 0 (HTTP 429)")
+    orig = aimedia.image
+    aimedia.image = hard_fail
+    try:
+        st, logs = doodle.AIState(), []
+        sc = video.clean_scenes([{"type": "doodle", "headline": "H", "narration": "Lời đọc dài.",
+                                  "panels": [{"label": f"Hình {k}", "visual": "v"} for k in range(4)]}])[0]
+        for page in range(3):
+            panels = doodle.make_panels(sc, (720, 1280), tmp_path, page, "key", logs.append, True, st)
+            assert len(panels) == 4 and all((tmp_path / n).exists() for n, *_ in panels)
+        assert st.off and "limit: 0" in st.reason and len(calls) <= 3      # dừng thử sau lỗi cứng, không gọi 12 lần
+        assert sum("không vẽ được hình" in l for l in logs) >= 1
+    finally:
+        aimedia.image = orig
+
+
+def test_icons_pick_by_keyword_and_imagen_fallback(monkeypatch):
+    from app import aimedia, doodle_icons
+    assert doodle_icons.pick("Giảm 30% thuế", "", 0)[0] == "percent"
+    assert doodle_icons.pick("Hồ sơ kê khai", "invoice", 1)[0] == "document"
+    assert len(set(doodle_icons.pick("Tư vấn miễn phí", "", 3, 3))) == 3
+    assert doodle_icons.draw_scene(120, "x", "y", 1).size == (120, 120)
+    import base64 as b64
+    seq = []
+
+    def fake_post(path, key, body, **kw):
+        seq.append(path)
+        if ":predict" in path:
+            return {"predictions": [{"bytesBase64Encoded": b64.b64encode(b"IMG").decode()}]}
+        raise aimedia.AIError("no access (HTTP 403)")
+    monkeypatch.setattr(aimedia, "_post", fake_post)
+    assert aimedia.image("p", "1:1", "k") == b"IMG" and any("imagen" in p for p in seq)
