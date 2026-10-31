@@ -177,7 +177,10 @@ chữ lớn + phụ đề → FFmpeg ghép thành video dọc 9:16 (hoặc ngang
 - Lần đầu bấm **⬇ Cài công cụ** (cài `pillow`, `edge-tts`, `imageio-ffmpeg` — đã kèm FFmpeg).
 - Chọn bài ở tab *Tin tức AI* / *Bài đăng* hoặc dán nội dung → **✨ AI viết kịch bản** → sửa từng cảnh →
   **🎬 Dựng clip** → xem thử → **⬇ Tải về** (TikTok, YouTube) hoặc **📤 Đăng lên Fanpage**.
-- Giọng đọc: Microsoft (Hoài My, Nam Minh — hay nhất, cần Internet) hoặc **Piper offline**
+- **Giọng Gemini AI (tự nhiên nhất, dùng Gemini key có sẵn)**: 10 giọng (Leda, Zephyr, Kore, Puck...) kèm
+  *phong cách đọc* (năng động tin nhanh / ấm áp tư vấn / chuyên gia). **Ảnh AI** vẽ riêng cho từng cảnh và
+  **video AI Veo** (công nghệ của Google Flow, có phí ~0,8 USD/cảnh 8 giây, mặc định tắt) — chọn ở Cài đặt clip.
+- Giọng đọc khác: Microsoft (Hoài My, Nam Minh — hay nhất, cần Internet) hoặc **Piper offline**
   ([OHF-Voice/piper1-gpl](https://github.com/OHF-Voice/piper1-gpl), giọng VAIS1000 / 25hours / VIVOS — chạy ngay trên máy,
   lần đầu tự tải mô hình về `data/piper-voices`). Giọng lỗi thì tự chuyển giọng khác, cuối cùng là Google.
   Bấm **🔊 Nghe thử** để so sánh.

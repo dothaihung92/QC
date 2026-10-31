@@ -647,6 +647,8 @@
       <div id="vdTools"></div>
       <div class="row2">
         <div><label>Giọng đọc</label><select id="vdVoice"></select>
+          <label style="margin-top:8px">Phong cách đọc <span class="small muted">(giọng Gemini AI)</span></label>
+          <select id="vdStyle"></select>
           <button class="btn" id="vdTestBtn" onclick="vdVoiceTest()" style="margin-top:6px">🔊 Nghe thử</button></div>
         <div><label>Tốc độ đọc (%)</label><input id="vdRate" type="number" min="-30" max="30"></div>
       </div>
@@ -655,6 +657,15 @@
           <option value="ngang">Ngang 16:9 (YouTube)</option></select></div>
         <div><label>Màu thương hiệu</label><input id="vdColor" type="color" style="height:38px"></div>
       </div>
+      <div class="row2">
+        <div><label>Hình nền mỗi cảnh</label>
+          <select id="vdVisual"><option value="stock">Video/ảnh Pexels hoặc nền màu (miễn phí)</option>
+            <option value="ai">Ảnh AI vẽ riêng từng cảnh (Gemini)</option></select></div>
+        <div><label>Số cảnh dùng video AI Veo <span class="small muted" id="vdVeoCost"></span></label>
+          <input id="vdVeo" type="number" min="0" max="8"></div>
+      </div>
+      <p class="muted small" style="margin:0 0 8px">Veo là công nghệ tạo video của Google Flow: cảnh nào dùng Veo sẽ có đoạn video AI 8 giây
+        (có phí, trả theo giây). Để 0 nếu chưa cần. Ảnh AI và Veo dùng Gemini key đã nhập ở tab Tin tức AI.</p>
       <label>Dòng chữ cuối khung (tên Fanpage, số điện thoại)</label>
       <input id="vdBrand" placeholder="Group Kế Toán HCM • 09xx xxx xxx">
       <label>Pexels API key — ảnh minh họa miễn phí (tùy chọn) <a class="small" href="https://www.pexels.com/api/" target="_blank">(lấy key)</a>
@@ -789,7 +800,12 @@ const VD_ST = { draft: ['Kịch bản','p-info'], rendering: ['Đang dựng','p-
 function vdFromNews(id) { VPRESET = 'news:' + id; openTab('video'); }
 async function loadVideo() {
   VCFG = await api('/api/video/config');
-  $('vdVoice').innerHTML = Object.entries(VCFG.voices).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
+  $('vdVoice').innerHTML = [['gemini:', '⭐ Gemini AI — tự nhiên nhất (cần Gemini key)'], ['vi-VN', 'Microsoft — cần Internet'], ['piper:', 'Piper — offline']]
+    .map(([pre, lbl]) => `<optgroup label="${lbl}">${Object.entries(VCFG.voices).filter(([k]) => k.startsWith(pre))
+      .map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</optgroup>`).join('');
+  $('vdStyle').innerHTML = Object.entries(VCFG.styles).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
+  $('vdStyle').value = VCFG.tts_style; $('vdVisual').value = VCFG.visual; $('vdVeo').value = VCFG.veo_scenes;
+  $('vdVeoCost').textContent = `(≈ ${VCFG.veo_cost} USD / cảnh)`;
   $('vdVoice').value = VCFG.voice; $('vdRate').value = VCFG.rate;
   if (!VCFG.piper) [...$('vdVoice').options].forEach(o => { if (o.value.startsWith('piper:')) o.textContent += ' (chưa cài)'; }); $('vdFormat').value = VCFG.format;
   $('vdColor').value = VCFG.color; $('vdBrand').value = VCFG.brand; $('vdMusic').checked = VCFG.music;
@@ -837,7 +853,7 @@ function vdPick() {
   if (x) { $('vdText').value = x.text; $('vdImg').value = x.img || ''; }
 }
 async function vdSave() {
-  VCFG = await api('/api/video/config', { method: 'PUT', body: { voice: $('vdVoice').value, rate: $('vdRate').value,
+  VCFG = await api('/api/video/config', { method: 'PUT', body: { voice: $('vdVoice').value, tts_style: $('vdStyle').value, visual: $('vdVisual').value, veo_scenes: $('vdVeo').value, rate: $('vdRate').value,
     format: $('vdFormat').value, color: $('vdColor').value, brand: $('vdBrand').value, pexels_key: $('vdPexels').value,
     music: $('vdMusic').checked } });
   $('vdPexels').value = ''; toast('✅ Đã lưu cài đặt clip'); loadVideo();
@@ -873,6 +889,7 @@ function vdScene(v, s, i) {
       <div class="col" style="flex-basis:120px"><input data-v="${v.id}" data-i="${i}" data-f="big" value="${esc(s.big || '')}" placeholder="Số nổi bật (vd 30%)"></div>
       <div class="col" style="flex-basis:160px"><input data-v="${v.id}" data-i="${i}" data-f="keyword" value="${esc(s.keyword)}" placeholder="Từ khóa ảnh/video (tiếng Anh)"></div>
     </div>
+    <input data-v="${v.id}" data-i="${i}" data-f="visual" value="${esc(s.visual || '')}" placeholder="Mô tả hình minh họa (tiếng Anh) — dùng cho ảnh AI / Veo">
     <textarea data-v="${v.id}" data-i="${i}" data-f="items" rows="2" placeholder="Ý hiện trên màn hình — mỗi dòng 1 ý (tối đa 4)">${esc((s.items || []).join('\n'))}</textarea>
   </div>`;
 }
@@ -910,7 +927,7 @@ function vdCollect(id) {
 }
 async function vdSaveOne(id) { return api('/api/videos/' + id, { method: 'PUT', body: vdCollect(id) }); }
 async function vdAddScene(id) {
-  const b = vdCollect(id); b.scenes.push({ type: 'list', headline: '', narration: 'Lời đọc cảnh mới', big: '', items: [], keyword: '' });
+  const b = vdCollect(id); b.scenes.push({ type: 'list', headline: '', narration: 'Lời đọc cảnh mới', big: '', items: [], keyword: '', visual: '' });
   await api('/api/videos/' + id, { method: 'PUT', body: b }); vdLoadList();
 }
 async function vdDelScene(id, i) {

@@ -27,20 +27,34 @@ from pathlib import Path
 
 import requests
 
-from . import config, db, newsagent
+from . import aimedia, config, db, newsagent
 
 VIDEO_DIR = config.DATA_DIR / "videos"
 MUSIC_DIR = config.DATA_DIR / "music"
 FPS = 30
 OVERSIZE = 1.10                      # ảnh nền lớn hơn khung 10% để trượt chậm
 SIZES = {"doc": (1080, 1920), "ngang": (1920, 1080)}
-VOICES = {"vi-VN-HoaiMyNeural": "Hoài My (nữ) — Microsoft, cần Internet",
+GEMINI_VOICES = {"Leda": "Leda (nữ trẻ)", "Zephyr": "Zephyr (nữ, tươi sáng)", "Kore": "Kore (nữ, chắc giọng)",
+                 "Aoede": "Aoede (nữ, nhẹ nhàng)", "Sulafat": "Sulafat (nữ, ấm áp)",
+                 "Puck": "Puck (nam, vui tươi)", "Charon": "Charon (nam, thông tin)",
+                 "Fenrir": "Fenrir (nam, sôi nổi)", "Orus": "Orus (nam, vững vàng)", "Achird": "Achird (nam, thân thiện)"}
+STYLES = {
+    "nang_dong": ("Năng động, tin nhanh", "Đọc như một MC bản tin kinh tế trẻ trung, tươi sáng và nhiệt huyết, nhịp nhanh "
+                  "vừa phải, nhấn mạnh con số và mốc thời gian, ngắt nghỉ tự nhiên như đang nói chuyện với bạn bè, "
+                  "tuyệt đối không đọc đều đều"),
+    "tu_van": ("Ấm áp, tư vấn", "Đọc bằng giọng ấm áp, thân thiện của một chuyên viên tư vấn đang nhiệt tình giải thích cho khách, "
+               "tốc độ vừa phải, nhấn nhá cảm xúc, có nụ cười trong giọng"),
+    "chuyen_gia": ("Chuyên gia, rõ ràng", "Đọc bằng giọng tự tin, rõ ràng của một chuyên gia thuế, nhịp độ khá nhanh, "
+                   "nhấn mạnh ý quan trọng, không kéo dài giọng"),
+}
+VOICES = {f"gemini:{k}": f"{v} — Gemini AI, tự nhiên nhất" for k, v in GEMINI_VOICES.items()}
+VOICES.update({"vi-VN-HoaiMyNeural": "Hoài My (nữ) — Microsoft, cần Internet",
           "vi-VN-NamMinhNeural": "Nam Minh (nam) — Microsoft, cần Internet",
           # Piper (github.com/OHF-Voice/piper1-gpl): chạy ngay trên máy, không cần Internet sau lần tải đầu
           "piper:vi_VN-vais1000-medium": "VAIS1000 (nữ) — Piper, offline",
           "piper:vi_VN-25hours_single-low": "25hours (nữ) — Piper, offline",
-          "piper:vi_VN-vivos-x_low": "VIVOS (nhiều giọng) — Piper, offline"}
-EDGE_VOICES = [v for v in VOICES if not v.startswith("piper:")]
+          "piper:vi_VN-vivos-x_low": "VIVOS (nhiều giọng) — Piper, offline"})
+EDGE_VOICES = [v for v in VOICES if v.startswith("vi-VN-")]
 PIPER_DIR = config.DATA_DIR / "piper-voices"
 OPTIONAL_TOOLS = {"piper": "piper-tts"}                  # cài lỗi (vd Python quá mới) vẫn dùng được giọng khác
 LENGTHS = {30: 5, 45: 7, 60: 9, 120: 14, 180: 20}      # giây → số cảnh
@@ -48,8 +62,11 @@ TOOLS = {"PIL": "pillow", "edge_tts": "edge-tts", "imageio_ffmpeg": "imageio-ffm
          "gtts": "gTTS"}                                 # gTTS: giọng dự phòng khi Edge-TTS từ chối
 
 DEFAULTS = {
-    "voice": "vi-VN-HoaiMyNeural",
-    "rate": 5,                        # tốc độ đọc, % (-30..+30)
+    "voice": "gemini:Leda",           # giọng Gemini AI tự nhiên nhất; không có Gemini key thì tự dùng giọng Microsoft
+    "tts_style": "nang_dong",         # phong cách đọc (chỉ giọng Gemini)
+    "rate": 8,                        # tốc độ đọc, % (-30..+30)
+    "visual": "stock",                # stock = video/ảnh Pexels hoặc nền màu; ai = ảnh AI riêng cho từng cảnh
+    "veo_scenes": 0,                  # số cảnh dùng video AI Veo (TRẢ PHÍ ~0,8 USD/cảnh); 0 = tắt
     "format": "doc",                  # doc = 9:16 (Reels/TikTok), ngang = 16:9 (YouTube)
     "brand": "",                      # dòng chữ nhỏ cuối khung: tên Fanpage / số điện thoại
     "color": "#0b4f8a",               # màu thương hiệu (nền + khung tiêu đề)
@@ -88,8 +105,9 @@ def save_config(body: dict) -> dict:
         if isinstance(default, bool):
             v = bool(v)
         elif isinstance(default, int):
+            lo, hi = (0, 8) if k == "veo_scenes" else (-30, 30)
             try:
-                v = max(-30, min(30, int(v)))
+                v = max(lo, min(hi, int(v)))
             except (TypeError, ValueError):
                 v = default
         else:
@@ -97,6 +115,10 @@ def save_config(body: dict) -> dict:
         cur[k] = v
     if cur["voice"] not in VOICES:
         cur["voice"] = DEFAULTS["voice"]
+    if cur["tts_style"] not in STYLES:
+        cur["tts_style"] = DEFAULTS["tts_style"]
+    if cur["visual"] not in ("stock", "ai"):
+        cur["visual"] = DEFAULTS["visual"]
     if cur["format"] not in SIZES:
         cur["format"] = DEFAULTS["format"]
     if not re.fullmatch(r"#[0-9a-fA-F]{6}", cur["color"]):
@@ -113,6 +135,8 @@ def public_config() -> dict:
     cfg = get_config()
     cfg["has_pexels_key"] = bool(cfg.pop("pexels_key"))
     cfg["voices"] = VOICES
+    cfg["styles"] = {k: v[0] for k, v in STYLES.items()}
+    cfg["veo_cost"] = round(aimedia.VEO_SECONDS * aimedia.VEO_PRICE_PER_SEC, 2)
     cfg["piper"] = piper_available()
     cfg["piper_downloaded"] = sorted(p.name[:-5] for p in PIPER_DIR.glob("*.onnx")) if PIPER_DIR.is_dir() else []
     cfg["lengths"] = list(LENGTHS)
@@ -194,7 +218,8 @@ Quy tắc nội dung:
 - Cảnh cuối (type "cta"): kêu gọi theo dõi Fanpage hoặc nhắn tin để được tư vấn miễn phí.
 
 Quy tắc lời đọc (narration) — viết như người dẫn chương trình đang nói, tự nhiên, có cảm xúc:
-- Câu ngắn, có từ nối ("Vậy", "Đặc biệt", "Lưu ý nhé"), xưng "bạn".
+- Câu ngắn (tối đa 18 từ), có từ nối ("Vậy", "Đặc biệt", "Lưu ý nhé"), xưng "bạn", có câu hỏi gợi mở và cảm thán nhẹ
+  để giọng đọc lên xuống tự nhiên; các cảnh nối tiếp nhau như một câu chuyện liền mạch, KHÔNG mở đầu mỗi cảnh bằng "Cảnh tiếp theo".
 - KHÔNG viết tắt: viết "thu nhập doanh nghiệp" thay "TNDN", "nghị định" thay "NĐ-CP", "hộ kinh doanh" thay "HKD".
 - Ngày tháng viết kiểu nói: "ngày 29 tháng 10 năm 2026". Không emoji, không ký hiệu markdown.
 
@@ -205,10 +230,12 @@ Mỗi cảnh có phần hình trên màn hình:
 - items: 2-4 ý ngắn (mỗi ý tối đa 9 từ) hiện thành gạch đầu dòng; với "stat" thì items[0] là chú thích cho con số.
   Cảnh nào cũng phải có items (trừ "hook" có thể để trống).
 - keyword: 1-3 từ TIẾNG ANH để tìm video/ảnh minh họa (vd "tax documents", "calculator", "small shop owner").
+- visual: 1 câu TIẾNG ANH mô tả cảnh quay minh họa cho cảnh này (ảnh thật, người Việt Nam, văn phòng / cửa hàng hiện đại,
+  ánh sáng đẹp, KHÔNG có chữ hay logo trong ảnh), vd "A Vietnamese shop owner smiling while checking invoices on a tablet".
 - description: lời giới thiệu đăng kèm video, 2-3 câu, kết bằng 3 hashtag.
 {brand}
 Trả về DUY NHẤT JSON: {{"title": "...", "description": "...", "scenes": [{{"type": "hook", "headline": "...",
-"narration": "...", "big": "", "items": ["..."], "keyword": "..."}}]}}
+"narration": "...", "big": "", "items": ["..."], "keyword": "...", "visual": "..."}}]}}
 
 NỘI DUNG:
 {text}
@@ -245,7 +272,8 @@ def clean_scenes(scenes) -> list:
                     "narration": narration[:900],
                     "big": str(s.get("big", "")).strip()[:16],
                     "items": items,
-                    "keyword": str(s.get("keyword", "")).strip()[:60]})
+                    "keyword": str(s.get("keyword", "")).strip()[:60],
+                    "visual": str(s.get("visual", "")).strip()[:300]})
     return out[:30]
 
 
@@ -397,7 +425,28 @@ def _piper(text: str, voice: str, rate: int, dest: Path):
     wav.unlink(missing_ok=True)
 
 
-def tts(text: str, voice: str, rate: int, dest: Path) -> str:
+def _gemini_voice(text: str, voice: str, style: str, rate: int, dest: Path):
+    import wave
+    key = newsagent.get_config()["gemini_key"]
+    if not key:
+        raise VideoError("Chưa có Gemini API key (nhập ở tab Tin tức AI)")
+    try:
+        pcm, hz = aimedia.tts_pcm(text, voice, style, key)
+    except aimedia.AIError as e:
+        raise VideoError(str(e)) from e
+    wav = dest.with_suffix(".wav")
+    with wave.open(str(wav), "wb") as f:
+        f.setnchannels(1)
+        f.setsampwidth(2)
+        f.setframerate(hz)
+        f.writeframes(pcm)
+    trim = "silenceremove=start_periods=1:start_threshold=-45dB"       # cắt khoảng lặng đầu và cuối cho nhịp liền mạch
+    flt = f"{trim},areverse,{trim},areverse,atempo={1 + max(-30, min(30, rate)) / 100:.2f}"
+    _ffmpeg(["-i", wav.name, "-af", flt, "-c:a", "libmp3lame", "-q:a", "3", dest.name], dest.parent)
+    wav.unlink(missing_ok=True)
+
+
+def tts(text: str, voice: str, rate: int, dest: Path, style: str = "") -> str:
     """Tạo giọng đọc, thử lần lượt tới khi được. Giọng Microsoft: giọng đã chọn → tốc độ chuẩn →
     giọng Microsoft còn lại → Piper offline (nếu đã cài) → Google. Giọng Piper: Piper → Microsoft → Google.
     Trả về tên giọng đã dùng."""
@@ -407,7 +456,11 @@ def tts(text: str, voice: str, rate: int, dest: Path) -> str:
     label = lambda v: VOICES.get(v, v).split(" — ")[0]
     piper_fallback = next((v for v in VOICES if v.startswith("piper:") and
                            (PIPER_DIR / f"{v[6:]}.onnx").exists()), None)
-    if voice.startswith("piper:"):
+    if voice.startswith("gemini:"):
+        edge = EDGE_VOICES[0]
+        attempts = [(label(voice), lambda: _gemini_voice(text, voice[7:], style, rate, dest)),
+                    (label(edge), lambda: _edge(text, edge, f"{int(rate):+d}%", dest))]
+    elif voice.startswith("piper:"):
         attempts = [(label(voice), lambda: _piper(text, voice, rate, dest)),
                     (label(EDGE_VOICES[0]), lambda: _edge(text, EDGE_VOICES[0], "+0%", dest))]
     else:
@@ -431,7 +484,7 @@ def tts(text: str, voice: str, rate: int, dest: Path) -> str:
         except Exception as e:  # noqa: BLE001
             errors.append(f"{name}: {str(e)[:120]}")
     raise VideoError("Không tạo được giọng đọc. Bấm 'Cài / cập nhật công cụ' rồi thử lại, hoặc chọn giọng "
-                     "Piper (offline). Chi tiết: " + " | ".join(errors))
+                     "khác. Chi tiết: " + " | ".join(errors))
 
 
 SAMPLE = ("Xin chào, đây là giọng đọc thử cho Fanpage kế toán. Từ ngày một tháng bảy năm hai nghìn "
@@ -444,7 +497,7 @@ def voice_sample(voice: str, rate: int) -> Path:
     d = VIDEO_DIR / "_nghe-thu"
     d.mkdir(parents=True, exist_ok=True)
     dest = d / f"{re.sub(r'[^A-Za-z0-9_-]', '_', voice)}.mp3"
-    used = tts(SAMPLE, voice, rate, dest)
+    used = tts(SAMPLE, voice, rate, dest, STYLES[get_config()["tts_style"]][1])
     if used != VOICES[voice].split(" — ")[0]:
         raise VideoError(f"Giọng này đang lỗi (đã phải dùng {used}) — xem thông báo ở ô Cài đặt clip")
     return dest
@@ -942,18 +995,48 @@ def render(video_id: int):
         if not _download(v["image_url"], article_img):
             article_img = None
     used_videos, durations = set(), []
+    style = STYLES[cfg["tts_style"]][1]
+    gkey = newsagent.get_config()["gemini_key"]
+    aspect = "9:16" if L.vertical else "16:9"
+    veo_at = set()
+    if cfg["veo_scenes"] and gkey:                    # rải đều các cảnh dùng Veo, luôn gồm cảnh mở đầu
+        k = min(cfg["veo_scenes"], total)
+        veo_at = {round(j * (total - 1) / max(1, k - 1)) for j in range(k)} if k > 1 else {0}
     for i, sc in enumerate(scenes):
         step(f"Cảnh {i + 1}/{total}: giọng đọc")
-        used = tts(sc["narration"], cfg["voice"], cfg["rate"], work / f"voice{i}.mp3")
+        used = tts(sc["narration"], cfg["voice"], cfg["rate"], work / f"voice{i}.mp3", style)
         if used != VOICES.get(cfg["voice"], "").split(" — ")[0]:
             _log(f"Cảnh {i + 1}: giọng đã chọn lỗi, đã dùng giọng {used}")
         voice_len = media_duration(work / f"voice{i}.mp3")
-        dur = math.ceil((voice_len + 0.8) * FPS) / FPS
+        dur = math.ceil((voice_len + 0.35) * FPS) / FPS
 
         step(f"Cảnh {i + 1}/{total}: hình ảnh")
-        bg_video = pexels_video(sc["keyword"], cfg["pexels_key"], size, work / f"bgv{i}.mp4", used_videos)
-        if not bg_video:
-            if pexels_photo(sc["keyword"], cfg["pexels_key"], not L.vertical, work / f"photo{i}.img"):
+        visual = sc["visual"] or sc["keyword"] or sc["headline"]
+        bg_video = False
+        if i in veo_at:
+            step(f"Cảnh {i + 1}/{total}: tạo video AI Veo (1-3 phút)")
+            try:
+                aimedia.veo(f"{visual}. Cinematic, realistic, smooth camera movement, no text, no logos, no speech.",
+                            aspect, gkey, work / f"bgv{i}.mp4")
+                bg_video = True
+            except aimedia.AIError as e:
+                _log(f"Cảnh {i + 1}: Veo lỗi, dùng ảnh thay thế — {str(e)[:160]}")
+        ai_photo = None
+        if not bg_video and cfg["visual"] == "ai" and gkey and visual:
+            step(f"Cảnh {i + 1}/{total}: vẽ ảnh AI")
+            try:
+                data = aimedia.image(f"{visual}. Photorealistic, natural lighting, vibrant, high detail, "
+                                     f"no text, no watermark, no logos.", aspect, gkey)
+                ai_photo = work / f"ai{i}.img"
+                ai_photo.write_bytes(data)
+            except aimedia.AIError as e:
+                _log(f"Cảnh {i + 1}: ảnh AI lỗi, dùng nền thay thế — {str(e)[:160]}")
+        if ai_photo:
+            render_background(ai_photo, size, cfg["color"], work / f"bg{i}.png", "photo")
+        elif not bg_video:
+            bg_video = pexels_video(sc["keyword"], cfg["pexels_key"], size, work / f"bgv{i}.mp4", used_videos)
+        if not bg_video and not ai_photo:
+            if pexels_photo(sc["keyword"], cfg["pexels_key"], L.vertical, work / f"photo{i}.img"):
                 render_background(work / f"photo{i}.img", size, cfg["color"], work / f"bg{i}.png", "photo")
             elif article_img:
                 mode = "photo" if sc["type"] == "hook" and not sc["headline"] else "blur"

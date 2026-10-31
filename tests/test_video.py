@@ -41,14 +41,14 @@ def test_config_masks_pexels_key_and_validates(client):
 def test_render_download_publish_delete(client, monkeypatch, tmp_path):
     vid = db.video_add("T", "mô tả", video.clean_scenes(SCRIPT["scenes"]))
 
-    def fake_tts(text, voice, rate, dest):          # không gọi Internet: tạo tiếng bíp 1 giây
+    def fake_tts(text, voice, rate, dest, style=""):          # không gọi Internet: tạo tiếng bíp 1 giây
         video._ffmpeg(["-f", "lavfi", "-i", "sine=duration=1", "-c:a", "libmp3lame", str(dest)], dest.parent)
     monkeypatch.setattr(video, "tts", fake_tts)
     monkeypatch.setattr(video, "missing_tools", lambda: [])
     monkeypatch.setattr(video, "_run_bg", lambda fn, *a: fn(*a))     # dựng ngay, không chạy nền
 
     r = client.post(f"/api/videos/{vid}/render").json()
-    assert r["status"] == "done" and r["has_file"] and 3 < r["duration"] < 4
+    assert r["status"] == "done" and r["has_file"] and 2 < r["duration"] < 3
     f = client.get(f"/api/videos/{vid}/file?download=1")
     assert f.status_code == 200 and f.headers["content-type"] == "video/mp4" and len(f.content) > 1000
     assert sorted(p.name for p in (tmp_path / "videos" / str(vid)).iterdir()) == ["clip.mp4"]
@@ -141,11 +141,11 @@ def test_piper_voice_makes_mp3_and_falls_back(monkeypatch, tmp_path):
 
 def test_voice_test_endpoint(client, monkeypatch):
     monkeypatch.setattr(video, "missing_tools", lambda: [])
-    monkeypatch.setattr(video, "tts", lambda text, voice, rate, dest: (dest.write_bytes(b"ID3"), "Hoài My (nữ)")[1])
+    monkeypatch.setattr(video, "tts", lambda text, voice, rate, dest, style="": (dest.write_bytes(b"ID3"), "Hoài My (nữ)")[1])
     r = client.post("/api/video/voice-test", json={"voice": "vi-VN-HoaiMyNeural"})
     assert r.status_code == 200 and r.headers["content-type"] == "audio/mpeg" and r.content == b"ID3"
     assert client.post("/api/video/voice-test", json={"voice": "xx"}).status_code == 400
-    monkeypatch.setattr(video, "tts", lambda text, voice, rate, dest: (dest.write_bytes(b"x"), "Google")[1])
+    monkeypatch.setattr(video, "tts", lambda text, voice, rate, dest, style="": (dest.write_bytes(b"x"), "Google")[1])
     r = client.post("/api/video/voice-test", json={"voice": "vi-VN-NamMinhNeural"})
     assert r.status_code == 400 and "Google" in r.json()["detail"]
 
@@ -162,3 +162,82 @@ def test_pexels_video_picks_smallest_sharp_file_and_skips_used(monkeypatch, tmp_
     assert video.pexels_video("tax", "", (1080, 1920), tmp_path / "a.mp4", set()) is False     # chưa có key
     assert video.pexels_video("tax", "k", (1080, 1920), tmp_path / "a.mp4", {1}) is True
     assert got == [("small", "video")]
+
+
+def test_gemini_voice_trims_and_falls_back_to_microsoft(monkeypatch, tmp_path):
+    from app import aimedia
+    newsagent.save_config({"gemini_key": "k"})
+    seen = {}
+
+    def fake_pcm(text, voice, style, key):
+        seen.update(voice=voice, style=style, key=key, text=text)
+        return b"\x00\x00" * 24000, 24000                   # 1 giây im lặng
+    monkeypatch.setattr(aimedia, "tts_pcm", fake_pcm)
+    dest = tmp_path / "g.mp3"
+    if HAS_TOOLS:
+        try:
+            video._gemini_voice("Xin chào", "Leda", "Đọc vui vẻ", 8, dest)
+        except video.VideoError:
+            pytest.fail("ffmpeg không xử lý được âm thanh Gemini")
+        assert dest.exists() and not dest.with_suffix(".wav").exists()
+    assert seen["voice"] == "Leda" and seen["style"] == "Đọc vui vẻ" and seen["key"] == "k"
+
+    def boom(*a):
+        raise aimedia.AIError("quota (HTTP 429)")
+    monkeypatch.setattr(aimedia, "tts_pcm", boom)
+    monkeypatch.setattr(video, "_edge", lambda text, voice, rate, d: d.write_bytes(b"mp3"))
+    monkeypatch.setattr(video.time, "sleep", lambda s: None)
+    assert video.tts("Xin chào", "gemini:Leda", 8, tmp_path / "h.mp3", "style") == "Hoài My (nữ)"
+
+
+def test_aimedia_parses_tts_image_and_retries(monkeypatch):
+    import base64 as b64
+    from app import aimedia
+    monkeypatch.setattr(aimedia.time, "sleep", lambda s: None)
+    calls = []
+
+    class R:
+        def __init__(self, status, body): self.status_code, self._b, self.text = status, body, str(body)
+        def json(self): return self._b
+    pcm = b64.b64encode(b"\x01\x00" * 10).decode()
+    replies = iter([R(429, {"error": {"message": "Please retry in 2.5s"}}),
+                    R(404, {"error": {"message": "model not found"}}),
+                    R(200, {"candidates": [{"content": {"parts": [{"inlineData": {
+                        "mimeType": "audio/L16;codec=pcm;rate=24000", "data": pcm}}]}}]})])
+    monkeypatch.setattr(aimedia.requests, "post", lambda url, **kw: calls.append((url, kw["json"])) or next(replies))
+    data, hz = aimedia.tts_pcm("Xin chào", "Leda", "Vui", "key")
+    assert data == b"\x01\x00" * 10 and hz == 24000
+    assert len(calls) == 3 and "preview-tts" in calls[0][0] and "flash-tts" in calls[2][0]        # 429 thử lại, 404 đổi model
+    assert calls[0][1]["generationConfig"]["speechConfig"]["voiceConfig"]["prebuiltVoiceConfig"]["voiceName"] == "Leda"
+    assert calls[0][1]["contents"][0]["parts"][0]["text"] == "Vui:\nXin chào"
+
+    png = b64.b64encode(b"\x89PNGdata").decode()
+    monkeypatch.setattr(aimedia.requests, "post", lambda url, **kw: R(200, {"candidates": [{"content": {"parts": [
+        {"text": "ok"}, {"inlineData": {"mimeType": "image/png", "data": png}}]}}]}))
+    assert aimedia.image("a shop", "9:16", "key") == b"\x89PNGdata"
+
+
+def test_render_uses_ai_image_and_veo_with_fallbacks(client, monkeypatch, tmp_path):
+    from app import aimedia
+    newsagent.save_config({"gemini_key": "k"})
+    video.save_config({"visual": "ai", "veo_scenes": 2, "voice": "vi-VN-HoaiMyNeural"})
+    sc = [{"type": "text", "headline": f"H{i}", "narration": "Lời đọc.", "visual": f"scene {i}"} for i in range(3)]
+    vid = db.video_add("T", "", sc)
+    monkeypatch.setattr(video, "tts", lambda text, voice, rate, dest, style="": (video._ffmpeg(
+        ["-f", "lavfi", "-i", "sine=duration=1", "-c:a", "libmp3lame", str(dest)], dest.parent), "Hoài My (nữ)")[1])
+    veo_calls, img_calls, rendered = [], [], []
+
+    def fake_veo(prompt, aspect, key, dest, wait=0):
+        veo_calls.append(prompt)
+        if len(veo_calls) == 2:
+            raise aimedia.AIError("Veo quá lâu")
+        video._ffmpeg(["-f", "lavfi", "-i", "testsrc2=size=320x240:rate=25:duration=1", "-c:v", "libx264",
+                       "-pix_fmt", "yuv420p", str(dest)], dest.parent)
+    monkeypatch.setattr(aimedia, "veo", fake_veo)
+    monkeypatch.setattr(aimedia, "image", lambda prompt, aspect, key: img_calls.append((prompt, aspect)) or (_ for _ in ()).throw(aimedia.AIError("blocked")))
+    video.render(vid)
+    v = db.video_get(vid)
+    assert v["status"] == "done"
+    assert len(veo_calls) == 2 and veo_calls[0].startswith("scene 0") and veo_calls[1].startswith("scene 2")   # cảnh đầu + cuối
+    assert len(img_calls) == 2 and img_calls[0][0].startswith("scene 1") and img_calls[0][1] == "9:16"          # chỉ cảnh còn lại
+    assert any("Veo lỗi" in l for l in video.state["log"]) and any("ảnh AI lỗi" in l for l in video.state["log"])
