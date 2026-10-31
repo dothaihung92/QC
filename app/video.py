@@ -184,34 +184,58 @@ def start_install():
     _run_bg(_install)
 
 
-def _pip(pkgs: list):
-    return subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", *pkgs],
-                          capture_output=True, text=True, timeout=900)
+def _pip(pkgs: list, timeout: int = 900, only_binary: bool = False):
+    """Chạy pip, ghi các dòng tiến độ vào nhật ký ngay khi có. Trả về (mã lỗi, phần cuối đầu ra).
+    only_binary: chỉ nhận bản cài sẵn (wheel) — thiếu thì báo lỗi ngay thay vì biên dịch từ mã nguồn hàng chục phút."""
+    cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "--progress-bar", "off", "--disable-pip-version-check"]
+    if only_binary:
+        cmd.append("--only-binary=:all:")
+    kw = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    proc = subprocess.Popen(cmd + list(pkgs), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                            encoding="utf-8", errors="replace", **kw)
+    timer = threading.Timer(timeout, proc.kill)
+    timer.start()
+    tail, last_log = [], 0.0
+    try:
+        for line in proc.stdout:
+            line = line.rstrip()
+            tail = (tail + [line])[-12:]
+            if re.match(r"(Collecting|Downloading|Building|Installing collected|Using cached|ERROR)", line) and time.time() - last_log > 4:
+                _log("   pip: " + line[:110])
+                last_log = time.time()
+        proc.wait()
+    finally:
+        timer.cancel()
+    if proc.returncode in (-9, 137) or (proc.returncode and proc.returncode < 0):
+        return 1, f"quá {timeout // 60} phút nên bị dừng\n" + "\n".join(tail)
+    return proc.returncode, "\n".join(tail)
 
 
 def _install():
     # luôn cài/cập nhật bản mới nhất: Edge-TTS hay phải cập nhật khi Microsoft đổi cách xác thực
     pkgs = list(TOOLS.values())
     _log(f"Đang cài / cập nhật {', '.join(pkgs)} (1-3 phút)...")
-    r = _pip(pkgs)
-    if r.returncode != 0:
-        raise VideoError("Cài thất bại: " + (r.stderr or r.stdout)[-400:])
+    rc, out = _pip(pkgs)
+    if rc != 0:
+        raise VideoError("Cài thất bại: " + out[-400:])
     for mod, pkg in OPTIONAL_TOOLS.items():
         label = "VieNeu-TTS (giọng Việt offline, khoảng 3-8 phút)" if mod == "vieneu" else "Piper (giọng offline dự phòng)"
         if sys.version_info >= (3, 14) and mod == "vieneu":
             _log("ℹ Python 3.14 còn rất mới, nhiều thư viện của VieNeu-TTS có thể chưa có bản cài sẵn; "
                  "nếu lỗi, cài Python 3.12 rồi xóa thư mục .venv và chạy lại start.bat.")
         _log(f"Đang cài {label}...")
-        r = _pip([pkg])
-        if r.returncode != 0:
-            _log(f"⚠ Không cài được {pkg} — vẫn dùng giọng Gemini / Microsoft / Google được. "
-                 + (r.stderr or r.stdout)[-300:])
+        rc, out = _pip([pkg])
+        if rc != 0:
+            _log(f"⚠ Không cài được {pkg} — vẫn dùng giọng Gemini / Microsoft / Google được. " + out[-300:])
     if get_config()["pen"] == "strokes":
-        _log("Đang cài whiteboard-animator (vẽ từng nét, khoảng 200 MB gồm opencv, scipy, mô hình nhận chữ)...")
-        r = _pip(["whiteboard-animator"])
-        if r.returncode != 0:
-            _log("⚠ Không cài được whiteboard-animator — clip vẫn dựng được bằng kiểu quét nhanh. "
-                 + (r.stderr or r.stdout)[-300:])
+        _log("Đang cài whiteboard-animator (vẽ từng nét, ~200 MB gồm opencv, scipy, mô hình nhận chữ 83 MB; tối đa 30 phút)...")
+        rc, out = _pip(["whiteboard-animator"], timeout=1800, only_binary=True)
+        if rc != 0:
+            ver = f"{sys.version_info.major}.{sys.version_info.minor}"
+            _log(f"⚠ Không cài được whiteboard-animator trên Python {ver} — clip vẫn dựng được bằng kiểu quét nhanh. "
+                 "Thường do thư viện (scipy, opencv, scikit-image) chưa có bản cài sẵn cho bản Python này. "
+                 "Cách xử lý: cài thêm Python 3.12, chạy `<python 3.12> -m pip install whiteboard-animator`, rồi thêm dòng "
+                 "QC_WBA_PYTHON=<đường dẫn python.exe 3.12> vào file .env. Chi tiết: " + out[-300:])
     importlib.invalidate_caches()
     for mod in ("edge_tts", "gtts"):                     # dùng bản vừa cập nhật mà không cần khởi động lại
         if mod in sys.modules:

@@ -390,3 +390,9 @@ def test_doodle_stroke_engine_overlays_video_and_falls_back(monkeypatch):
     assert v["status"] == "done" and 3 < v["duration"] < 5
     assert sorted(c[0] for c in calls) == ["pw0_0.png", "pw0_1.png", "pw0_2.png"] and all(c[1] >= 1.0 for c in calls)
     assert any("không vẽ từng nét được" in l for l in video.state["log"])
+
+
+def test_pip_helper_logs_progress_and_reports_failure():
+    rc, out = video._pip(["nonexistent-pkg-zzz-123"])
+    assert rc != 0 and "No matching distribution" in out
+    assert any("pip:" in l for l in video.state["log"])
