@@ -96,12 +96,24 @@ def test_tts_cleans_text_and_falls_back_to_google(monkeypatch, tmp_path):
         video.tts("Xin chào", "vi-VN-HoaiMyNeural", 0, tmp_path / "b.mp3")
 
 
-def test_long_clip_script_keeps_many_scenes(client, monkeypatch):
+def test_long_clip_script_retries_when_too_short(client, monkeypatch):
     prompts = []
-    scenes = [{"headline": f"Ý {i}", "narration": f"Lời đọc {i}.", "keyword": "tax"} for i in range(16)]
-    monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: prompts.append(p) or {"scenes": scenes})
+    short = [{"headline": "Ý", "narration": "Ngắn quá.", "items": ["a"]}] * 8
+    long_ = [{"type": "stat", "headline": f"Ý {i}", "narration": "Lời đọc khá dài " * 7, "big": "30%",
+              "items": "Ý một\nÝ hai\n\n• Ý ba"} for i in range(20)]
+    replies = iter([{"scenes": short}, {"scenes": long_}])
+    monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: prompts.append(p) or next(replies))
     v = client.post("/api/videos", json={"text": "Nội dung bài viết về thuế. " * 10, "seconds": 180}).json()
-    assert len(v["scenes"]) == 16 and "16 cảnh" in prompts[0] and "2-3 câu" in prompts[0]
+    assert len(v["scenes"]) == 20 and v["scenes"][0]["items"] == ["Ý một", "Ý hai", "Ý ba"]
+    assert "20 cảnh" in prompts[0] and "540 từ" in prompts[0] and "QUÁ NGẮN" in prompts[1]
+    assert 150 < video.estimate_seconds(v["scenes"]) < 200
+
+
+def test_caption_chunks_are_short():
+    chunks = video.caption_chunks("Từ ngày 1 tháng 7, doanh nghiệp nhỏ được giảm 30% thuế thu nhập doanh nghiệp "
+                                  "trong hai năm liên tiếp 2026 và 2027. Đặc biệt!")
+    assert all(len(c.split()) <= 10 for c in chunks) and " ".join(chunks).endswith("Đặc biệt!")
+
 
 
 @pytest.mark.skipif(not (HAS_TOOLS and importlib.util.find_spec("piper")), reason="cần piper-tts")
@@ -136,3 +148,17 @@ def test_voice_test_endpoint(client, monkeypatch):
     monkeypatch.setattr(video, "tts", lambda text, voice, rate, dest: (dest.write_bytes(b"x"), "Google")[1])
     r = client.post("/api/video/voice-test", json={"voice": "vi-VN-NamMinhNeural"})
     assert r.status_code == 400 and "Google" in r.json()["detail"]
+
+
+def test_pexels_video_picks_smallest_sharp_file_and_skips_used(monkeypatch, tmp_path):
+    vids = [{"id": 1, "duration": 10, "video_files": [{"file_type": "video/mp4", "width": 1080, "height": 1920, "link": "u1"}]},
+            {"id": 2, "duration": 10, "video_files": [
+                {"file_type": "video/mp4", "width": 2160, "height": 3840, "link": "big"},
+                {"file_type": "video/mp4", "width": 720, "height": 1280, "link": "small"},
+                {"file_type": "video/mp4", "width": 360, "height": 640, "link": "blurry"}]}]
+    monkeypatch.setattr(video, "_pexels", lambda path, key, params: [dict(v) for v in vids])
+    got = []
+    monkeypatch.setattr(video, "_download", lambda url, dest, kind="image": got.append((url, kind)) or True)
+    assert video.pexels_video("tax", "", (1080, 1920), tmp_path / "a.mp4", set()) is False     # chưa có key
+    assert video.pexels_video("tax", "k", (1080, 1920), tmp_path / "a.mp4", {1}) is True
+    assert got == [("small", "video")]

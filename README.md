@@ -171,6 +171,9 @@ Gemini viết kịch bản theo cảnh → giọng đọc tiếng Việt miễn 
 ảnh nền (ảnh của bài, ảnh miễn phí Pexels nếu có key, hoặc nền màu thương hiệu) →
 chữ lớn + phụ đề → FFmpeg ghép thành video dọc 9:16 (hoặc ngang 16:9).
 
+- Mỗi cảnh gồm: nền chuyển động (video Pexels nếu có key, ảnh của bài làm mờ, hoặc nền màu có hiệu ứng),
+  tiêu đề trượt vào, thẻ **con số nổi bật** hoặc **gạch đầu dòng hiện lần lượt**, phụ đề chạy theo lời đọc
+  (số liệu tô vàng), chuyển cảnh mượt giữa các cảnh. Kịch bản 2–3 phút được AI viết đủ số từ (thiếu thì tự viết lại).
 - Lần đầu bấm **⬇ Cài công cụ** (cài `pillow`, `edge-tts`, `imageio-ffmpeg` — đã kèm FFmpeg).
 - Chọn bài ở tab *Tin tức AI* / *Bài đăng* hoặc dán nội dung → **✨ AI viết kịch bản** → sửa từng cảnh →
   **🎬 Dựng clip** → xem thử → **⬇ Tải về** (TikTok, YouTube) hoặc **📤 Đăng lên Fanpage**.

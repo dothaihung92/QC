@@ -636,9 +636,9 @@
       <label>Ảnh của bài (tùy chọn, dùng cho cảnh đầu và cuối)</label>
       <input id="vdImg" placeholder="https://...jpg">
       <label>Độ dài</label>
-      <select id="vdLen"><option value="30">~30 giây (4 cảnh)</option><option value="45" selected>~45 giây (6 cảnh)</option>
-        <option value="60">~60 giây (7 cảnh)</option><option value="120">~2 phút (12 cảnh)</option>
-        <option value="180">~3 phút (16 cảnh)</option></select>
+      <select id="vdLen"><option value="30">~30 giây (5 cảnh)</option><option value="45" selected>~45 giây (7 cảnh)</option>
+        <option value="60">~60 giây (9 cảnh)</option><option value="120">~2 phút (14 cảnh)</option>
+        <option value="180">~3 phút (20 cảnh)</option></select>
       <div class="btns"><button class="btn pri" id="vdMake" onclick="vdCreate()">✨ AI viết kịch bản</button></div>
       <p class="muted small" id="vdKeyHint"></p>
     </div>
@@ -857,12 +857,23 @@ async function vdLoadList() {
   if (VIDEOS.some(v => v.status === 'rendering') && document.getElementById('video').classList.contains('active'))
     vdTimer = setTimeout(vdLoadList, 3000);
 }
+const VD_TYPES = { hook: 'Mở đầu', stat: 'Con số nổi bật', list: 'Gạch đầu dòng', text: 'Chữ', cta: 'Kêu gọi liên hệ' };
+const vdWords = (t) => (t.match(/[\p{L}\p{N}]+/gu) || []).length;
+const vdEst = (scenes) => Math.round(scenes.reduce((n, s) => n + vdWords(s.narration) / 3 + 0.3, 0));
+const vdFmtSec = (n) => n >= 60 ? `${Math.floor(n / 60)} phút ${n % 60} giây` : `${n} giây`;
 function vdScene(v, s, i) {
   return `<div style="border-left:3px solid #ddd;padding-left:10px;margin:8px 0">
-    <b class="small">Cảnh ${i + 1}</b> <button class="btn" style="padding:2px 8px" onclick="vdDelScene(${v.id},${i})">✕</button>
-    <input data-v="${v.id}" data-i="${i}" data-f="headline" value="${esc(s.headline)}" placeholder="Chữ lớn trên màn hình">
-    <textarea data-v="${v.id}" data-i="${i}" data-f="narration" rows="2" placeholder="Lời đọc">${esc(s.narration)}</textarea>
-    <input data-v="${v.id}" data-i="${i}" data-f="keyword" value="${esc(s.keyword)}" placeholder="Từ khóa ảnh (tiếng Anh)">
+    <b class="small">Cảnh ${i + 1}</b>
+    <select data-v="${v.id}" data-i="${i}" data-f="type" style="width:auto;display:inline-block">
+      ${Object.entries(VD_TYPES).map(([k, l]) => `<option value="${k}" ${s.type === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+    <button class="btn" style="padding:2px 8px" onclick="vdDelScene(${v.id},${i})">✕</button>
+    <input data-v="${v.id}" data-i="${i}" data-f="headline" value="${esc(s.headline)}" placeholder="Tiêu đề lớn trên màn hình">
+    <textarea data-v="${v.id}" data-i="${i}" data-f="narration" rows="3" placeholder="Lời đọc">${esc(s.narration)}</textarea>
+    <div class="row">
+      <div class="col" style="flex-basis:120px"><input data-v="${v.id}" data-i="${i}" data-f="big" value="${esc(s.big || '')}" placeholder="Số nổi bật (vd 30%)"></div>
+      <div class="col" style="flex-basis:160px"><input data-v="${v.id}" data-i="${i}" data-f="keyword" value="${esc(s.keyword)}" placeholder="Từ khóa ảnh/video (tiếng Anh)"></div>
+    </div>
+    <textarea data-v="${v.id}" data-i="${i}" data-f="items" rows="2" placeholder="Ý hiện trên màn hình — mỗi dòng 1 ý (tối đa 4)">${esc((s.items || []).join('\n'))}</textarea>
   </div>`;
 }
 function vdRenderList() {
@@ -871,7 +882,7 @@ function vdRenderList() {
     const busy = v.status === 'rendering';
     return `<div class="card" style="margin:0 0 12px">
       <span class="pill ${cls}">${lbl}</span> <b>${esc(v.title || 'Clip #' + v.id)}</b>
-      <span class="muted small">${fmt(v.created_at)}${v.duration ? ' · ' + Math.round(v.duration) + ' giây' : ''}${v.fb_video_id ? ' · đã đăng Fanpage' : ''}</span>
+      <span class="muted small">${fmt(v.created_at)} · ${v.scenes.length} cảnh · ${v.duration ? 'dài ' + vdFmtSec(Math.round(v.duration)) : 'ước tính ≈ ' + vdFmtSec(vdEst(v.scenes))}${v.fb_video_id ? ' · đã đăng Fanpage' : ''}</span>
       ${busy ? `<p class="small">⏳ ${esc(v.progress || 'Đang dựng...')}</p>` : ''}
       ${v.error ? `<div class="small" style="color:#b42318">${esc(v.error)}</div>` : ''}
       ${v.has_file && !busy ? `<div style="margin:8px 0"><video src="/api/videos/${v.id}/file?t=${v.duration}" controls preload="metadata"
@@ -893,12 +904,13 @@ function vdRenderList() {
 function vdCollect(id) {
   const v = VIDEOS.find(x => x.id === id);
   const scenes = v.scenes.map(s => ({ ...s }));
-  document.querySelectorAll(`[data-v="${id}"]`).forEach(el => { scenes[+el.dataset.i][el.dataset.f] = el.value; });
+  document.querySelectorAll(`[data-v="${id}"]`).forEach(el => {
+    scenes[+el.dataset.i][el.dataset.f] = el.dataset.f === 'items' ? el.value.split('\n').map(x => x.trim()).filter(Boolean) : el.value; });
   return { title: $('vt' + id).value, description: $('vds' + id).value, scenes };
 }
 async function vdSaveOne(id) { return api('/api/videos/' + id, { method: 'PUT', body: vdCollect(id) }); }
 async function vdAddScene(id) {
-  const b = vdCollect(id); b.scenes.push({ headline: '', narration: 'Lời đọc cảnh mới', keyword: '' });
+  const b = vdCollect(id); b.scenes.push({ type: 'list', headline: '', narration: 'Lời đọc cảnh mới', big: '', items: [], keyword: '' });
   await api('/api/videos/' + id, { method: 'PUT', body: b }); vdLoadList();
 }
 async function vdDelScene(id, i) {
