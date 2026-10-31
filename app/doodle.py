@@ -23,7 +23,8 @@ SOFT = 70                                   # độ rộng (px) của mép mờ 
 IMG_STYLE = ("Detailed hand-drawn whiteboard doodle illustration, a small rich scene with 3-5 related elements "
              "(characters with expressive faces, objects, icons, arrows, sparkles), black ink outline sketch with flat pastel colour accents "
              "(orange, teal, yellow, pink), cute friendly cartoon style, centered on a plain pure white background with "
-             "generous margin, no text, no letters, no numbers, no watermark: ")
+             "generous margin, no text, no letters, no numbers, no watermark. If a person or mascot appears, always use the same recurring "
+             "character: a friendly round-faced accountant with big round glasses, an orange tie and a small notebook: ")
 
 
 def layout(size, n):
@@ -31,7 +32,7 @@ def layout(size, n):
     W, H = size
     vertical = W < H
     pad = int(min(size) * 0.05)
-    top, bottom = int(H * (0.2 if vertical else 0.27)), int(H * (0.72 if vertical else 0.8))
+    top, bottom = int(H * (0.19 if vertical else 0.27)), int(H * (0.78 if vertical else 0.82))
     gap = int(pad * 0.6)
     n = max(1, min(4, n))
     if not vertical:
@@ -42,10 +43,11 @@ def layout(size, n):
         s = min(avail_w, avail_h)
         return [((W - s) // 2, top + (avail_h - s) // 2, s, s)]
     cw = (avail_w - gap) // 2
-    ch = min(cw + int(cw * 0.12), (avail_h - gap) // 2)
+    ch = min(cw + int(cw * 0.3), (avail_h - gap) // 2)
     if n == 2:
-        ch = min(int(cw * 1.1), (avail_h - gap) // 2)
-        return [((W - cw * 2 - gap) // 2 + k * (cw + gap), top + (avail_h - ch) // 2, cw, ch) for k in range(2)]
+        full = avail_w
+        ch = min(int(full * 0.95), (avail_h - gap) // 2)
+        return [(pad, top + (avail_h - 2 * ch - gap) // 2 + k * (ch + gap), full, ch) for k in range(2)]
     boxes = [(pad + (k % 2) * (cw + gap), top + (k // 2) * (ch + gap), cw, ch) for k in range(4)]
     if n == 3:
         boxes[2] = ((W - cw) // 2, boxes[2][1], cw, ch)
@@ -220,7 +222,7 @@ def caption_layer(L, words: list, dest: Path):
         lines.append(cur)
     lines = lines[:3]
     lh = int(f.size * 1.4)
-    top = L.cap_y + int(L.H * 0.02) - lh * len(lines) // 2
+    top = int(L.H * (0.865 if L.vertical else 0.88)) - lh * len(lines) // 2
     for k, line in enumerate(lines):
         x = (L.W - (sum(w[2] for w in line) + space * (len(line) - 1))) / 2
         y = top + k * lh
