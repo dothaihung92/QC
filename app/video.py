@@ -125,7 +125,7 @@ def save_config(body: dict) -> dict:
         cur["voice"] = DEFAULTS["voice"]
     if cur["tts_style"] not in STYLES:
         cur["tts_style"] = DEFAULTS["tts_style"]
-    if cur["look"] not in ("doodle", "explainer", "classic"):
+    if cur["look"] not in ("doodle", "tech", "explainer", "classic"):
         cur["look"] = DEFAULTS["look"]
     if cur["pen"] not in ("wipe", "strokes"):
         cur["pen"] = DEFAULTS["pen"]
@@ -254,10 +254,42 @@ def piper_available() -> bool:
     return importlib.util.find_spec("piper") is not None
 
 
+# ---------------------------------------------------------------- nguồn nội dung: repo GitHub
+
+def github_source(url: str) -> dict:
+    """Lấy mô tả, số sao, giấy phép và README của một repo GitHub công khai để làm nguồn viết kịch bản clip."""
+    m = re.match(r"\s*(?:https?://)?(?:www\.)?github\.com/([\w.-]+)/([\w.-]+?)(?:\.git)?(?:[/?#].*)?\s*$", url or "")
+    if not m:
+        raise VideoError("Dán link repo GitHub dạng https://github.com/chủ-repo/tên-repo")
+    owner, repo = m[1], m[2]
+    hdr = {"User-Agent": newsagent.UA, "Accept": "application/vnd.github+json"}
+    try:
+        r = requests.get(f"https://api.github.com/repos/{owner}/{repo}", headers=hdr, timeout=20)
+        if r.status_code == 404:
+            raise VideoError("Không tìm thấy repo (hoặc repo riêng tư)")
+        if r.status_code in (403, 429):
+            raise VideoError("GitHub đang giới hạn lượt gọi, đợi vài phút rồi thử lại")
+        r.raise_for_status()
+        info = r.json()
+        rd = requests.get(f"https://api.github.com/repos/{owner}/{repo}/readme",
+                          headers={**hdr, "Accept": "application/vnd.github.raw"}, timeout=20)
+        readme = rd.text if rd.ok else ""
+    except requests.RequestException as e:
+        raise VideoError(f"Không kết nối được GitHub: {e}") from e
+    lic = (info.get("license") or {}).get("spdx_id") or "không rõ"
+    readme = re.sub(r"<[^>]+>|!\[[^\]]*\]\([^)]*\)", " ", readme)              # bỏ thẻ HTML, ảnh
+    readme = re.sub(r"\n{3,}", "\n\n", readme).strip()[:8000]
+    text = (f"Repo GitHub: {info.get('full_name')}\nMô tả: {info.get('description') or ''}\n"
+            f"Số sao: {info.get('stargazers_count')}; Số fork: {info.get('forks_count')}; Giấy phép: {lic}; "
+            f"Ngôn ngữ: {info.get('language') or ''}; Tạo ngày: {(info.get('created_at') or '')[:10]}; "
+            f"Chủ đề: {', '.join(info.get('topics') or [])}\n\nREADME:\n{readme}")
+    return {"text": text, "name": info.get("full_name") or f"{owner}/{repo}", "stars": info.get("stargazers_count", 0)}
+
+
 # ---------------------------------------------------------------- 1. kịch bản
 
 WORDS_PER_SEC = 3.0                  # tốc độ đọc tiếng Việt trung bình của giọng máy (đo từ clip thật)
-SCENE_TYPES = ("hook", "stat", "list", "flow", "steps", "text", "cta", "doodle")
+SCENE_TYPES = ("hook", "stat", "list", "flow", "steps", "text", "cta", "doodle", "hero", "browser")
 DOODLE_PAGES = {30: 3, 45: 4, 60: 5, 120: 8, 180: 12}   # giây → số trang của clip vẽ tay (~15 giây / trang)
 
 SCRIPT_PROMPT = """Bạn là biên tập viên video (Facebook Reels / TikTok / YouTube) cho một công ty dịch vụ kế toán - thuế ở Việt Nam.
@@ -334,6 +366,34 @@ NỘI DUNG:
 {text}
 """
 
+TECH_PROMPT = """Bạn là biên tập viên video "review công cụ / công nghệ" (Facebook Reels / TikTok / YouTube) bằng tiếng Việt.
+Từ nội dung dưới đây (thông tin về một công cụ, phần mềm, repo GitHub hoặc chủ đề công nghệ), viết kịch bản video giải thích dài khoảng {seconds} giây gồm đúng {n} cảnh.
+
+ĐỘ DÀI (BẮT BUỘC): tổng lời đọc khoảng {total} từ, mỗi cảnh {lo}-{hi} từ.
+
+NỘI DUNG: nói rõ công cụ là gì, giải quyết vấn đề gì, điểm mạnh (con số cụ thể: số sao, số kênh, miễn phí, giấy phép), cách cài / dùng, các tình huống áp dụng KÈM VÍ DỤ CỤ THỂ, rủi ro và lưu ý bảo mật,
+rồi kết bằng câu hỏi tương tác (vd "Bạn muốn ... nào? Bình luận cho mình biết nhé"). Chỉ dùng thông tin có trong nội dung nguồn, không bịa số liệu; ví dụ minh họa phải ghi rõ là ví dụ.
+Lời đọc: câu ngắn tự nhiên như người dẫn chương trình, xưng "bạn", không viết tắt khó đọc, không emoji / markdown; số lớn đọc thành chữ ("một trăm lẻ sáu nghìn chín trăm sao").
+
+Mỗi cảnh có:
+- type: "hero" (cảnh đầu: logo + tiêu đề + 4-6 chip), "stat" (một con số nổi bật + biểu đồ), "browser" (cửa sổ trình duyệt hiển thị đoạn trích / ví dụ),
+  "steps" (các bước), "list" (các ý), "flow" (sơ đồ cây), "cta" (cảnh cuối: câu hỏi + nút), "text".
+- tag: nhãn nhỏ phía trên, viết hoa, vd "01 — ÁP DỤNG", "BẢO MẬT" (tối đa 4 từ).
+- headline: tiêu đề 2 DÒNG ngăn bằng "|", tổng tối đa 7 từ, dòng 2 sẽ tô xanh, vd "Cho AI “mắt”|nhìn Internet".
+- chips: các nhãn ngắn hiện thành chip, mỗi chip dạng "biểu_tượng|Nhãn" với biểu_tượng thuộc: lock, check, warn, star, search, globe, play, bell, chat, no, bolt, doc (vd "lock|Cần đăng nhập"). Cảnh "hero" cần 4-6 chip.
+- big: (cho "stat") con số nổi bật, vd "106,9K"; items[0] là dòng chú thích dưới số, vd "trong 8 tháng"; chips[0] là nhãn phụ.
+- url, url_title, items, focus, tone: (cho "browser") url là địa chỉ giả hiển thị (vd "github.com · tên-repo / README"), url_title là tiêu đề trang, items là 3-5 dòng nội dung
+  của trang (trích / diễn giải từ nguồn), focus là số thứ tự dòng (từ 0) cần tô khung sáng, tone là "info" | "good" | "bad" (xanh dương | xanh lá | đỏ).
+- items: (cho "steps" / "list" / "flow" / "cta") 2-5 ý ngắn; với "cta": items[0] là câu hỏi hiện trong bong bóng, items[1] là dòng phụ, chips[0] là nhãn nút (vd "bell|Đăng ký kênh").
+- note: chú thích nhỏ cuối khung nếu nội dung là minh họa, vd "* Ví dụ minh hoạ".
+- description: (một lần ở cuối JSON) lời giới thiệu đăng kèm video, 2-3 câu, kết bằng 3 hashtag.
+{brand}
+Trả về DUY NHẤT JSON: {{"title": "...", "description": "...", "scenes": [{{"type": "hero", "tag": "...", "headline": "...|...", "narration": "...", "chips": ["lock|..."], "big": "", "url": "", "url_title": "", "items": [], "focus": 0, "tone": "info", "note": ""}}]}}
+
+NỘI DUNG:
+{text}
+"""
+
 EXPAND = """Video dài nên phải giải thích ĐẦY ĐỦ và có VÍ DỤ CỤ THỂ có số liệu (nói rõ là ví dụ), không chỉ tóm tắt: ai được áp dụng, điều kiện, mức ưu đãi cụ thể,
 thời gian hiệu lực, cách tính (có ví dụ minh họa ghi rõ là ví dụ), các bước doanh nghiệp cần làm, hồ sơ / thời hạn,
 lưu ý và sai lầm thường gặp, câu hỏi hay gặp. Dùng nhiều cảnh "stat" và "list" để màn hình luôn có thông tin."""
@@ -372,7 +432,15 @@ def clean_scenes(scenes) -> list:
             items = [pv["label"] for pv in panels if pv["label"]][:4]
         if panels and typ not in SCENE_TYPES:
             typ = "doodle"
+        chips = s.get("chips") or []
+        chips = [str(x).strip()[:60] for x in (chips.splitlines() if isinstance(chips, str) else chips) if str(x).strip()][:8]
+        try:
+            focus = int(s.get("focus", -1))
+        except (TypeError, ValueError):
+            focus = -1
         out.append({"type": typ if typ in SCENE_TYPES else ("stat" if s.get("big") else "list" if items else "text"),
+                    "chips": chips, "url": str(s.get("url", "")).strip()[:60], "url_title": str(s.get("url_title", "")).strip()[:50],
+                    "focus": focus, "tone": str(s.get("tone", "")).strip().lower()[:8], "note": str(s.get("note", "")).strip()[:60],
                     "tag": str(s.get("tag", "")).strip()[:40], "panels": panels, "hl": hl,
                     "headline": str(s.get("headline", "")).strip()[:120],
                     "narration": narration[:900],
@@ -390,11 +458,14 @@ def make_script(text: str, seconds: int = 45) -> dict:
     seconds = seconds if seconds in LENGTHS else 45
     cfg = get_config()
     doodle = cfg["look"] == "doodle"
+    tech = cfg["look"] == "tech"
     n = DOODLE_PAGES[seconds] if doodle else LENGTHS[seconds]
     total = int(seconds * WORDS_PER_SEC)
     per = total / n
     brand = f'- {"Trang" if doodle else "Cảnh"} cuối nhắc tên: "{cfg["brand"]}"\n' if cfg["brand"] else ""
-    if doodle:
+    if tech:
+        prompt = TECH_PROMPT.format(seconds=seconds, n=n, total=total, lo=int(per * 0.8), hi=int(per * 1.25), brand=brand, text=text[:12000])
+    elif doodle:
         prompt = DOODLE_PROMPT.format(seconds=seconds, n=n, total=total, lo=int(per * 0.8), hi=int(per * 1.25),
                                       examples=max(1, n // 3), brand=brand, text=text[:12000])
     else:
@@ -1140,7 +1211,9 @@ def render(video_id: int):
         if not _download(v["image_url"], article_img):
             article_img = None
     from . import doodle, explainer
-    expl = cfg["look"] == "explainer"
+    from . import techlook
+    tech = cfg["look"] == "tech"
+    expl = cfg["look"] == "explainer" or tech
     paper = cfg["look"] == "doodle"
     trans, tnames = (0.3, ["fade"]) if (expl or paper) else (TRANSITION, TRANSITIONS)
     ai_state = doodle.AIState()
@@ -1202,13 +1275,16 @@ def render(video_id: int):
             elif article_img and not expl:
                 mode = "photo" if sc["type"] == "hook" and not sc["headline"] else "blur"
                 render_background(article_img, size, cfg["color"], work / f"bg{i}.png", mode)
+            elif tech:
+                techlook.background(size, work / f"bg{i}.png", seed=video_id * 100 + i)
             elif expl:
                 explainer.background(size, work / f"bg{i}.png", seed=video_id * 100 + i)
             else:
                 render_background(None, size, cfg["color"], work / f"bg{i}.png", "none", seed=video_id * 100 + i)
 
         if expl:
-            layers, captions = explainer.build(L, sc, i, total, work, cfg["brand"], dur, voice_len)
+            builder = techlook.build if tech else explainer.build
+            layers, captions = builder(L, sc, i, total, work, cfg["brand"], dur, voice_len)
         else:
             layers = []
             pos = _frame_layer(L, cfg["color"], cfg["brand"], i, total, work / f"frame{i}.png")

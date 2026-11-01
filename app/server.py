@@ -966,6 +966,19 @@ def video_install():
     return video.public_config()
 
 
+class GithubIn(BaseModel):
+    url: str
+
+
+@admin.post("/api/video/github")
+def video_github(body: GithubIn):
+    """Lấy nội dung repo GitHub (mô tả, sao, giấy phép, README) làm nguồn viết kịch bản clip."""
+    try:
+        return video.github_source(body.url)
+    except video.VideoError as e:
+        raise HTTPException(400, str(e))
+
+
 class VoiceTestIn(BaseModel):
     voice: str
     rate: int = 0

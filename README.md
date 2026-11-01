@@ -174,6 +174,10 @@ chữ lớn + phụ đề → FFmpeg ghép thành video dọc 9:16 (hoặc ngang
 - **Kiểu clip "Vẽ tay" (mặc định)**: nền giấy kem, nhãn + tiêu đề góc trái, 2-4 hình minh họa phác thảo do Gemini vẽ
   được "vẽ" lộ dần bởi một bàn tay cầm bút, phụ đề có tô vàng từ khóa. Kịch bản chi tiết, giải thích thuật ngữ và có
   **ví dụ cụ thể có số liệu**. Dựng ở 720p cho nhanh; mỗi hình AI khoảng 0,04 USD, hình nào lỗi thì dùng thẻ phác thảo vẽ tay.
+- **Kiểu "Công nghệ"** (học theo clip review repo bạn gửi): nền xanh đen có lưới và hạt sáng, nhãn "01 — ÁP DỤNG" + tiêu đề 2 dòng
+  (dòng 2 xanh dương), **chip có biểu tượng**, **cửa sổ trình duyệt giả có khung tô sáng dòng quan trọng**, số liệu lớn + biểu đồ,
+  bong bóng chat + nút kêu gọi, phụ đề trắng đậm tô nền xanh. Có ô **"Lấy nội dung repo GitHub"**: dán link repo, phần mềm lấy mô tả, số sao,
+  giấy phép, README làm nguồn để AI viết kịch bản.
 - **Vẽ từng nét (tùy chọn)**: chọn "Vẽ từng nét như người thật" ở Cài đặt clip để dùng
   [whiteboard-animator](https://github.com/masihsultani/whiteboard-animator) (MIT, chạy CPU): chữ được viết từng từ, nét mực
   vẽ theo đường, hình tô màu được tô bằng nét cọ. Cần cài thêm (~200 MB) và dựng lâu hơn; lỗi thì tự quay về kiểu quét nhanh.

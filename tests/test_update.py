@@ -44,3 +44,15 @@ def test_network_failure_never_raises(upd, monkeypatch):
         raise OSError("offline")
     monkeypatch.setattr(upd, "_tai_raw", boom)
     assert upd.main() == 0
+
+
+def test_every_app_module_and_static_file_is_in_update_list():
+    import os
+    import update
+    base = os.path.dirname(os.path.dirname(os.path.abspath(update.__file__))) if False else os.path.dirname(os.path.abspath(update.__file__))
+    missing = []
+    for folder in ("app", "static"):
+        for name in os.listdir(os.path.join(base, folder)):
+            if name.endswith((".py", ".html", ".js")) and f"{folder}/{name}" not in update.FILES and name != "__pycache__":
+                missing.append(f"{folder}/{name}")
+    assert not missing, f"thiếu trong update.FILES: {missing}"

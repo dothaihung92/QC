@@ -396,3 +396,45 @@ def test_pip_helper_logs_progress_and_reports_failure():
     rc, out = video._pip(["nonexistent-pkg-zzz-123"])
     assert rc != 0 and "No matching distribution" in out
     assert any("pip:" in l for l in video.state["log"])
+
+
+def test_github_source_builds_text_and_validates_url(monkeypatch):
+    with pytest.raises(video.VideoError):
+        video.github_source("https://example.com/x/y")
+
+    class R:
+        def __init__(self, data=None, text="", status=200):
+            self._d, self.text, self.status_code, self.ok = data, text, status, status < 400
+        def json(self): return self._d
+        def raise_for_status(self): pass
+    def fake_get(url, **kw):
+        if url.endswith("/readme"):
+            return R(text="# Agent Reach\n\n<img src=x>\n![logo](a.png)\nGive AI eyes to the Internet.\n\n\n\nRead-only.")
+        return R({"full_name": "Panniantong/Agent-Reach", "description": "Eyes for AI", "stargazers_count": 106900,
+                  "forks_count": 9000, "license": {"spdx_id": "MIT"}, "language": "Python", "created_at": "2026-02-01T00:00:00Z",
+                  "topics": ["ai", "agent"]})
+    monkeypatch.setattr(video.requests, "get", fake_get)
+    r = video.github_source("https://github.com/Panniantong/Agent-Reach.git")
+    assert r["name"] == "Panniantong/Agent-Reach" and r["stars"] == 106900
+    assert "Giấy phép: MIT" in r["text"] and "Give AI eyes" in r["text"] and "<img" not in r["text"] and "logo" not in r["text"]
+
+
+def test_tech_look_renders_all_scene_types(client, monkeypatch):
+    from app import techlook
+    video.save_config({"look": "tech", "voice": "vi-VN-HoaiMyNeural"})
+    assert video.get_config()["look"] == "tech"
+    L = video.Layout((720, 1280))
+    import tempfile
+    from pathlib import Path
+    work = Path(tempfile.mkdtemp())
+    base = {"narration": "Lời đọc ngắn cho cảnh này.", "headline": "Tiêu đề|dòng hai", "tag": "01 — ÁP DỤNG"}
+    for extra in ({"type": "hero", "chips": ["lock|Reddit", "dot|GitHub", "globe|Web"]},
+                  {"type": "stat", "big": "106.9K", "items": ["trong 8 tháng"], "chips": ["check|MIT"]},
+                  {"type": "browser", "url": "github.com", "url_title": "Security", "focus": 1, "tone": "bad",
+                   "items": ["Dòng một", "Dòng hai quan trọng", "Dòng ba"], "chips": ["no|Không dùng"]},
+                  {"type": "cta", "items": ["Bạn muốn gì?", "Bình luận nhé"], "chips": ["bell|Đăng ký"]},
+                  {"type": "steps", "items": ["A", "B"]}, {"type": "flow", "items": ["Gốc", "x | y", "z | w"]}, {"type": "text"}):
+        sc = video.clean_scenes([{**base, **extra}])[0]
+        layers, caps = techlook.build(L, sc, 0, 3, work, "", 3.0, 2.5)
+        assert caps and all((work / n).exists() for n, *_ in layers), extra["type"]
+    assert techlook.split_chip("lock|Reddit") == ("lock", "Reddit") and techlook.split_chip("Chỉ chữ") == ("dot", "Chỉ chữ")

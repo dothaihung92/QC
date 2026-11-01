@@ -47,6 +47,8 @@ FILES = [
     "app/aimedia.py",
     "app/explainer.py",
     "app/doodle.py",
+    "app/doodle_icons.py",
+    "app/techlook.py",
     "app/server.py",
     "static/index.html",
     "static/seo-writer.html",

@@ -631,6 +631,9 @@
       <p class="muted small">AI viết kịch bản → giọng đọc tiếng Việt → chữ + phụ đề → ghép thành video dọc cho Reels / TikTok / Shorts.</p>
       <label>Lấy nội dung từ</label>
       <select id="vdSource" onchange="vdPick()"><option value="">— Tự dán nội dung —</option></select>
+      <label>Hoặc lấy từ repo GitHub (review công cụ / phần mềm mã nguồn mở)</label>
+      <div class="row" style="align-items:center"><input id="vdGh" placeholder="https://github.com/chủ-repo/tên-repo" style="flex:1 1 220px">
+        <button class="btn" id="vdGhBtn" onclick="vdGithub()">⬇ Lấy nội dung repo</button></div>
       <label>Nội dung bài viết</label>
       <textarea id="vdText" rows="8" placeholder="Dán bài viết hoặc chọn ở ô trên"></textarea>
       <label>Ảnh của bài (tùy chọn, dùng cho cảnh đầu và cuối)</label>
@@ -660,7 +663,8 @@
         <div><label>Màu thương hiệu</label><input id="vdColor" type="color" style="height:38px"></div>
       </div>
       <label>Kiểu clip</label>
-      <select id="vdLook"><option value="doodle">Vẽ tay trên giấy (hình AI vẽ lộ dần, có bàn tay cầm bút) — cần Gemini key</option>
+      <select id="vdLook"><option value="tech">Công nghệ (nền xanh đen, chip, cửa sổ trình duyệt, bong bóng chat) — kiểu review công cụ / repo GitHub</option>
+        <option value="doodle">Vẽ tay trên giấy (hình AI vẽ lộ dần, có bàn tay cầm bút) — cần Gemini key</option>
         <option value="explainer">Giải thích (sơ đồ, thẻ kính, phụ đề vàng) — kiểu clip công nghệ</option>
         <option value="classic">Cổ điển (khung tiêu đề + ảnh nền)</option></select>
       <label>Cách "vẽ" hình (kiểu Vẽ tay)</label>
@@ -842,6 +846,14 @@ function vdRenderTools() {
           <button class="btn" onclick="vdInstall()" ${VCFG.busy ? 'disabled' : ''} title="Cập nhật giọng đọc khi gặp lỗi">🔄 Cập nhật công cụ</button></p>`) +
     (VCFG.log.length ? `<pre class="small" style="white-space:pre-wrap;max-height:120px;overflow:auto">${esc(VCFG.log.join('\n'))}</pre>` : '');
 }
+async function vdGithub() {
+  const btn = $('vdGhBtn'); btn.disabled = true; btn.textContent = '⏳ Đang lấy...';
+  try {
+    const r = await api('/api/video/github', { method: 'POST', body: { url: $('vdGh').value } });
+    $('vdText').value = r.text; $('vdImg').value = '';
+    toast(`✅ Đã lấy repo ${r.name} (${r.stars} sao) — bấm "AI viết kịch bản"`);
+  } finally { btn.disabled = false; btn.textContent = '⬇ Lấy nội dung repo'; }
+}
 async function vdVoiceTest() {
   const btn = $('vdTestBtn'), voice = $('vdVoice').value;
   btn.disabled = true; btn.textContent = voice.startsWith('piper:') ? '⏳ Lần đầu tải giọng, đợi chút...' : '⏳ Đang đọc...';
@@ -894,7 +906,7 @@ async function vdLoadList() {
   if (VIDEOS.some(v => v.status === 'rendering') && document.getElementById('video').classList.contains('active'))
     vdTimer = setTimeout(vdLoadList, 3000);
 }
-const VD_TYPES = { doodle: 'Trang vẽ tay', hook: 'Mở đầu', stat: 'Con số nổi bật', list: 'Danh sách ý', flow: 'Sơ đồ cây (gốc + nhánh)', steps: 'Các bước nối nhau', text: 'Chỉ tiêu đề', cta: 'Kêu gọi liên hệ' };
+const VD_TYPES = { hero: 'Mở đầu (logo + chip)', browser: 'Cửa sổ trình duyệt', doodle: 'Trang vẽ tay', hook: 'Mở đầu', stat: 'Con số nổi bật', list: 'Danh sách ý', flow: 'Sơ đồ cây (gốc + nhánh)', steps: 'Các bước nối nhau', text: 'Chỉ tiêu đề', cta: 'Kêu gọi liên hệ' };
 const vdWords = (t) => (t.match(/[\p{L}\p{N}]+/gu) || []).length;
 const vdEst = (scenes) => Math.round(scenes.reduce((n, s) => n + vdWords(s.narration) / 3 + 0.3, 0));
 const vdFmtSec = (n) => n >= 60 ? `${Math.floor(n / 60)} phút ${n % 60} giây` : `${n} giây`;
@@ -918,6 +930,10 @@ function vdScene(v, s, i) {
       <div class="col" style="flex-basis:120px"><input data-v="${v.id}" data-i="${i}" data-f="big" value="${esc(s.big || '')}" placeholder="Số nổi bật (vd 30%)"></div>
       <div class="col" style="flex-basis:160px"><input data-v="${v.id}" data-i="${i}" data-f="keyword" value="${esc(s.keyword)}" placeholder="Từ khóa ảnh/video (tiếng Anh)"></div>
     </div>
+    ${['hero','browser','stat','cta'].includes(s.type) ? `<textarea data-v="${v.id}" data-i="${i}" data-f="chips" rows="2" placeholder="Chip: mỗi dòng 1 chip, dạng biểu_tượng|Nhãn (lock, check, warn, star, search, globe, play, bell, chat, no, bolt, doc)">${esc((s.chips || []).join('\n'))}</textarea>
+    <div class="row"><div class="col" style="flex-basis:200px"><input data-v="${v.id}" data-i="${i}" data-f="url" value="${esc(s.url || '')}" placeholder="Địa chỉ giả (cảnh trình duyệt)"></div>
+      <div class="col" style="flex-basis:120px"><input data-v="${v.id}" data-i="${i}" data-f="focus" value="${s.focus >= 0 ? s.focus : ''}" placeholder="Dòng tô khung (0,1..)"></div>
+      <div class="col" style="flex-basis:100px"><input data-v="${v.id}" data-i="${i}" data-f="tone" value="${esc(s.tone || '')}" placeholder="info/good/bad"></div></div>` : ''}
     <input data-v="${v.id}" data-i="${i}" data-f="visual" value="${esc(s.visual || '')}" placeholder="Mô tả hình minh họa (tiếng Anh) — dùng cho ảnh AI / Veo">
     <textarea data-v="${v.id}" data-i="${i}" data-f="items" rows="2" placeholder="Ý hiện trên màn hình — mỗi dòng 1 ý (tối đa 4)">${esc((s.items || []).join('\n'))}</textarea>
   </div>`;
@@ -953,6 +969,8 @@ function vdCollect(id) {
   document.querySelectorAll(`[data-v="${id}"]`).forEach(el => {
     const f = el.dataset.f, sc = scenes[+el.dataset.i];
     if (f === 'items') sc[f] = el.value.split('\n').map(x => x.trim()).filter(Boolean);
+    else if (f === 'chips') sc[f] = el.value.split('\n').map(x => x.trim()).filter(Boolean);
+    else if (f === 'focus') sc[f] = el.value.trim() === '' ? -1 : +el.value;
     else if (f === 'hl') sc[f] = el.value.split(',').map(x => x.trim()).filter(Boolean);
     else if (f === 'panels') sc[f] = el.value.split('\n').map(x => x.trim()).filter(Boolean).map(l => { const [a, ...b] = l.split('|'); return { label: a.trim(), visual: b.join('|').trim() }; });
     else sc[f] = el.value; });
