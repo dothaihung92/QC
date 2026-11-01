@@ -160,6 +160,7 @@ def test_pexels_video_picks_smallest_sharp_file_and_skips_used(monkeypatch, tmp_
     monkeypatch.setattr(video, "_pexels", lambda path, key, params: [dict(v) for v in vids])
     got = []
     monkeypatch.setattr(video, "_download", lambda url, dest, kind="image": got.append((url, kind)) or True)
+    monkeypatch.setattr(video, "media_duration", lambda p: 8.0)
     assert video.pexels_video("tax", "", (1080, 1920), tmp_path / "a.mp4", set()) is False     # chưa có key
     assert video.pexels_video("tax", "k", (1080, 1920), tmp_path / "a.mp4", {1}) is True
     assert got == [("small", "video")]
@@ -458,3 +459,25 @@ def test_detailed_items_split_and_thin_script_is_retried(client, monkeypatch, tm
     v = client.post("/api/videos", json={"text": "Nội dung quy định thuế. " * 20, "seconds": 60}).json()
     assert len(prompts) == 2 and "thiếu thông tin trên màn hình" in prompts[1]
     assert all(len(x["items"]) == 4 for x in v["scenes"]) and "căn cứ pháp lý" in prompts[0].lower()
+
+
+@pytest.mark.skipif(not HAS_TOOLS, reason="cần pillow + imageio-ffmpeg")
+def test_join_many_scenes_in_groups_with_transitions_and_fallback(tmp_path, monkeypatch):
+    n = 9
+    for k in range(n):
+        video._ffmpeg(["-f", "lavfi", "-i", f"color=c=0x{(k * 25) % 255:02x}6030:s=160x90:r=30:d=1.5",
+                       "-f", "lavfi", "-i", "sine=frequency=300:duration=1.5", "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                       "-c:a", "aac", "-ar", "44100", "-ac", "2", "-shortest", f"scene{k}.mp4"], tmp_path)
+    out = tmp_path / "clip.mp4"
+    video.join_scenes(tmp_path, [1.5] * n, out, None, 0.3, ["fade", "slideleft"])
+    assert abs(video.media_duration(out) - (1.5 * n - 0.3 * (n - 1))) < 0.4          # 9 đoạn → 3 nhóm → nối tiếp, vẫn trừ đúng phần chồng
+
+    real = video._xfade_group
+
+    def broken(*a, **k):
+        raise video.VideoError("hết bộ nhớ")
+    monkeypatch.setattr(video, "_xfade_group", broken)
+    out2 = tmp_path / "clip2.mp4"
+    video.join_scenes(tmp_path, [1.5] * n, out2, None, 0.3, ["fade"])
+    assert abs(video.media_duration(out2) - 1.5 * n) < 0.4 and any("nối thẳng" in l for l in video.state["log"])
+    monkeypatch.setattr(video, "_xfade_group", real)

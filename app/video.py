@@ -566,6 +566,11 @@ def pexels_video(keyword: str, key: str, size, dest: Path, used: set) -> bool:
             continue
         f = min(good, key=lambda f: f["width"] * f["height"])      # bản nhỏ nhất đủ nét: tải nhanh
         if _download(f["link"], dest, "video"):
+            try:
+                media_duration(dest)                 # tải dở / hỏng thì bỏ, thử video khác
+            except VideoError:
+                dest.unlink(missing_ok=True)
+                continue
             used.add(v.get("id"))
             return True
     return False
@@ -1161,30 +1166,64 @@ def _music_files() -> list:
     return [p for p in MUSIC_DIR.iterdir() if p.suffix.lower() in (".mp3", ".m4a", ".wav", ".aac")]
 
 
+JOIN_GROUP = 4                  # nối tối đa 4 đoạn mỗi lần: xfade giữ các đoạn sau trong bộ nhớ nên nối 20 đoạn một lượt dễ hết RAM
+
+
+def _xfade_group(work: Path, files: list, durations: list, out: str, trans: float, names: list, start: int):
+    """Nối vài đoạn bằng xfade (hình) + acrossfade (tiếng). Trả về độ dài đoạn kết quả."""
+    n = len(files)
+    inputs, flt = [], []
+    for k, f in enumerate(files):
+        inputs += ["-i", f]
+        flt.append(f"[{k}:v]settb=AVTB,setpts=PTS-STARTPTS,fps={FPS}[v{k}]")
+    length, vcur, acur = durations[0], "v0", "0:a"
+    for k in range(1, n):
+        tr = names[(start + k - 1) % len(names)]
+        flt.append(f"[{vcur}][v{k}]xfade=transition={tr}:duration={trans}:offset={length - trans:.3f}[x{k}]")
+        flt.append(f"[{acur}][{k}:a]acrossfade=d={trans}[a{k}]")
+        vcur, acur = f"x{k}", f"a{k}"
+        length += durations[k] - trans
+    flt.append(f"[{vcur}]format=yuv420p[v]")
+    _ffmpeg(["-filter_complex_threads", "2", *inputs, "-filter_complex", ";".join(flt), "-map", "[v]", "-map", f"[{acur}]",
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-c:a", "aac", "-b:a", "160k", "-ar", "44100", "-ac", "2",
+             "-movflags", "+faststart", out], work)
+    return length
+
+
+def _concat_copy(work: Path, files: list, out: str):
+    (work / "list.txt").write_text("".join(f"file '{f}'\n" for f in files), encoding="utf-8")
+    _ffmpeg(["-f", "concat", "-safe", "0", "-i", "list.txt", "-c", "copy", "-movflags", "+faststart", out], work)
+
+
 def join_scenes(work: Path, durations: list, out: Path, music: Path | None,
                 trans: float = TRANSITION, names: list = None):
-    """Nối các cảnh bằng hiệu ứng chuyển cảnh (xfade) + giọng đọc nối mượt (acrossfade), rồi trộn nhạc nền."""
-    n = len(durations)
+    """Nối các cảnh có hiệu ứng chuyển cảnh, rồi trộn nhạc nền. Nối theo nhóm nhỏ (cây nhị phân) để không tốn RAM;
+    nếu xfade vẫn lỗi thì nối thẳng không hiệu ứng (vẫn ra clip)."""
+    names = names or TRANSITIONS
     joined = "joined.mp4" if music else str(out)
-    if n == 1:
-        _ffmpeg(["-i", "scene0.mp4", "-c", "copy", "-movflags", "+faststart", joined], work)
+    files = [f"scene{k}.mp4" for k in range(len(durations))]
+    if len(files) == 1:
+        _ffmpeg(["-i", files[0], "-c", "copy", "-movflags", "+faststart", joined], work)
     else:
-        inputs, flt = [], []
-        for k in range(n):
-            inputs += ["-i", f"scene{k}.mp4"]
-            flt.append(f"[{k}:v]settb=AVTB,setpts=PTS-STARTPTS,fps={FPS}[v{k}]")
-        length, vcur, acur = durations[0], "v0", "0:a"
-        for k in range(1, n):
-            off = length - trans
-            tr = (names or transS)[(k - 1) % len(names or transS)]
-            flt.append(f"[{vcur}][v{k}]xfade=transition={tr}:duration={trans}:offset={off:.3f}[x{k}]")
-            flt.append(f"[{acur}][{k}:a]acrossfade=d={trans}[a{k}]")
-            vcur, acur = f"x{k}", f"a{k}"
-            length += durations[k] - trans
-        flt.append(f"[{vcur}]format=yuv420p[v]")
-        _ffmpeg([*inputs, "-filter_complex", ";".join(flt), "-map", "[v]", "-map", f"[{acur}]",
-                 "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-c:a", "aac", "-b:a", "160k",
-                 "-movflags", "+faststart", joined], work)
+        try:
+            level, durs, pos = 0, list(durations), 0
+            while len(files) > 1:
+                nxt_files, nxt_durs = [], []
+                for g in range(0, len(files), JOIN_GROUP):
+                    grp, gd = files[g:g + JOIN_GROUP], durs[g:g + JOIN_GROUP]
+                    if len(grp) == 1:
+                        nxt_files.append(grp[0])
+                        nxt_durs.append(gd[0])
+                        continue
+                    final = len(files) <= JOIN_GROUP
+                    name = joined if final else f"join{level}_{g}.mp4"
+                    nxt_durs.append(_xfade_group(work, grp, gd, name, trans, names, pos))
+                    nxt_files.append(name)
+                    pos += len(grp) - 1
+                files, durs, level = nxt_files, nxt_durs, level + 1
+        except VideoError as e:
+            _log(f"⚠ Nối có hiệu ứng chuyển cảnh lỗi, nối thẳng các cảnh — {str(e)[:160]}")
+            _concat_copy(work, [f"scene{k}.mp4" for k in range(len(durations))], joined)
     if music:
         _ffmpeg(["-i", "joined.mp4", "-stream_loop", "-1", "-i", str(music), "-filter_complex",
                  "[1:a]volume=0.10[m];[0:a][m]amix=inputs=2:duration=first:normalize=0[a]",
@@ -1337,7 +1376,19 @@ def render(video_id: int):
                     captions.append((f"cap{i}_{k}.png", p, t, end))
                 t = end
         step(f"Cảnh {i + 1}/{total}: dựng video")
-        render_scene(work, i, size, dur, bg_video, layers, captions)
+        try:
+            render_scene(work, i, size, dur, bg_video, layers, captions)
+        except VideoError as e:
+            if not bg_video:
+                raise VideoError(f"Cảnh {i + 1}: {e}") from e
+            _log(f"Cảnh {i + 1}: video nền lỗi, dùng nền tĩnh — {str(e)[:120]}")      # video tải về hỏng → nền tĩnh, không bỏ cả clip
+            if tech:
+                techlook.background(size, work / f"bg{i}.png", seed=video_id * 100 + i)
+            elif expl:
+                explainer.background(size, work / f"bg{i}.png", seed=video_id * 100 + i)
+            else:
+                render_background(None, size, cfg["color"], work / f"bg{i}.png", "none", seed=video_id * 100 + i)
+            render_scene(work, i, size, dur, False, layers, captions)
         durations.append(dur)
     music = random.choice(_music_files()) if cfg["music"] and _music_files() else None
     step("Ghép các cảnh + hiệu ứng chuyển cảnh" + (" + nhạc nền" if music else ""))
