@@ -349,11 +349,6 @@ def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_l
     top = hb + int(L.base * 0.05)
     bottom = int(L.H * 0.80)
     typ = sc["type"]
-    recap_pos = None
-    if sc.get("recap"):
-        recap_pos = X.recap_layer(L, sc["recap"], work / f"tr{i}.png", BLUE)
-        if recap_pos[0]:
-            bottom = min(bottom, recap_pos[1] - int(L.pad * 0.5))
     if typ == "hero":
         top = chips_layers(c, L, sc["chips"] or sc["items"], top, 2, 0.5)
     elif typ == "stat" and sc["big"]:
@@ -380,8 +375,6 @@ def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_l
     elif sc["chips"]:
         chips_layers(c, L, sc["chips"], top, 1, 0.5, border=BLUE)
     layers += c.out
-    if recap_pos and recap_pos[0]:
-        layers.append((f"tr{i}.png", recap_pos[0], max(1.0, voice_len * 0.6), "rise"))
     note = sc.get("note") or ("* Ví dụ minh hoạ" if typ == "browser" else "")
     if note:
         ov = c.new()

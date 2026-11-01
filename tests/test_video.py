@@ -106,9 +106,9 @@ def test_long_clip_script_retries_when_too_short(client, monkeypatch):
     monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: prompts.append(p) or next(replies))
     v = client.post("/api/videos", json={"text": "Nội dung bài viết về thuế. " * 10, "seconds": 180}).json()
     assert len(v["scenes"]) == 20 and v["scenes"][0]["items"] == ["Ý một", "Ý hai", "Ý ba"]
-    assert "20 cảnh" in prompts[0] and "432 từ" in prompts[0] and "QUÁ NGẮN" in prompts[1]
-    assert "DỄ HIỂU TỐI ĐA" in prompts[0] and "không gọi bác" in prompts[0]        # mặc định: chế độ dễ hiểu nhất, xưng "bạn"
-    assert 200 < video.estimate_seconds(v["scenes"]) < 260                        # người lớn tuổi đọc chậm hơn (2,4 từ/giây)
+    assert "20 cảnh" in prompts[0] and "468 từ" in prompts[0] and "QUÁ NGẮN" in prompts[1]
+    assert "CHUYÊN GIA GIẢI TRÌNH" in prompts[0] and "LUẬT SƯ KIÊM KẾ TOÁN" in prompts[0]   # mặc định: luật sư – kế toán giải trình
+    assert 190 < video.estimate_seconds(v["scenes"]) < 240                        # đọc 2,6 từ/giây
 
 
 def test_caption_chunks_are_short():
@@ -223,7 +223,7 @@ def test_aimedia_parses_tts_image_and_retries(monkeypatch):
 def test_render_uses_ai_image_and_veo_with_fallbacks(client, monkeypatch, tmp_path):
     from app import aimedia
     newsagent.save_config({"gemini_key": "k"})
-    video.save_config({"visual": "ai", "veo_scenes": 2, "voice": "vi-VN-HoaiMyNeural", "look": "classic"})
+    video.save_config({"visual": "ai", "veo_scenes": 2, "voice": "vi-VN-HoaiMyNeural", "look": "classic", "ai_images": True})
     sc = [{"type": "text", "headline": f"H{i}", "narration": "Lời đọc.", "visual": f"scene {i}"} for i in range(3)]
     vid = db.video_add("T", "", sc)
     monkeypatch.setattr(video, "tts", lambda text, voice, rate, dest, style="": (video._ffmpeg(
@@ -292,7 +292,7 @@ def test_doodle_layout_highlight_and_render(client, monkeypatch, tmp_path):
     assert hit == ["ba", "mươi", "phần", "trăm,"]
     if not HAS_TOOLS:
         return
-    video.save_config({"look": "doodle", "voice": "vi-VN-HoaiMyNeural"})
+    video.save_config({"look": "doodle", "voice": "vi-VN-HoaiMyNeural", "ai_images": True})
     newsagent.save_config({"gemini_key": "k"})
     scenes = [{"type": "doodle", "tag": "VÍ DỤ", "headline": "Chị Lan", "narration": "Chị Lan nộp thuế hai trăm triệu.",
                "panels": [{"label": "A", "visual": "a"}, {"label": "B", "visual": "b"}], "hl": ["hai trăm triệu"]}]
@@ -513,7 +513,7 @@ def test_calc_scene_and_karaoke_layers(tmp_path):
         assert all(a[3] <= b[2] + 1e-6 for a, b in zip(caps, caps[1:]))
 
 
-def test_audience_general_uses_normal_pace_and_senior_recap_banner(client, monkeypatch, tmp_path):
+def test_audience_general_uses_normal_pace_and_no_recap_banner(client, monkeypatch, tmp_path):
     from app import explainer
     video.save_config({"look": "explainer", "audience": "general"})
     prompts = []
@@ -521,7 +521,9 @@ def test_audience_general_uses_normal_pace_and_senior_recap_banner(client, monke
         {"type": "list", "headline": "A|B", "narration": "Lời đọc " * 20, "items": ["Tiêu đề | giải thích đủ dài để vượt qua ngưỡng"] * 3}] * 20})
     client.post("/api/videos", json={"text": "Nội dung bài viết về thuế. " * 10, "seconds": 180})
     assert "540 từ" in prompts[0] and "DỄ HIỂU TỐI ĐA" not in prompts[0]
-    assert video.save_config({"audience": "xx"})["audience"] == "senior"
+    assert video.save_config({"audience": "xx"})["audience"] == "expert"
+    db.set_setting("video", {"audience": "senior"})
+    assert video.get_config()["audience"] == "expert" and video.get_config()["ai_images"] is False
     L = video.Layout((720, 1280))
     L.ts = 1.25
     sc = video.clean_scenes([{"type": "list", "headline": "A|B", "narration": "Lời đọc ngắn.", "recap": "Doanh thu dưới 10 tỷ thì được giảm 30% thuế",
@@ -530,7 +532,7 @@ def test_audience_general_uses_normal_pace_and_senior_recap_banner(client, monke
     if HAS_TOOLS:
         video._ffmpeg(["-f", "lavfi", "-i", "sine=duration=3", "-c:a", "libmp3lame", "voice0.mp3"], tmp_path)
     layers, caps = explainer.build(L, sc, 0, 1, tmp_path, "", 3.5, 3.0)
-    assert "xr0.png" in [n for n, *_ in layers]
+    assert not any(n.startswith("xr") for n, *_ in layers)                        # không còn khung "tóm tắt"
 
 
 def test_visual_bars_and_loss_calc_scenes(tmp_path):
@@ -562,10 +564,11 @@ def test_visual_bars_and_loss_calc_scenes(tmp_path):
 
 
 def test_audience_prompt_asks_for_profit_loss_examples_and_visuals(client, monkeypatch):
-    video.save_config({"look": "tech", "audience": "senior"})
+    video.save_config({"look": "tech", "audience": "expert"})
     prompts = []
     monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: prompts.append(p) or {"scenes": [
         {"type": "list", "headline": "A|B", "narration": "Lời " * 30, "items": ["T | giải thích đủ dài để vượt ngưỡng chi tiết"] * 3}] * 12})
     client.post("/api/videos", json={"text": "Nội dung thuế về lãi lỗ. " * 10, "seconds": 120})
     p = prompts[0]
-    assert "CÓ LÃI" in p and "BỊ LỖ" in p and "\"visual\"" in p and "bạn" in p and "không gọi bác" in p
+    assert "CÓ LÃI" in p and "BỊ LỖ" in p and "LUẬT SƯ KIÊM KẾ TOÁN" in p and "căn cứ pháp lý" in p.lower()
+    assert "Không dùng cảnh hình minh họa" in p and "KHÔNG viết khung" in p

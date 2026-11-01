@@ -71,7 +71,8 @@ DEFAULTS = {
     "voice": "vieneu:Mai Anh",        # VieNeu-TTS chạy ngay trên máy; chưa cài thì tự dùng giọng khác
     "tts_style": "nang_dong",         # phong cách đọc (chỉ giọng Gemini)
     "rate": 8,                        # tốc độ đọc, % (-30..+30)
-    "audience": "senior",             # senior = người lớn tuổi (chữ to, đọc chậm, lời rất dễ hiểu); general = phổ thông
+    "audience": "expert",             # expert = luật sư / kế toán giải trình văn bản; general = phổ thông
+    "ai_images": False,               # cho phép Gemini vẽ hình minh họa (mặc định TẮT: chỉ dùng ghi chú chữ)
     "look": "doodle",                 # doodle = vẽ tay trên giấy (hình AI vẽ lộ dần); explainer = sơ đồ thẻ kính; classic = cũ
     "pen": "wipe",                    # wipe = quét lộ dần kèm bàn tay; strokes = vẽ từng nét (whiteboard-animator, cài thêm)
     "visual": "stock",                # stock = video/ảnh Pexels hoặc nền màu; ai = ảnh AI riêng cho từng cảnh
@@ -100,6 +101,8 @@ def _log(msg: str):
 def get_config() -> dict:
     cfg = dict(DEFAULTS)
     cfg.update(db.get_setting("video", {}) or {})
+    if cfg.get("audience") == "senior":
+        cfg["audience"] = "expert"
     return cfg
 
 
@@ -126,7 +129,9 @@ def save_config(body: dict) -> dict:
         cur["voice"] = DEFAULTS["voice"]
     if cur["tts_style"] not in STYLES:
         cur["tts_style"] = DEFAULTS["tts_style"]
-    if cur["audience"] not in ("senior", "general"):
+    if cur["audience"] == "senior":                      # tên cũ của chế độ này
+        cur["audience"] = "expert"
+    if cur["audience"] not in ("expert", "general"):
         cur["audience"] = DEFAULTS["audience"]
     if cur["look"] not in ("doodle", "tech", "explainer", "classic"):
         cur["look"] = DEFAULTS["look"]
@@ -291,26 +296,23 @@ def github_source(url: str) -> dict:
 
 # ---------------------------------------------------------------- 1. kịch bản
 
-SENIOR_BLOCK = (
-    "\n\nCHẾ ĐỘ DỄ HIỂU TỐI ĐA (rất quan trọng, ưu tiên hơn mọi quy tắc về độ ngắn gọn). Người xem không rành về thuế / kế toán, "
-    "nhiều người đã lớn tuổi: nghe và nhìn một lần phải HIỂU và HÌNH DUNG ĐƯỢC.\n"
-    "- Xưng hô thân thiện: gọi người xem là \"bạn\" (không gọi bác, cô chú, anh chị).\n"
-    "- MỖI CÂU CHỈ MỘT Ý, tối đa 14 từ. Dùng từ thông thường; KHÔNG dùng từ tiếng Anh, không viết tắt, không từ hàn lâm. "
-    "Thuật ngữ bắt buộc phải nhắc (doanh thu, giá vốn, kê khai...) thì giải nghĩa NGAY bằng lời đời thường.\n"
-    "- LUÔN LẤY VÍ DỤ CỤ THỂ, HÌNH DUNG ĐƯỢC: một cửa hàng / hộ kinh doanh có tên và mặt hàng thật (vd \"cửa hàng quần áo của chị Lan\", "
-    "\"quán bún của anh Nam\") với số tiền cụ thể, con số tròn dễ nhẩm. Không nói chung chung.\n"
-    "- VÍ DỤ TÍNH LÃI / LỖ (bắt buộc khi nội dung liên quan thuế, doanh thu, chi phí): tính TỪNG BƯỚC "
-    "Doanh thu − Giá vốn hàng bán − Chi phí = Lãi (hoặc Lỗ), rồi mới tới thuế. Phải có ĐỦ HAI ví dụ: một cửa hàng CÓ LÃI (tính ra tiền thuế) "
-    "và một cửa hàng BỊ LỖ (nói rõ trường hợp lỗ ảnh hưởng thế nào tới thuế theo nội dung nguồn; nếu nguồn không nói thì ghi \"cần đối chiếu văn bản gốc\"). "
-    "Phép tính phải ĐÚNG. Dùng cảnh \"calc\" (bảng tính từng dòng; dòng cuối là Lãi hoặc Lỗ) và cảnh \"bars\" (biểu đồ cột: "
-    "items là các dòng \"Nhãn | số tiền\" như \"Doanh thu | 500 triệu\", \"Giá vốn | 300 triệu\", \"Chi phí | 120 triệu\", \"Lãi | 80 triệu\").\n"
-    "- HÌNH MINH HỌA CỤ THỂ: ít nhất MỘT NỬA số cảnh là cảnh type \"visual\" gồm 2-4 hình trong \"panels\", mỗi hình có \"label\" (nhãn tiếng Việt tối đa 4 từ) "
-    "và \"visual\" (2-3 câu TIẾNG ANH mô tả một cảnh nhỏ chi tiết minh họa đúng ý đang nói: cửa hàng, hàng hóa, tiền, hóa đơn, máy tính, "
-    "người bán / người mua với biểu cảm, mũi tên chỉ dòng tiền; không có chữ trong hình). Cảnh visual đặt NGAY TRƯỚC cảnh giải thích chi tiết cùng ý đó.\n"
-    "- Cuối mỗi cảnh có 1 câu nhắc lại ý chính bắt đầu bằng \"Tóm lại...\"; điền câu đó vào \"recap\" (tối đa 12 từ).\n"
-    "- Trên màn hình mỗi cảnh chữ sẽ rất to nên TỐI ĐA 3 mục: tiêu đề tối đa 5 từ, giải thích tối đa 15 từ. Mỗi cảnh chỉ giải thích MỘT điều; cần nói nhiều thì chia thành nhiều cảnh.\n"
+EXPERT_BLOCK = (
+    "\n\nCHẾ ĐỘ CHUYÊN GIA GIẢI TRÌNH (rất quan trọng, ưu tiên hơn mọi quy tắc về độ ngắn gọn). Hãy đóng vai MỘT LUẬT SƯ KIÊM KẾ TOÁN "
+    "đang giải trình một quy định / nghị định cho khách hàng không rành pháp luật, để họ HIỂU ĐÚNG và LÀM ĐÚNG.\n"
+    "- Xưng \"tôi\", gọi người nghe là \"bạn\"; giọng chuyên nghiệp, điềm tĩnh, rõ ràng, chính xác nhưng không khô cứng. KHÔNG viết khung \"tóm tắt\" hay \"tóm lại\".\n"
+    "- Trình tự như một buổi tư vấn: (1) Căn cứ pháp lý: nói rõ số hiệu văn bản, cơ quan ban hành, ngày ban hành, ngày hiệu lực, điều / khoản liên quan; "
+    "(2) Phạm vi và đối tượng: áp dụng cho ai, không áp dụng cho ai; (3) Nội dung quy định từng điều khoản quan trọng — nêu ĐÚNG như nguồn, rồi giải thích lại bằng lời thường "
+    "(\"Hiểu đơn giản là...\"); (4) Điều kiện, mốc thời gian, hồ sơ thủ tục; (5) Ví dụ áp dụng có số liệu; (6) Rủi ro, sai sót thường gặp, mức phạt, điều cần đối chiếu; (7) Khuyến nghị hành động cụ thể.\n"
+    "- Khi nhắc điều / khoản: dùng cảnh type \"browser\" hiển thị đoạn trích điều khoản (url_title ghi \"Nghị định ... — Điều ...\", items là các dòng trích / diễn giải sát nguồn, "
+    "focus là dòng quan trọng nhất, note \"* Trích dẫn rút gọn — đối chiếu văn bản gốc\"). Chỉ trích những gì CÓ trong nguồn; chỗ nguồn chưa rõ thì nói \"cần đối chiếu văn bản gốc\".\n"
+    "- Mỗi thuật ngữ pháp lý / kế toán xuất hiện lần đầu phải được giải nghĩa ngay bằng lời đời thường. Câu ngắn, mỗi câu một ý, tối đa 18 từ, không từ tiếng Anh, không viết tắt khó hiểu.\n"
+    "- VÍ DỤ TÍNH LÃI / LỖ (bắt buộc khi nội dung liên quan thuế, doanh thu, chi phí): một cửa hàng cụ thể (có tên, mặt hàng), tính TỪNG BƯỚC Doanh thu − Giá vốn − Chi phí = Lãi (hoặc Lỗ), rồi tới nghĩa vụ thuế. "
+    "Có ĐỦ hai ví dụ: CÓ LÃI và BỊ LỖ (ảnh hưởng tới thuế thế nào theo nguồn). Phép tính phải ĐÚNG. Dùng cảnh \"calc\" (bảng tính, dòng cuối là Lãi / Lỗ) và cảnh \"bars\" (biểu đồ cột: items \"Nhãn | số tiền\").\n"
+    "- GHI CHÚ TRÊN MÀN HÌNH phải CHI TIẾT: mỗi cảnh 3-5 mục dạng \"Tiêu đề ngắn | giải thích đầy đủ 12-25 từ\" (điều kiện, con số, mốc thời gian, ngoại lệ). Không dùng cảnh hình minh họa, không dùng cảnh \"visual\"; "
+    "mọi hình ảnh chỉ là chữ, bảng, biểu đồ, sơ đồ.\n"
+    "- Mỗi cảnh chỉ giải thích MỘT điều; cần nói nhiều thì chia thành nhiều cảnh.\n"
 )
-SENIOR_WPS = 2.4                 # người lớn tuổi: đọc chậm hơn (từ / giây)
+EXPERT_WPS = 2.6                 # giải trình: đọc rõ, vừa phải (từ / giây)
 WORDS_PER_SEC = 3.0                  # tốc độ đọc tiếng Việt trung bình của giọng máy (đo từ clip thật)
 SCENE_TYPES = ("hook", "stat", "list", "flow", "steps", "text", "cta", "doodle", "hero", "browser", "calc", "visual", "bars")
 DOODLE_PAGES = {30: 3, 45: 4, 60: 5, 120: 8, 180: 12}   # giây → số trang của clip vẽ tay (~15 giây / trang)
@@ -464,7 +466,7 @@ def word_count(text: str) -> int:
 
 
 def estimate_seconds(scenes) -> int:
-    wps = SENIOR_WPS if get_config()["audience"] == "senior" else WORDS_PER_SEC
+    wps = EXPERT_WPS if get_config()["audience"] == "expert" else WORDS_PER_SEC
     return round(sum(word_count(s.get("narration", "")) for s in scenes) / wps + 0.6 * len(scenes))
 
 
@@ -523,8 +525,8 @@ def make_script(text: str, seconds: int = 45) -> dict:
     tech = cfg["look"] == "tech"
     n = DOODLE_PAGES[seconds] if doodle else LENGTHS[seconds]
     brand = f'- {"Trang" if doodle else "Cảnh"} cuối nhắc tên: "{cfg["brand"]}"\n' if cfg["brand"] else ""
-    senior = cfg["audience"] == "senior"
-    wps = SENIOR_WPS if senior else WORDS_PER_SEC
+    expert = cfg["audience"] == "expert"
+    wps = EXPERT_WPS if expert else WORDS_PER_SEC
     total = int(seconds * wps)
     per = total / n
     if tech:
@@ -535,8 +537,8 @@ def make_script(text: str, seconds: int = 45) -> dict:
     else:
         prompt = SCRIPT_PROMPT.format(seconds=seconds, n=n, total=total, lo=int(per * 0.8), hi=int(per * 1.25),
                                       expand=EXPAND if seconds >= 90 else "", brand=brand, text=text[:12000])
-    if senior:
-        prompt += SENIOR_BLOCK
+    if expert:
+        prompt += EXPERT_BLOCK
     best = None
     for attempt in range(2):          # AI hay viết quá ngắn: thiếu thì yêu cầu viết lại 1 lần
         try:
@@ -1420,8 +1422,8 @@ def render(video_id: int):
     if cfg["look"] == "doodle":                  # kiểu vẽ tay có nhiều lớp chồng: dựng 720p cho nhanh (đúng độ phân giải clip mẫu)
         size = (size[0] * 2 // 3, size[1] * 2 // 3)
     L = Layout(size)
-    senior = cfg["audience"] == "senior"
-    L.ts = 1.25 if senior else 1.0
+    expert = cfg["audience"] == "expert"
+    L.ts = 1.15 if expert else 1.0
     work = VIDEO_DIR / str(video_id)
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True, exist_ok=True)
@@ -1451,7 +1453,7 @@ def render(video_id: int):
         hand = (hand_file.name, doodle.hand_image(int(L.base * 0.24), hand_file))
     used_videos, durations = set(), []
     style = STYLES[cfg["tts_style"]][1]
-    gkey = newsagent.get_config()["gemini_key"]
+    gkey = newsagent.get_config()["gemini_key"] if cfg["ai_images"] else ""        # khóa Gemini chỉ dùng vẽ hình khi được bật; viết kịch bản dùng khóa riêng
     aspect = "9:16" if L.vertical else "16:9"
     veo_at = set()
     if cfg["veo_scenes"] and gkey:                    # rải đều các cảnh dùng Veo, luôn gồm cảnh mở đầu
@@ -1459,11 +1461,11 @@ def render(video_id: int):
         veo_at = {round(j * (total - 1) / max(1, k - 1)) for j in range(k)} if k > 1 else {0}
     for i, sc in enumerate(scenes):
         step(f"Cảnh {i + 1}/{total}: giọng đọc")
-        used = tts(sc["narration"], cfg["voice"], min(cfg["rate"], -6) if senior else cfg["rate"], work / f"voice{i}.mp3", style)
+        used = tts(sc["narration"], cfg["voice"], min(cfg["rate"], -4) if expert else cfg["rate"], work / f"voice{i}.mp3", style)
         if used != VOICES.get(cfg["voice"], "").split(" — ")[0]:
             _log(f"Cảnh {i + 1}: giọng đã chọn lỗi, đã dùng giọng {used}")
         voice_len = media_duration(work / f"voice{i}.mp3")
-        dur = math.ceil((voice_len + (0.9 if senior else 0.35)) * FPS) / FPS
+        dur = math.ceil((voice_len + (0.7 if expert else 0.35)) * FPS) / FPS
 
         if paper:
             step(f"Trang {i + 1}/{total}: vẽ hình minh họa" + (" (AI)" if gkey else ""))
@@ -1571,7 +1573,7 @@ def render(video_id: int):
     if (paper or ai_state.fails or ai_state.ok) and ai_state.fails and not paper:
         note = (f"Hình minh họa: AI vẽ được {ai_state.ok} hình, {ai_state.fails} hình lỗi nên dùng hình phác thảo có sẵn. "
                 f"Lý do: {ai_state.reason}")
-    elif paper and not gkey:
+    elif paper and not gkey and cfg["ai_images"]:
         note = "Chưa có Gemini key nên dùng bộ hình phác thảo có sẵn. Nhập key ở tab Tin tức AI để AI vẽ hình riêng cho từng cảnh."
     elif paper and ai_state.fails:
         note = (f"AI vẽ được {ai_state.ok} hình, {ai_state.fails} hình lỗi nên dùng hình phác thảo có sẵn. "

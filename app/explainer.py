@@ -528,11 +528,6 @@ def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_l
     if pos:
         layers.append((f"xh{i}.png", pos, 0.0, "head"))
     top, bottom = int(L.H * 0.255), int(L.H * 0.70)
-    recap_pos = None
-    if sc.get("recap"):
-        recap_pos = recap_layer(L, sc["recap"], work / f"xr{i}.png")
-        if recap_pos and recap_pos[0]:
-            bottom = min(bottom, recap_pos[1] - int(L.pad * 0.5))
     c = Cards(L, work, i, voice_len)
     typ, items = sc["type"], sc["items"]
     if typ == "stat" and sc["big"]:
@@ -550,8 +545,6 @@ def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_l
     elif items:
         _list(c, sc, top, bottom)
     layers += c.out
-    if recap_pos and recap_pos[0]:
-        layers.append((f"xr{i}.png", recap_pos[0], max(1.0, voice_len * 0.6), "rise"))
     if brand:                                           # tên thương hiệu mờ ở đáy, không chiếm chỗ
         ov = c.new()
         ImageDraw.Draw(ov).text((L.W / 2, int(L.H * 0.935)), brand, font=V._font(int(L.base * 0.03), bold=True),
