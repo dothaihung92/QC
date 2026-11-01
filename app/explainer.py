@@ -129,7 +129,7 @@ def caption_layer(L, words, active, dest: Path):
     """Phụ đề vàng chữ hẹp; từ đang được đọc (chỉ số active) nổi lên trên nền tím."""
     if not words:
         return None
-    size = int(L.base * 0.072)
+    size = int(L.base * 0.072 * getattr(L, "ts", 1.0))
     imgs = [cond_text(w, size, fill=YELLOW, scale=0.84) for w in words]
     space = int(size * 0.28)
     lines, cur, cur_w = [], [], 0
@@ -228,16 +228,16 @@ def _stat(c: Cards, sc, top, bottom):
     c.add(ov, 0.45, "pop")
 
 
-def _fit_items(c: Cards, items, text_w: int, avail_h: int, gap: int, pad_v: int, lines_d: int = 4):
+def _fit_items(c: Cards, items, text_w: int, avail_h: int, gap: int, pad_v: int, lines_d: int = 5):
     """Chia mỗi ý thành (tiêu đề | giải thích), thu nhỏ chữ dần cho tới khi cả danh sách vừa khung.
     Trả về (font tiêu đề, font giải thích, [(dòng tiêu đề, dòng giải thích, chiều cao thẻ)])."""
     L = c.L
     meas = ImageDraw.Draw(c.new())
     parts = [_split_item(t) for t in items]
-    scale = 1.0
+    scale = 1.9 * getattr(L, "ts", 1.0) / 1.25                  # bắt đầu từ cỡ chữ to nhất rồi thu nhỏ vừa đủ lấp đầy khung
     while True:
-        ft = V._font(max(14, int(L.base * 0.046 * scale)), bold=True)
-        fd = V._font(max(12, int(L.base * 0.038 * scale)))
+        ft = V._font(max(14, min(int(L.base * 0.046 * scale), int(L.base * 0.075))), bold=True)
+        fd = V._font(max(12, min(int(L.base * 0.038 * scale), int(L.base * 0.06))))
         lt, ld = int(ft.size * 1.28), int(fd.size * 1.32)
         rows, total = [], 0
         for title, detail in parts:
@@ -340,13 +340,15 @@ def _calc(c: Cards, sc, top, bottom):
     meas = ImageDraw.Draw(c.new())
     x0, x1 = L.pad, L.W - L.pad
     inner = x1 - x0 - 2 * L.pad
-    scale = 1.0
+    scale = 1.7 * getattr(L, "ts", 1.0) / 1.25
     while True:
-        fl = V._font(max(14, int(L.base * 0.042 * scale)))
-        fv = V._font(max(14, int(L.base * 0.05 * scale)), bold=True)
+        fl = V._font(max(14, min(int(L.base * 0.042 * scale), int(L.base * 0.062))))
+        fv = V._font(max(14, min(int(L.base * 0.05 * scale), int(L.base * 0.072))), bold=True)
         lh = int(max(fl.size, fv.size) * 1.45)
-        wrapped = [(_wrap_text(meas, a or b, fl, int(inner * 0.58), 3), v if a else "") for a, v in
-                   [(a, b) for a, b in rows]]
+        wrapped = []
+        for a, b in rows:                                  # chừa chỗ cho số tiền bên phải rồi mới xuống dòng phần nhãn
+            vw = int(meas.textlength(b, font=fv)) if a else 0
+            wrapped.append((_wrap_text(meas, a or b, fl, max(int(inner * 0.3), inner - vw - int(L.pad * 0.8)), 3), b if a else ""))
         heights = [max(lh, len(w) * int(fl.size * 1.3)) + int(L.pad * 0.55) for w, _ in wrapped]
         if sum(heights) + L.pad <= bottom - top or scale < 0.55:
             break
@@ -406,6 +408,22 @@ def _steps(c: Cards, sc, top, bottom):
         y += h + gap
 
 
+def recap_layer(L, text: str, dest: Path, fill=(255, 190, 70)):
+    """Khung ghi nhớ nổi bật ("Bác nhớ giúp là ..."): chữ to, nền vàng nhạt, viền vàng."""
+    ov = Image.new("RGBA", (L.W, L.H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(ov)
+    f = V._font(int(L.base * 0.046 * getattr(L, "ts", 1.0)), bold=True)
+    lines = V._wrap(d, text, f, L.W - 3 * L.pad - int(f.size * 1.6))[:3]
+    lh = int(f.size * 1.3)
+    h = lh * len(lines) + int(L.pad * 0.9)
+    y0 = int(L.H * 0.80) - h
+    d.rounded_rectangle((L.pad, y0, L.W - L.pad, y0 + h), radius=20, fill=(60, 44, 10, 235), outline=fill + (255,), width=4)
+    d.text((L.pad + int(L.pad * 0.5), y0 + h / 2 - (len(lines) - 1) * lh / 2), "★", font=f, fill=GOLD2 + (255,), anchor="lm")
+    for k, line in enumerate(lines):
+        d.text((L.pad + int(f.size * 1.5), y0 + L.pad * 0.45 + k * lh + lh / 2), line, font=f, fill=(255, 244, 214, 255), anchor="lm")
+    return V._save_layer(ov, dest), y0
+
+
 def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_len: float):
     """Trả về (các lớp hình, các lớp phụ đề) của 1 cảnh kiểu giải thích."""
     layers = []
@@ -413,6 +431,11 @@ def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_l
     if pos:
         layers.append((f"xh{i}.png", pos, 0.0, "head"))
     top, bottom = int(L.H * 0.255), int(L.H * 0.70)
+    recap_pos = None
+    if sc.get("recap"):
+        recap_pos = recap_layer(L, sc["recap"], work / f"xr{i}.png")
+        if recap_pos and recap_pos[0]:
+            bottom = min(bottom, recap_pos[1] - int(L.pad * 0.5))
     c = Cards(L, work, i, voice_len)
     typ, items = sc["type"], sc["items"]
     if typ == "stat" and sc["big"]:
@@ -426,6 +449,8 @@ def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_l
     elif items:
         _list(c, sc, top, bottom)
     layers += c.out
+    if recap_pos and recap_pos[0]:
+        layers.append((f"xr{i}.png", recap_pos[0], max(1.0, voice_len * 0.6), "rise"))
     if brand:                                           # tên thương hiệu mờ ở đáy, không chiếm chỗ
         ov = c.new()
         ImageDraw.Draw(ov).text((L.W / 2, int(L.H * 0.935)), brand, font=V._font(int(L.base * 0.03), bold=True),

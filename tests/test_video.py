@@ -48,7 +48,7 @@ def test_render_download_publish_delete(client, monkeypatch, tmp_path):
     monkeypatch.setattr(video, "_run_bg", lambda fn, *a: fn(*a))     # dựng ngay, không chạy nền
 
     r = client.post(f"/api/videos/{vid}/render").json()
-    assert r["status"] == "done" and r["has_file"] and 2 < r["duration"] < 3
+    assert r["status"] == "done" and r["has_file"] and 2 < r["duration"] < 4
     f = client.get(f"/api/videos/{vid}/file?download=1")
     assert f.status_code == 200 and f.headers["content-type"] == "video/mp4" and len(f.content) > 1000
     assert sorted(p.name for p in (tmp_path / "videos" / str(vid)).iterdir()) == ["clip.mp4"]
@@ -106,8 +106,9 @@ def test_long_clip_script_retries_when_too_short(client, monkeypatch):
     monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: prompts.append(p) or next(replies))
     v = client.post("/api/videos", json={"text": "Nội dung bài viết về thuế. " * 10, "seconds": 180}).json()
     assert len(v["scenes"]) == 20 and v["scenes"][0]["items"] == ["Ý một", "Ý hai", "Ý ba"]
-    assert "20 cảnh" in prompts[0] and "540 từ" in prompts[0] and "QUÁ NGẮN" in prompts[1]
-    assert 150 < video.estimate_seconds(v["scenes"]) < 200
+    assert "20 cảnh" in prompts[0] and "432 từ" in prompts[0] and "QUÁ NGẮN" in prompts[1]
+    assert "NGƯỜI LỚN TUỔI" in prompts[0] and "bác" in prompts[0]                  # mặc định viết cho người lớn tuổi
+    assert 200 < video.estimate_seconds(v["scenes"]) < 260                        # người lớn tuổi đọc chậm hơn (2,4 từ/giây)
 
 
 def test_caption_chunks_are_short():
@@ -510,3 +511,23 @@ def test_calc_scene_and_karaoke_layers(tmp_path):
         assert len([n for n, *_ in layers if n.startswith("xl0_")]) >= 5          # nền bảng + 4 dòng hiện dần
         assert len(caps) >= 7 and caps[0][2] == 0.0 and caps[-1][3] == 3.5          # mỗi từ một trạng thái, liền nhau
         assert all(a[3] <= b[2] + 1e-6 for a, b in zip(caps, caps[1:]))
+
+
+def test_audience_general_uses_normal_pace_and_senior_recap_banner(client, monkeypatch, tmp_path):
+    from app import explainer
+    video.save_config({"look": "explainer", "audience": "general"})
+    prompts = []
+    monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: prompts.append(p) or {"scenes": [
+        {"type": "list", "headline": "A|B", "narration": "Lời đọc " * 20, "items": ["Tiêu đề | giải thích đủ dài để vượt qua ngưỡng"] * 3}] * 20})
+    client.post("/api/videos", json={"text": "Nội dung bài viết về thuế. " * 10, "seconds": 180})
+    assert "540 từ" in prompts[0] and "NGƯỜI LỚN TUỔI" not in prompts[0]
+    assert video.save_config({"audience": "xx"})["audience"] == "senior"
+    L = video.Layout((720, 1280))
+    L.ts = 1.25
+    sc = video.clean_scenes([{"type": "list", "headline": "A|B", "narration": "Lời đọc ngắn.", "recap": "Doanh thu dưới 10 tỷ thì được giảm 30% thuế",
+                              "items": ["Một | giải thích một", "Hai | giải thích hai", "Ba | giải thích ba"]}])[0]
+    assert sc["recap"].startswith("Doanh thu")
+    if HAS_TOOLS:
+        video._ffmpeg(["-f", "lavfi", "-i", "sine=duration=3", "-c:a", "libmp3lame", "voice0.mp3"], tmp_path)
+    layers, caps = explainer.build(L, sc, 0, 1, tmp_path, "", 3.5, 3.0)
+    assert "xr0.png" in [n for n, *_ in layers]

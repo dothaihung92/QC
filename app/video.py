@@ -71,6 +71,7 @@ DEFAULTS = {
     "voice": "vieneu:Mai Anh",        # VieNeu-TTS chạy ngay trên máy; chưa cài thì tự dùng giọng khác
     "tts_style": "nang_dong",         # phong cách đọc (chỉ giọng Gemini)
     "rate": 8,                        # tốc độ đọc, % (-30..+30)
+    "audience": "senior",             # senior = người lớn tuổi (chữ to, đọc chậm, lời rất dễ hiểu); general = phổ thông
     "look": "doodle",                 # doodle = vẽ tay trên giấy (hình AI vẽ lộ dần); explainer = sơ đồ thẻ kính; classic = cũ
     "pen": "wipe",                    # wipe = quét lộ dần kèm bàn tay; strokes = vẽ từng nét (whiteboard-animator, cài thêm)
     "visual": "stock",                # stock = video/ảnh Pexels hoặc nền màu; ai = ảnh AI riêng cho từng cảnh
@@ -125,6 +126,8 @@ def save_config(body: dict) -> dict:
         cur["voice"] = DEFAULTS["voice"]
     if cur["tts_style"] not in STYLES:
         cur["tts_style"] = DEFAULTS["tts_style"]
+    if cur["audience"] not in ("senior", "general"):
+        cur["audience"] = DEFAULTS["audience"]
     if cur["look"] not in ("doodle", "tech", "explainer", "classic"):
         cur["look"] = DEFAULTS["look"]
     if cur["pen"] not in ("wipe", "strokes"):
@@ -288,6 +291,8 @@ def github_source(url: str) -> dict:
 
 # ---------------------------------------------------------------- 1. kịch bản
 
+SENIOR_BLOCK = '\n\nĐỐI TƯỢNG XEM LÀ NGƯỜI LỚN TUỔI (rất quan trọng, ưu tiên hơn mọi quy tắc về độ ngắn gọn):\n- Gọi người xem là "bác" (hoặc "cô chú"), giọng ấm áp, kiên nhẫn, như con cháu đang giải thích cho ông bà nghe.\n- MỖI CÂU CHỈ MỘT Ý, tối đa 12 từ. Dùng toàn từ thông thường; KHÔNG dùng từ tiếng Anh, không viết tắt, không từ hàn lâm.\n  Thuật ngữ bắt buộc phải nhắc (vd "doanh thu", "kê khai") thì giải nghĩa NGAY bằng lời đời thường ("doanh thu là tổng số tiền bán hàng thu được").\n- Đi chậm từng bước: nói điều gì đó → lấy ví dụ đời thường → nhắc lại. Cuối mỗi cảnh có 1 câu nhắc lại ý chính, bắt đầu bằng "Bác nhớ giúp là..." hoặc "Tóm lại...".\n- Số tiền nói đầy đủ, rõ ràng ("hai trăm triệu đồng"); ví dụ dùng người quen thuộc (bác bán tạp hóa, cô bán bún, chú sửa xe) và con số tròn, dễ nhẩm.\n- Trên màn hình mỗi cảnh TỐI ĐA 3 mục (chữ sẽ rất to): tiêu đề tối đa 5 từ, giải thích tối đa 15 từ. Thêm trường "recap": câu ghi nhớ ngắn (tối đa 12 từ) hiện thành khung nổi bật, vd "Doanh thu dưới 10 tỷ thì được giảm 30% thuế".\n- Mỗi quy định chỉ giải thích MỘT ĐIỀU trong một cảnh; cần nói nhiều thì chia thành nhiều cảnh.\n'
+SENIOR_WPS = 2.4                 # người lớn tuổi: đọc chậm hơn (từ / giây)
 WORDS_PER_SEC = 3.0                  # tốc độ đọc tiếng Việt trung bình của giọng máy (đo từ clip thật)
 SCENE_TYPES = ("hook", "stat", "list", "flow", "steps", "text", "cta", "doodle", "hero", "browser", "calc")
 DOODLE_PAGES = {30: 3, 45: 4, 60: 5, 120: 8, 180: 12}   # giây → số trang của clip vẽ tay (~15 giây / trang)
@@ -441,7 +446,8 @@ def word_count(text: str) -> int:
 
 
 def estimate_seconds(scenes) -> int:
-    return round(sum(word_count(s.get("narration", "")) for s in scenes) / WORDS_PER_SEC + 0.6 * len(scenes))
+    wps = SENIOR_WPS if get_config()["audience"] == "senior" else WORDS_PER_SEC
+    return round(sum(word_count(s.get("narration", "")) for s in scenes) / wps + 0.6 * len(scenes))
 
 
 def clean_scenes(scenes) -> list:
@@ -477,6 +483,7 @@ def clean_scenes(scenes) -> list:
             focus = -1
         out.append({"type": typ if typ in SCENE_TYPES else ("stat" if s.get("big") else "list" if items else "text"),
                     "chips": chips, "url": str(s.get("url", "")).strip()[:60], "url_title": str(s.get("url_title", "")).strip()[:50],
+                    "recap": str(s.get("recap", "")).strip()[:140],
                     "focus": focus, "tone": str(s.get("tone", "")).strip().lower()[:8], "note": str(s.get("note", "")).strip()[:60],
                     "tag": str(s.get("tag", "")).strip()[:40], "panels": panels, "hl": hl,
                     "headline": str(s.get("headline", "")).strip()[:120],
@@ -497,9 +504,11 @@ def make_script(text: str, seconds: int = 45) -> dict:
     doodle = cfg["look"] == "doodle"
     tech = cfg["look"] == "tech"
     n = DOODLE_PAGES[seconds] if doodle else LENGTHS[seconds]
-    total = int(seconds * WORDS_PER_SEC)
-    per = total / n
     brand = f'- {"Trang" if doodle else "Cảnh"} cuối nhắc tên: "{cfg["brand"]}"\n' if cfg["brand"] else ""
+    senior = cfg["audience"] == "senior"
+    wps = SENIOR_WPS if senior else WORDS_PER_SEC
+    total = int(seconds * wps)
+    per = total / n
     if tech:
         prompt = TECH_PROMPT.format(seconds=seconds, n=n, total=total, lo=int(per * 0.8), hi=int(per * 1.25), brand=brand, text=text[:12000])
     elif doodle:
@@ -508,6 +517,8 @@ def make_script(text: str, seconds: int = 45) -> dict:
     else:
         prompt = SCRIPT_PROMPT.format(seconds=seconds, n=n, total=total, lo=int(per * 0.8), hi=int(per * 1.25),
                                       expand=EXPAND if seconds >= 90 else "", brand=brand, text=text[:12000])
+    if senior:
+        prompt += SENIOR_BLOCK
     best = None
     for attempt in range(2):          # AI hay viết quá ngắn: thiếu thì yêu cầu viết lại 1 lần
         try:
@@ -836,6 +847,7 @@ class Layout:
         self.card_x0 = (self.W - cw) // 2
         self.card_x1 = self.card_x0 + cw
         self.cap_y = int(self.H * (0.775 if self.vertical else 0.835))
+        self.ts = 1.0                      # hệ số cỡ chữ (người lớn tuổi: 1.25)
 
 
 def _save_layer(img, dest: Path):
@@ -1390,6 +1402,8 @@ def render(video_id: int):
     if cfg["look"] == "doodle":                  # kiểu vẽ tay có nhiều lớp chồng: dựng 720p cho nhanh (đúng độ phân giải clip mẫu)
         size = (size[0] * 2 // 3, size[1] * 2 // 3)
     L = Layout(size)
+    senior = cfg["audience"] == "senior"
+    L.ts = 1.25 if senior else 1.0
     work = VIDEO_DIR / str(video_id)
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True, exist_ok=True)
@@ -1427,11 +1441,11 @@ def render(video_id: int):
         veo_at = {round(j * (total - 1) / max(1, k - 1)) for j in range(k)} if k > 1 else {0}
     for i, sc in enumerate(scenes):
         step(f"Cảnh {i + 1}/{total}: giọng đọc")
-        used = tts(sc["narration"], cfg["voice"], cfg["rate"], work / f"voice{i}.mp3", style)
+        used = tts(sc["narration"], cfg["voice"], min(cfg["rate"], -6) if senior else cfg["rate"], work / f"voice{i}.mp3", style)
         if used != VOICES.get(cfg["voice"], "").split(" — ")[0]:
             _log(f"Cảnh {i + 1}: giọng đã chọn lỗi, đã dùng giọng {used}")
         voice_len = media_duration(work / f"voice{i}.mp3")
-        dur = math.ceil((voice_len + 0.35) * FPS) / FPS
+        dur = math.ceil((voice_len + (0.9 if senior else 0.35)) * FPS) / FPS
 
         if paper:
             step(f"Trang {i + 1}/{total}: vẽ hình minh họa" + (" (AI)" if gkey else ""))
