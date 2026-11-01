@@ -120,9 +120,11 @@ def _wrap(d, text, font, width, limit):
 
 def header(L, sc, i: int, work: Path):
     """Nhãn + tiêu đề (dòng 1 trắng, dòng 2 xanh dương) + logo cho cảnh mở đầu. Trả về (vị trí, đáy tiêu đề)."""
+    hero = sc["type"] == "hero"
+    if not getattr(L, "show_title", True) and not hero:             # tắt tiêu đề: chỉ chừa lề trên
+        return None, int(L.H * 0.1)
     ov = Image.new("RGBA", (L.W, L.H), (0, 0, 0, 0))
     d = ImageDraw.Draw(ov)
-    hero = sc["type"] == "hero"
     y = int(L.H * (0.17 if hero else 0.085))
     pad = L.pad
     if hero:

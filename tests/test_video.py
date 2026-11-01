@@ -572,3 +572,35 @@ def test_audience_prompt_asks_for_profit_loss_examples_and_visuals(client, monke
     p = prompts[0]
     assert "CÓ LÃI" in p and "BỊ LỖ" in p and "LUẬT SƯ KIÊM KẾ TOÁN" in p and "căn cứ pháp lý" in p.lower()
     assert "Không dùng cảnh hình minh họa" in p and "KHÔNG viết khung" in p
+
+
+def test_object_items_become_text_and_placeholders_are_dropped():
+    sc = video.clean_scenes([{"type": "calc", "headline": "A|B", "narration": "Lời đọc.", "items": [
+        {"Nội dung": "Doanh thu cả năm", "Số tiền": "1,2 tỷ"},
+        {"Tiêu đề ngắn": "Chi phí là gì?", "giải thích đầy đủ 10-25 từ": "Mọi khoản bỏ ra để bán hàng"},
+        ["Giá vốn", "300 triệu"], "Tiêu đề ngắn | giải thích đầy đủ 10-25 từ", "Lãi | 80 triệu"]}])[0]
+    assert sc["items"] == ["Doanh thu cả năm | 1,2 tỷ", "Chi phí là gì? | Mọi khoản bỏ ra để bán hàng", "Giá vốn | 300 triệu", "Lãi | 80 triệu"]
+    assert not any("{" in t for t in sc["items"])
+
+
+def test_parse_money_vietnamese_formats():
+    from app import explainer
+    p = explainer.parse_money
+    assert p("1,2 tỷ") == 1200 and p("300 triệu") == 300 and p("-700.000.000 VNĐ") == -700
+    assert p("1.200.000.000 đồng") == 1200 and p("− 30 triệu") == -30 and p("80 triệu đồng") == 80
+
+
+def test_show_title_off_hides_heading_and_prompt_is_story_driven(tmp_path):
+    from app import explainer, techlook
+    L = video.Layout((720, 1280))
+    sc = video.clean_scenes([{"type": "list", "headline": "Tiêu đề|hai", "tag": "TAG", "narration": "Lời đọc ngắn.",
+                              "items": ["Một | ý một", "Hai | ý hai"]}])[0]
+    L.show_title = False
+    for mod, name in ((techlook, "th0.png"), (explainer, "xh0.png")):
+        layers, _ = mod.build(L, sc, 0, 1, tmp_path, "", 3.0, 2.5)
+        assert name not in [n for n, *_ in layers]
+    L.show_title = True
+    layers, _ = techlook.build(L, sc, 0, 1, tmp_path, "", 3.0, 2.5)
+    assert "th0.png" in [n for n, *_ in layers]
+    assert "KỂ CHUYỆN THU HÚT" in video.EXPERT_BLOCK and "KHÔNG NHỒI CHỮ" in video.EXPERT_BLOCK
+    assert video.get_config()["show_title"] is True

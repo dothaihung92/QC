@@ -422,12 +422,15 @@ _UNIT = {"tỷ": 1000.0, "ty": 1000.0, "triệu": 1.0, "trieu": 1.0, "nghìn": 0
 
 
 def parse_money(text: str):
-    """"500 triệu" → 500.0 (đơn vị: triệu đồng); "−30 triệu" → -30.0; không đọc được → None."""
-    m = re.search(r"([-−–]?)\s*(\d+(?:[.,]\d+)?)\s*(tỷ|ty|triệu|trieu|nghìn|ngàn|đồng)?", text.lower())
+    """"500 triệu" → 500.0 (đơn vị: triệu đồng); "1,2 tỷ" → 1200; "−30 triệu" → -30; "-700.000.000 VNĐ" → -700; không đọc được → None."""
+    t = text.lower().replace("vnđ", "đồng").replace("vnd", "đồng")
+    m = re.search(r"([-−–]?)\s*(\d{1,3}(?:\.\d{3})+|\d+(?:[.,]\d+)?)\s*(tỷ|ty|triệu|trieu|nghìn|ngàn|đồng)?", t)
     if not m:
         return None
-    num = float(m.group(2).replace(",", "."))
-    val = num * _UNIT.get(m.group(3) or "triệu", 1.0)
+    raw = m.group(2)
+    num = float(raw.replace(".", "")) if re.fullmatch(r"\d{1,3}(?:\.\d{3})+", raw) else float(raw.replace(",", "."))
+    unit = m.group(3) or ("đồng" if num >= 100000 else "triệu")
+    val = num * _UNIT.get(unit, 1.0)
     return -val if m.group(1) else val
 
 
@@ -524,10 +527,10 @@ def recap_layer(L, text: str, dest: Path, fill=(255, 190, 70)):
 def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_len: float, illus=None):
     """Trả về (các lớp hình, các lớp phụ đề) của 1 cảnh kiểu giải thích."""
     layers = []
-    pos = heading_layer(L, sc, work / f"xh{i}.png")
+    pos = heading_layer(L, sc, work / f"xh{i}.png") if getattr(L, "show_title", True) else None
     if pos:
         layers.append((f"xh{i}.png", pos, 0.0, "head"))
-    top, bottom = int(L.H * 0.255), int(L.H * 0.70)
+    top, bottom = int(L.H * (0.255 if getattr(L, "show_title", True) else 0.14)), int(L.H * 0.70)
     c = Cards(L, work, i, voice_len)
     typ, items = sc["type"], sc["items"]
     if typ == "stat" and sc["big"]:

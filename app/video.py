@@ -72,6 +72,7 @@ DEFAULTS = {
     "tts_style": "nang_dong",         # phong cách đọc (chỉ giọng Gemini)
     "rate": 8,                        # tốc độ đọc, % (-30..+30)
     "audience": "expert",             # expert = luật sư / kế toán giải trình văn bản; general = phổ thông
+    "show_title": True,               # hiện tiêu đề lớn đầu mỗi cảnh (tắt: màn hình chỉ còn nội dung + phụ đề)
     "ai_images": False,               # cho phép Gemini vẽ hình minh họa (mặc định TẮT: chỉ dùng ghi chú chữ)
     "look": "doodle",                 # doodle = vẽ tay trên giấy (hình AI vẽ lộ dần); explainer = sơ đồ thẻ kính; classic = cũ
     "pen": "wipe",                    # wipe = quét lộ dần kèm bàn tay; strokes = vẽ từng nét (whiteboard-animator, cài thêm)
@@ -308,8 +309,16 @@ EXPERT_BLOCK = (
     "- Mỗi thuật ngữ pháp lý / kế toán xuất hiện lần đầu phải được giải nghĩa ngay bằng lời đời thường. Câu ngắn, mỗi câu một ý, tối đa 18 từ, không từ tiếng Anh, không viết tắt khó hiểu.\n"
     "- VÍ DỤ TÍNH LÃI / LỖ (bắt buộc khi nội dung liên quan thuế, doanh thu, chi phí): một cửa hàng cụ thể (có tên, mặt hàng), tính TỪNG BƯỚC Doanh thu − Giá vốn − Chi phí = Lãi (hoặc Lỗ), rồi tới nghĩa vụ thuế. "
     "Có ĐỦ hai ví dụ: CÓ LÃI và BỊ LỖ (ảnh hưởng tới thuế thế nào theo nguồn). Phép tính phải ĐÚNG. Dùng cảnh \"calc\" (bảng tính, dòng cuối là Lãi / Lỗ) và cảnh \"bars\" (biểu đồ cột: items \"Nhãn | số tiền\").\n"
-    "- GHI CHÚ TRÊN MÀN HÌNH phải CHI TIẾT: mỗi cảnh 3-5 mục dạng \"Tiêu đề ngắn | giải thích đầy đủ 12-25 từ\" (điều kiện, con số, mốc thời gian, ngoại lệ). Không dùng cảnh hình minh họa, không dùng cảnh \"visual\"; "
-    "mọi hình ảnh chỉ là chữ, bảng, biểu đồ, sơ đồ.\n"
+    "- MÀN HÌNH CHỈ LÀ ĐIỂM NHẤN, KHÔNG NHỒI CHỮ: mỗi cảnh tối đa 3 mục, mỗi mục dạng \"tiêu đề | ý ngắn\" (tiêu đề tối đa 4 từ, ý ngắn tối đa 8 từ), "
+    "vd \"Doanh nghiệp nhỏ | doanh thu năm dưới 10 tỷ\" (viết nội dung thật, KHÔNG chép lại ví dụ). TOÀN BỘ phần giải thích chi tiết phải nằm trong LỜI ĐỌC, không nhồi lên màn hình. "
+    "Cảnh trích điều khoản (browser) chỉ 2-3 dòng ngắn. Số tiền viết gọn (\"1,2 tỷ\", \"300 triệu\"), không viết \"1.200.000.000 VNĐ\". "
+    "Không dùng cảnh hình minh họa, không dùng cảnh \"visual\"; mọi hình ảnh chỉ là chữ, bảng, biểu đồ, sơ đồ.\n"
+    "- KỂ CHUYỆN THU HÚT, KHÔNG KHÔ KHAN: xuyên suốt clip dùng MỘT nhân vật quen thuộc (vd chị Lan bán quần áo, anh Nam mở quán bún) gặp một tình huống thật. "
+    "Mở đầu bằng câu hỏi / con số / tình huống gây tò mò (vd \"Bạn có biết có người nộp thừa hàng chục triệu chỉ vì không biết điều này?\"). "
+    "Mỗi cảnh mở bằng một câu \"móc\" và kết bằng câu dẫn sang cảnh sau (vd \"Vậy chị Lan phải làm gì? Xem tiếp nhé.\"). "
+    "Văn nói tự nhiên như đang trò chuyện: dùng câu hỏi, \"Nghe thì phức tạp, nhưng thật ra...\", \"Đây là chỗ nhiều người hay nhầm\", \"Bạn thử tưởng tượng...\". "
+    "Nói rõ quyền lợi hoặc rủi ro bằng tiền cụ thể (được lợi bao nhiêu, bị phạt bao nhiêu) để người nghe thấy liên quan đến mình. "
+    "Vẫn phải chính xác pháp lý: đọc rõ căn cứ, điều khoản nhưng ngắn gọn, rồi giải thích bằng lời thường. Tuyệt đối không đọc văn bản như đọc luật.\n"
     "- Mỗi cảnh chỉ giải thích MỘT điều; cần nói nhiều thì chia thành nhiều cảnh.\n"
 )
 EXPERT_WPS = 2.6                 # giải trình: đọc rõ, vừa phải (từ / giây)
@@ -350,12 +359,12 @@ GIẢI THÍCH DỄ HIỂU (rất quan trọng): coi người xem là chủ cửa
 - Ít nhất 2 cảnh type "calc" = VÍ DỤ TÍNH TOÁN TỪNG BƯỚC: items là các dòng "Nội dung | Số tiền" theo đúng thứ tự tính, dòng CUỐI là kết quả
   (vd "Doanh thu cả năm | 8 tỷ đồng", "Thuế phải nộp | 200 triệu", "Được giảm 30% | − 60 triệu", "Thực nộp | 140 triệu"). Phép tính phải ĐÚNG; ghi rõ đây là ví dụ minh họa.
 - Câu văn ngắn, không dùng từ hàn lâm; nếu buộc phải dùng thuật ngữ pháp lý thì giải thích ngay sau đó.
-Mỗi cảnh phải có 3-5 mục thông tin CHI TIẾT hiện trên màn hình, mỗi mục viết dạng "Tiêu đề ngắn | giải thích đầy đủ 10-25 từ" (không chỉ liệt kê từ khóa).
+Mỗi cảnh phải có 3-5 mục thông tin CHI TIẾT hiện trên màn hình, mỗi mục viết dạng "Doanh nghiệp nhỏ | doanh thu năm dưới 10 tỷ đồng" (không chỉ liệt kê từ khóa).
 Chỉ dùng thông tin có trong nội dung nguồn; chỗ nguồn chưa nói rõ thì ghi "cần đối chiếu văn bản gốc", không tự bịa.
 
 Mỗi cảnh có phần hình trên màn hình:
 - type: "hook" | "stat" | "list" | "flow" | "steps" | "calc" | "bars" | "visual" | "text" | "cta"
-  ("flow" = sơ đồ cây: items[0] là ý gốc, các items sau là 2-4 nhánh con, mỗi nhánh dạng "Tiêu đề ngắn | mô tả ngắn";
+  ("flow" = sơ đồ cây: items[0] là ý gốc, các items sau là 2-4 nhánh con, mỗi nhánh dạng "Hộ kinh doanh | kê khai theo quý";
    "steps" = các bước nối tiếp nhau; "list" = các ý song song; "stat" = một con số nổi bật. Dùng đa dạng các kiểu.)
 - headline: tiêu đề lớn gồm 2 DÒNG NGẮN ngăn bằng dấu "|", tổng tối đa 7 từ, vd "GIẢM 30% THUẾ|CHO HỘ KINH DOANH".
 - big: (cho "stat") con số / tỷ lệ / mốc thời gian nổi bật, tối đa 12 ký tự, vd "30%", "10 tỷ", "29/10/2026".
@@ -430,7 +439,7 @@ GIẢI THÍCH DỄ HIỂU (rất quan trọng): coi người xem là chủ cửa
 - Ít nhất 2 cảnh type "calc" = VÍ DỤ TÍNH TOÁN TỪNG BƯỚC: items là các dòng "Nội dung | Số tiền" theo đúng thứ tự tính, dòng CUỐI là kết quả
   (vd "Doanh thu cả năm | 8 tỷ đồng", "Thuế phải nộp | 200 triệu", "Được giảm 30% | − 60 triệu", "Thực nộp | 140 triệu"). Phép tính phải ĐÚNG; ghi rõ đây là ví dụ minh họa.
 - Câu văn ngắn, không dùng từ hàn lâm; nếu buộc phải dùng thuật ngữ pháp lý thì giải thích ngay sau đó.
-Mỗi cảnh phải có 3-5 mục thông tin CHI TIẾT hiện trên màn hình, mỗi mục viết dạng "Tiêu đề ngắn | giải thích đầy đủ 10-25 từ" (không chỉ liệt kê từ khóa).
+Mỗi cảnh phải có 3-5 mục thông tin CHI TIẾT hiện trên màn hình, mỗi mục viết dạng "Doanh nghiệp nhỏ | doanh thu năm dưới 10 tỷ đồng" (không chỉ liệt kê từ khóa).
 Chỉ dùng thông tin có trong nội dung nguồn; chỗ nguồn chưa nói rõ thì ghi "cần đối chiếu văn bản gốc", không tự bịa.
 
 NỘI DUNG (nếu là công cụ / phần mềm): nói rõ công cụ là gì, giải quyết vấn đề gì, điểm mạnh (con số cụ thể: số sao, số kênh, miễn phí, giấy phép), cách cài / dùng, các tình huống áp dụng KÈM VÍ DỤ CỤ THỂ, rủi ro và lưu ý bảo mật,
@@ -446,7 +455,7 @@ Mỗi cảnh có:
 - big: (cho "stat") con số nổi bật, vd "106,9K"; items[0] là dòng chú thích dưới số, vd "trong 8 tháng"; chips[0] là nhãn phụ.
 - url, url_title, items, focus, tone: (cho "browser") url là địa chỉ giả hiển thị (vd "github.com · tên-repo / README"), url_title là tiêu đề trang, items là 3-5 dòng nội dung
   của trang (trích / diễn giải từ nguồn), focus là số thứ tự dòng (từ 0) cần tô khung sáng, tone là "info" | "good" | "bad" (xanh dương | xanh lá | đỏ).
-- items: (cho "steps" / "list" / "flow" / "cta") 3-5 ý, mỗi ý dạng "Tiêu đề ngắn | giải thích đầy đủ 10-25 từ" (riêng "cta" thì ngắn); với "cta": items[0] là câu hỏi hiện trong bong bóng, items[1] là dòng phụ, chips[0] là nhãn nút (vd "bell|Đăng ký kênh").
+- items: (cho "steps" / "list" / "flow" / "cta") 3-5 ý, mỗi ý dạng "Doanh nghiệp nhỏ | doanh thu năm dưới 10 tỷ đồng" (riêng "cta" thì ngắn); với "cta": items[0] là câu hỏi hiện trong bong bóng, items[1] là dòng phụ, chips[0] là nhãn nút (vd "bell|Đăng ký kênh").
 - note: chú thích nhỏ cuối khung nếu nội dung là minh họa, vd "* Ví dụ minh hoạ".
 - description: (một lần ở cuối JSON) lời giới thiệu đăng kèm video, 2-3 câu, kết bằng 3 hashtag.
 {brand}
@@ -470,6 +479,21 @@ def estimate_seconds(scenes) -> int:
     return round(sum(word_count(s.get("narration", "")) for s in scenes) / wps + 0.6 * len(scenes))
 
 
+def _item_text(x) -> str:
+    """Một ý trên màn hình → "tiêu đề | nội dung". AI đôi khi trả về object {"Nội dung": ..., "Số tiền": ...} thay vì chuỗi:
+    chuyển thành "giá trị 1 | giá trị 2" (không hiện chữ thô kiểu {'a': 'b'})."""
+    if isinstance(x, dict):
+        vals = [str(v).strip() for v in x.values() if v is not None and str(v).strip()]
+        x = " | ".join([vals[0], " ".join(vals[1:])]) if len(vals) > 1 else (vals[0] if vals else "")
+    elif isinstance(x, (list, tuple)):
+        vals = [str(v).strip() for v in x if str(v).strip()]
+        x = " | ".join([vals[0], " ".join(vals[1:])]) if len(vals) > 1 else (vals[0] if vals else "")
+    t = str(x).strip(" -•*\t")
+    if re.search(r"giải thích đầy đủ \d+-\d+ từ|^Tiêu đề ngắn", t, re.I):          # AI chép nguyên câu mẫu trong yêu cầu: bỏ
+        return ""
+    return t
+
+
 def clean_scenes(scenes) -> list:
     out = []
     for s in scenes or []:
@@ -481,7 +505,7 @@ def clean_scenes(scenes) -> list:
         items = s.get("items") or []
         if isinstance(items, str):
             items = items.splitlines()
-        items = [str(x).strip(" -•*\t")[:220] for x in items if str(x).strip(" -•*\t")][:5]
+        items = [t[:220] for t in (_item_text(x) for x in items) if t][:5]
         typ = str(s.get("type", "")).strip().lower()
         panels = []
         for pv in (s.get("panels") or [])[:4]:
@@ -551,7 +575,7 @@ def make_script(text: str, seconds: int = 45) -> dict:
         words = sum(word_count(s["narration"]) for s in scenes)
         rich = [x for x in scenes if x["type"] in ("list", "steps", "flow", "browser", "calc")]
         def detailed(x):
-            return sum(1 for t in x["items"] if "|" in t and len(t.split("|", 1)[1].strip()) >= 25)
+            return sum(1 for t in x["items"] if "|" in t and len(t.split("|", 1)[1].strip()) >= 12)
         thin = [x for x in rich if len(x["items"]) < 3 or (x["type"] not in ("browser", "calc") and detailed(x) < min(3, len(x["items"])))]
         enough = not thin or len(thin) <= len(rich) * 0.25 or cfg["look"] in ("doodle", "classic")
         if scenes and (not best or (enough, words) > (best[3], best[1])):
@@ -560,7 +584,7 @@ def make_script(text: str, seconds: int = 45) -> dict:
             break
         if scenes and words >= total * 0.8 and not enough:
             prompt += ("\n\nLƯU Ý: bản trước có quá nhiều cảnh thiếu thông tin trên màn hình. Mỗi cảnh phải có 3-5 mục, mỗi mục "
-                       "\"Tiêu đề | giải thích đầy đủ 10-25 từ\", viết cụ thể, có số liệu, điều kiện, thời hạn.")
+                       "\"tiêu đề | ý ngắn\" viết cụ thể (số liệu, điều kiện, thời hạn), không để trống phần sau dấu |.")
             continue
         prompt += (f"\n\nLƯU Ý: bản trước chỉ có {len(scenes)} {'trang' if doodle else 'cảnh'} / {words} từ — QUÁ NGẮN. Viết lại đủ {n} {'trang' if doodle else 'cảnh'} "
                    f"và khoảng {total} từ lời đọc, giải thích chi tiết hơn.")
@@ -1424,6 +1448,7 @@ def render(video_id: int):
     L = Layout(size)
     expert = cfg["audience"] == "expert"
     L.ts = 1.15 if expert else 1.0
+    L.show_title = bool(cfg["show_title"])
     work = VIDEO_DIR / str(video_id)
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir(parents=True, exist_ok=True)

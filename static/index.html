@@ -663,6 +663,7 @@
         <div><label>Màu thương hiệu</label><input id="vdColor" type="color" style="height:38px"></div>
       </div>
       <label style="font-weight:400"><input type="checkbox" id="vdAiImg" style="width:auto"> Cho phép Gemini vẽ hình minh họa (mặc định TẮT — chỉ dùng ghi chú chữ, bảng, biểu đồ)</label>
+      <label style="font-weight:400"><input type="checkbox" id="vdShowTitle" style="width:auto"> Hiện tiêu đề lớn ở đầu mỗi cảnh (bỏ tick: màn hình chỉ còn nội dung + phụ đề, ít chữ hơn)</label>
       <label>Phong cách trình bày</label>
       <select id="vdAudience"><option value="expert">Luật sư – kế toán giải trình: căn cứ pháp lý, trích điều khoản, ghi chú chi tiết, ví dụ tính lãi / lỗ</option>
         <option value="general">Phổ thông — nhịp nhanh hơn, nhiều chữ hơn</option></select>
@@ -822,7 +823,7 @@ async function loadVideo() {
     .map(([pre, lbl]) => `<optgroup label="${lbl}">${Object.entries(VCFG.voices).filter(([k]) => k.startsWith(pre))
       .map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</optgroup>`).join('');
   $('vdStyle').innerHTML = Object.entries(VCFG.styles).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
-  $('vdStyle').value = VCFG.tts_style; $('vdLook').value = VCFG.look; $('vdAudience').value = VCFG.audience; $('vdAiImg').checked = VCFG.ai_images; $('vdPen').value = VCFG.pen;
+  $('vdStyle').value = VCFG.tts_style; $('vdLook').value = VCFG.look; $('vdAudience').value = VCFG.audience; $('vdAiImg').checked = VCFG.ai_images; $('vdShowTitle').checked = VCFG.show_title; $('vdPen').value = VCFG.pen;
   $('vdPenNote').textContent = VCFG.pen === 'strokes' ? (VCFG.wba ? '✅ Đã cài whiteboard-animator.' : '⚠ Chưa cài — bấm Lưu cài đặt rồi "Cập nhật công cụ".') : ''; $('vdVisual').value = VCFG.visual; $('vdVeo').value = VCFG.veo_scenes;
   $('vdVeoCost').textContent = `(≈ ${VCFG.veo_cost} USD / cảnh)`;
   $('vdVoice').value = VCFG.voice; $('vdRate').value = VCFG.rate;
@@ -890,7 +891,7 @@ function vdPick() {
   if (x) { $('vdText').value = x.text; $('vdImg').value = x.img || ''; }
 }
 async function vdSave() {
-  VCFG = await api('/api/video/config', { method: 'PUT', body: { audience: $('vdAudience').value, ai_images: $('vdAiImg').checked, look: $('vdLook').value, pen: $('vdPen').value, voice: $('vdVoice').value, tts_style: $('vdStyle').value, visual: $('vdVisual').value, veo_scenes: $('vdVeo').value, rate: $('vdRate').value,
+  VCFG = await api('/api/video/config', { method: 'PUT', body: { audience: $('vdAudience').value, ai_images: $('vdAiImg').checked, show_title: $('vdShowTitle').checked, look: $('vdLook').value, pen: $('vdPen').value, voice: $('vdVoice').value, tts_style: $('vdStyle').value, visual: $('vdVisual').value, veo_scenes: $('vdVeo').value, rate: $('vdRate').value,
     format: $('vdFormat').value, color: $('vdColor').value, brand: $('vdBrand').value, pexels_key: $('vdPexels').value,
     music: $('vdMusic').checked } });
   $('vdPexels').value = ''; toast('✅ Đã lưu cài đặt clip'); loadVideo();
