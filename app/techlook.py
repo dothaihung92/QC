@@ -163,7 +163,7 @@ def chip(d, box, text: str, border=RED, fill=(34, 18, 32, 235)):
     d.text((x0 + (y1 - y0) * 1.0, (y0 + y1) / 2), label, font=f, fill=WHITE + (255,), anchor="lm")
 
 
-def chips_layers(c: X.Cards, L, chips: list, top: int, cols: int = 2, start=0.5, border=RED):
+def chips_layers(c: X.Cards, L, chips: list, top: int, cols: int = 2, start=0.5, border=RED, spread=True):
     if not chips:
         return top
     rows = (len(chips) + cols - 1) // cols
@@ -176,7 +176,7 @@ def chips_layers(c: X.Cards, L, chips: list, top: int, cols: int = 2, start=0.5,
         x0 = L.pad + c_ * (cw + gap)
         y0 = top + r_ * (ch + gap)
         chip(ImageDraw.Draw(ov), (x0, y0, x0 + cw, y0 + ch), t, border)
-        c.add(ov, start + 0.18 * k, "pop")
+        c.add(ov, (c.when(k, len(chips), start) if spread else start + 0.18 * k), "pop")
     return top + rows * (ch + gap)
 
 
@@ -225,7 +225,7 @@ def browser(c: X.Cards, L, sc, top: int, bottom: int, start=0.45):
         ov = c.new()
         d = ImageDraw.Draw(ov)
         d.rounded_rectangle(focus_box, radius=12, fill=col + (40,), outline=col + (255,), width=4)
-        c.add(ov, start + 1.1, "none")
+        c.add(ov, max(start + 1.1, c.span * 0.35), "none")        # khung sáng hiện khi lời đọc tới ý đó
     return y1
 
 
@@ -303,16 +303,14 @@ def cta_block(c: X.Cards, L, sc, top: int):
     return y
 
 
-def caption_layer(L, text: str, dest: Path):
-    """Phụ đề trắng đậm, từ khóa tô nền xanh."""
-    words = text.split()
+def caption_layer(L, words: list, active: int, dest: Path):
+    """Phụ đề trắng đậm; từ đang được đọc (chỉ số active) nổi lên trên nền xanh."""
     if not words:
         return None
     size = int(L.base * 0.056)
     f = V._font(size, bold=True)
     ov = Image.new("RGBA", (L.W, L.H), (0, 0, 0, 0))
     d = ImageDraw.Draw(ov)
-    key = X._key_word(words)
     space = d.textlength(" ", font=f)
     lines, cur, cur_w = [], [], 0.0
     for w in words:
@@ -325,7 +323,7 @@ def caption_layer(L, text: str, dest: Path):
     lines.append(cur)
     lh = int(size * 1.4)
     top = int(L.H * 0.875) - lh * len(lines) // 2
-    marked = False
+    wi = 0
     for li, line in enumerate(lines):
         x = (L.W - (sum(w[1] for w in line) + space * (len(line) - 1))) / 2
         y = top + li * lh
@@ -334,11 +332,11 @@ def caption_layer(L, text: str, dest: Path):
                                              radius=14, fill=(0, 0, 0, 120))
         ov.alpha_composite(bg)
         for w, ww in line:
-            if w == key and not marked:
-                marked = True
+            if wi == active:
                 d.rounded_rectangle((x - 6, y + 2, x + ww + 6, y + lh - 8), radius=8, fill=KEYBOX + (255,))
             d.text((x, y + lh / 2 - 2), w, font=f, fill=WHITE + (255,), anchor="lm")
             x += ww + space
+            wi += 1
     return V._save_layer(ov, dest)
 
 
@@ -347,7 +345,7 @@ def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_l
     pos, hb = header(L, sc, i, work)
     if pos:
         layers.append((f"th{i}.png", pos, 0.0, "head"))
-    c = X.Cards(L, work, i)
+    c = X.Cards(L, work, i, voice_len)
     top = hb + int(L.base * 0.05)
     bottom = int(L.H * 0.80)
     typ = sc["type"]
@@ -366,6 +364,8 @@ def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_l
         X._flow(c, sc, top, bottom)
     elif typ == "steps" and sc["items"]:
         X._steps(c, sc, top, bottom)
+    elif typ == "calc" and sc["items"]:
+        X._calc(c, sc, top, bottom)
     elif sc["items"]:
         X._list(c, sc, top, bottom)
     elif sc["chips"]:
@@ -378,13 +378,6 @@ def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_l
         pos = V._save_layer(ov, work / f"tn{i}.png")
         if pos:
             layers.append((f"tn{i}.png", pos, 0.5, "none"))
-    captions, chunks = [], V.caption_chunks(sc["narration"], 5)
-    weights = [len(ch) + 6 for ch in chunks]
-    t = 0.0
-    for k, ch in enumerate(chunks):
-        end = dur if k == len(chunks) - 1 else t + voice_len * weights[k] / sum(weights)
-        p = caption_layer(L, ch, work / f"tc{i}_{k}.png")
-        if p:
-            captions.append((f"tc{i}_{k}.png", p, t, end))
-        t = end
+    captions = V.karaoke_captions(L, work, f"tc{i}", sc["narration"], work / f"voice{i}.mp3", dur, voice_len,
+                                  lambda w, k, dest: caption_layer(L, w, k, dest), 5)
     return layers, captions

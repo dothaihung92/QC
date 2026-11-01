@@ -289,7 +289,7 @@ def github_source(url: str) -> dict:
 # ---------------------------------------------------------------- 1. kịch bản
 
 WORDS_PER_SEC = 3.0                  # tốc độ đọc tiếng Việt trung bình của giọng máy (đo từ clip thật)
-SCENE_TYPES = ("hook", "stat", "list", "flow", "steps", "text", "cta", "doodle", "hero", "browser")
+SCENE_TYPES = ("hook", "stat", "list", "flow", "steps", "text", "cta", "doodle", "hero", "browser", "calc")
 DOODLE_PAGES = {30: 3, 45: 4, 60: 5, 120: 8, 180: 12}   # giây → số trang của clip vẽ tay (~15 giây / trang)
 
 SCRIPT_PROMPT = """Bạn là biên tập viên video (Facebook Reels / TikTok / YouTube) cho một công ty dịch vụ kế toán - thuế ở Việt Nam.
@@ -318,11 +318,18 @@ NẾU NỘI DUNG LÀ QUY ĐỊNH / VĂN BẢN PHÁP LUẬT / CHÍNH SÁCH THUẾ
  5) Thủ tục, hồ sơ, thời hạn thực hiện;
  6) Lưu ý, sai sót thường gặp, mức phạt nếu có;
  7) Tóm tắt và kêu gọi liên hệ tư vấn.
+
+GIẢI THÍCH DỄ HIỂU (rất quan trọng): coi người xem là chủ cửa hàng nhỏ chưa biết gì về thuế.
+- Mỗi thuật ngữ khi xuất hiện lần đầu phải được giải nghĩa ngay bằng lời đời thường, kèm so sánh gần gũi nếu được (vd "doanh thu là tổng tiền bán hàng thu về, chưa trừ chi phí").
+- Với mỗi quy định: nói nó LÀ GÌ → áp vào TRƯỜNG HỢP CỦA BẠN như thế nào → ví dụ cụ thể có tên người và số tiền.
+- Ít nhất 2 cảnh type "calc" = VÍ DỤ TÍNH TOÁN TỪNG BƯỚC: items là các dòng "Nội dung | Số tiền" theo đúng thứ tự tính, dòng CUỐI là kết quả
+  (vd "Doanh thu cả năm | 8 tỷ đồng", "Thuế phải nộp | 200 triệu", "Được giảm 30% | − 60 triệu", "Thực nộp | 140 triệu"). Phép tính phải ĐÚNG; ghi rõ đây là ví dụ minh họa.
+- Câu văn ngắn, không dùng từ hàn lâm; nếu buộc phải dùng thuật ngữ pháp lý thì giải thích ngay sau đó.
 Mỗi cảnh phải có 3-5 mục thông tin CHI TIẾT hiện trên màn hình, mỗi mục viết dạng "Tiêu đề ngắn | giải thích đầy đủ 10-25 từ" (không chỉ liệt kê từ khóa).
 Chỉ dùng thông tin có trong nội dung nguồn; chỗ nguồn chưa nói rõ thì ghi "cần đối chiếu văn bản gốc", không tự bịa.
 
 Mỗi cảnh có phần hình trên màn hình:
-- type: "hook" | "stat" | "list" | "flow" | "steps" | "text" | "cta"
+- type: "hook" | "stat" | "list" | "flow" | "steps" | "calc" | "text" | "cta"
   ("flow" = sơ đồ cây: items[0] là ý gốc, các items sau là 2-4 nhánh con, mỗi nhánh dạng "Tiêu đề ngắn | mô tả ngắn";
    "steps" = các bước nối tiếp nhau; "list" = các ý song song; "stat" = một con số nổi bật. Dùng đa dạng các kiểu.)
 - headline: tiêu đề lớn gồm 2 DÒNG NGẮN ngăn bằng dấu "|", tổng tối đa 7 từ, vd "GIẢM 30% THUẾ|CHO HỘ KINH DOANH".
@@ -392,6 +399,12 @@ NẾU NỘI DUNG LÀ QUY ĐỊNH / VĂN BẢN PHÁP LUẬT / CHÍNH SÁCH THUẾ
  5) Thủ tục, hồ sơ, thời hạn thực hiện;
  6) Lưu ý, sai sót thường gặp, mức phạt nếu có;
  7) Tóm tắt và kêu gọi liên hệ tư vấn.
+GIẢI THÍCH DỄ HIỂU (rất quan trọng): coi người xem là chủ cửa hàng nhỏ chưa biết gì về thuế.
+- Mỗi thuật ngữ khi xuất hiện lần đầu phải được giải nghĩa ngay bằng lời đời thường, kèm so sánh gần gũi nếu được (vd "doanh thu là tổng tiền bán hàng thu về, chưa trừ chi phí").
+- Với mỗi quy định: nói nó LÀ GÌ → áp vào TRƯỜNG HỢP CỦA BẠN như thế nào → ví dụ cụ thể có tên người và số tiền.
+- Ít nhất 2 cảnh type "calc" = VÍ DỤ TÍNH TOÁN TỪNG BƯỚC: items là các dòng "Nội dung | Số tiền" theo đúng thứ tự tính, dòng CUỐI là kết quả
+  (vd "Doanh thu cả năm | 8 tỷ đồng", "Thuế phải nộp | 200 triệu", "Được giảm 30% | − 60 triệu", "Thực nộp | 140 triệu"). Phép tính phải ĐÚNG; ghi rõ đây là ví dụ minh họa.
+- Câu văn ngắn, không dùng từ hàn lâm; nếu buộc phải dùng thuật ngữ pháp lý thì giải thích ngay sau đó.
 Mỗi cảnh phải có 3-5 mục thông tin CHI TIẾT hiện trên màn hình, mỗi mục viết dạng "Tiêu đề ngắn | giải thích đầy đủ 10-25 từ" (không chỉ liệt kê từ khóa).
 Chỉ dùng thông tin có trong nội dung nguồn; chỗ nguồn chưa nói rõ thì ghi "cần đối chiếu văn bản gốc", không tự bịa.
 
@@ -401,7 +414,7 @@ Lời đọc: câu ngắn tự nhiên như người dẫn chương trình, xưng
 
 Mỗi cảnh có:
 - type: "hero" (cảnh đầu: logo + tiêu đề + 4-6 chip), "stat" (một con số nổi bật + biểu đồ), "browser" (cửa sổ trình duyệt hiển thị đoạn trích / ví dụ),
-  "steps" (các bước), "list" (các ý), "flow" (sơ đồ cây), "cta" (cảnh cuối: câu hỏi + nút), "text".
+  "steps" (các bước), "calc" (ví dụ tính toán từng bước), "list" (các ý), "flow" (sơ đồ cây), "cta" (cảnh cuối: câu hỏi + nút), "text".
 - tag: nhãn nhỏ phía trên, viết hoa, vd "01 — ÁP DỤNG", "BẢO MẬT" (tối đa 4 từ).
 - headline: tiêu đề 2 DÒNG ngăn bằng "|", tổng tối đa 7 từ, dòng 2 sẽ tô xanh, vd "Cho AI “mắt”|nhìn Internet".
 - chips: các nhãn ngắn hiện thành chip, mỗi chip dạng "biểu_tượng|Nhãn" với biểu_tượng thuộc: lock, check, warn, star, search, globe, play, bell, chat, no, bolt, doc (vd "lock|Cần đăng nhập"). Cảnh "hero" cần 4-6 chip.
@@ -505,8 +518,10 @@ def make_script(text: str, seconds: int = 45) -> dict:
             raise VideoError(str(e)) from e
         scenes = clean_scenes(out.get("scenes"))
         words = sum(word_count(s["narration"]) for s in scenes)
-        rich = [x for x in scenes if x["type"] in ("list", "steps", "flow", "browser")]
-        thin = [x for x in rich if len(x["items"]) < 3 or sum(len(t) for t in x["items"]) < 60]
+        rich = [x for x in scenes if x["type"] in ("list", "steps", "flow", "browser", "calc")]
+        def detailed(x):
+            return sum(1 for t in x["items"] if "|" in t and len(t.split("|", 1)[1].strip()) >= 25)
+        thin = [x for x in rich if len(x["items"]) < 3 or (x["type"] not in ("browser", "calc") and detailed(x) < min(3, len(x["items"])))]
         enough = not thin or len(thin) <= len(rich) * 0.25 or cfg["look"] in ("doodle", "classic")
         if scenes and (not best or (enough, words) > (best[3], best[1])):
             best = (out, words, scenes, enough)
@@ -1126,7 +1141,108 @@ def _motion(kind: str, x: int, y: int, start: float, base: int):
     return str(x), str(y)
 
 
-def render_scene(work: Path, i: int, size, duration: float, bg_video: bool, layers: list, captions: list):
+# ---------------------------------------------------------------- phụ đề chạy theo giọng đọc (từng từ)
+
+def speech_span(audio: Path, total: float):
+    """Đo file giọng đọc: (lúc bắt đầu nói, lúc nói xong, [(đầu, cuối) các khoảng lặng giữa chừng]) bằng silencedetect."""
+    kw = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+    r = subprocess.run([ffmpeg_exe(), "-hide_banner", "-i", str(audio), "-af", "silencedetect=n=-36dB:d=0.11", "-f", "null", "-"],
+                       capture_output=True, text=True, timeout=120, **kw)
+    starts = [float(x) for x in re.findall(r"silence_start: (-?[\d.]+)", r.stderr)]
+    ends = [float(x) for x in re.findall(r"silence_end: ([\d.]+)", r.stderr)]
+    sils = []
+    for k, st in enumerate(starts):
+        sils.append((max(0.0, st), ends[k] if k < len(ends) else total))
+    begin, end = 0.0, total
+    if sils and sils[0][0] <= 0.05:
+        begin = sils.pop(0)[1]
+    if sils and sils[-1][1] >= total - 0.05:
+        end = sils.pop()[0]
+    return begin, max(begin + 0.3, end), [x for x in sils if begin < x[0] and x[1] < end]
+
+
+def align_words(words: list, audio: Path, total: float) -> list:
+    """Thời điểm bắt đầu nói từng từ. Ước lượng theo độ dài chữ (dấu câu = chỗ ngắt), rồi khớp các chỗ ngắt đó với
+    khoảng lặng THẬT trong file âm thanh để mỗi câu / cụm bắt đầu đúng lúc giọng đọc."""
+    n = len(words)
+    if not n:
+        return []
+    try:
+        begin, end, sils = speech_span(audio, total)
+    except Exception:  # noqa: BLE001 — đo lỗi thì chia đều theo độ dài chữ
+        begin, end, sils = 0.0, total, []
+
+    def w_len(w):
+        t = re.sub(r"[^\w%]", "", w)
+        return max(2.0, len(t) * 1.0 + 1.0)
+    pause = [(6.0 if re.search(r"[.!?…]$", w) else 3.0 if re.search(r"[,;:]$", w) else 0.0) for w in words]
+    weights = [w_len(w) + pause[k] for k, w in enumerate(words)]
+    tot_w = sum(weights)
+    est, acc = [], 0.0
+    for k in range(n):
+        est.append(begin + (end - begin) * acc / tot_w)
+        acc += weights[k]
+    est.append(end)
+    # neo các chỗ ngắt (sau từ có dấu câu) vào khoảng lặng gần nhất chưa dùng
+    anchors, used = {}, set()
+    for k in range(n - 1):
+        if pause[k] <= 0:
+            continue
+        exp = est[k + 1] - (end - begin) * pause[k] / tot_w * 0.5
+        best = None
+        for si, (a, b) in enumerate(sils):
+            if si in used:
+                continue
+            dist = abs((a + b) / 2 - exp)
+            if dist < 0.9 and (best is None or dist < best[0]):
+                best = (dist, si)
+        if best:
+            used.add(best[1])
+            anchors[k] = sils[best[1]]
+    starts = [0.0] * n
+    seg_from, seg_t0 = 0, begin
+    cut_points = sorted(anchors) + [n - 1]
+    for cut in cut_points:
+        if cut == n - 1 and cut not in anchors:
+            seg_end_t, nxt_t0, last = end, end, n - 1
+        else:
+            a, b = anchors[cut]
+            seg_end_t, nxt_t0, last = max(a, seg_t0 + 0.2), b, cut
+        seg_w = sum(w_len(words[j]) for j in range(seg_from, last + 1)) or 1.0
+        acc = 0.0
+        for j in range(seg_from, last + 1):
+            starts[j] = seg_t0 + (seg_end_t - seg_t0) * acc / seg_w
+            acc += w_len(words[j])
+        seg_from, seg_t0 = last + 1, nxt_t0
+        if seg_from >= n:
+            break
+    for j in range(1, n):                                   # đảm bảo tăng dần
+        starts[j] = max(starts[j], starts[j - 1] + 0.05)
+    return starts
+
+
+def karaoke_captions(L, work: Path, prefix: str, narration: str, audio: Path, dur: float, voice_len: float, draw,
+                     max_words: int = 6) -> list:
+    """Phụ đề: mỗi cụm hiện đủ chữ, từ đang được đọc được tô nổi lên. draw(words, active, dest) vẽ 1 trạng thái.
+    Trả về [(file, vị trí, từ giây, đến giây)] liền nhau, bắt đầu từ giây 0 đến hết cảnh."""
+    chunks = caption_chunks(narration, max_words)
+    allw = " ".join(chunks).split()
+    times = align_words(allw, audio, voice_len)
+    out, idx = [], 0
+    for ci, ch in enumerate(chunks):
+        cw = ch.split()
+        for wi in range(len(cw)):
+            pos = draw(cw, wi, work / f"{prefix}_{ci}_{wi}.png")
+            a = 0.0 if idx == 0 else times[idx]
+            b = times[idx + 1] if idx + 1 < len(times) else dur
+            if pos and b > a:
+                out.append((f"{prefix}_{ci}_{wi}.png", pos, a, b))
+            idx += 1
+    return out
+
+
+def render_scene(work: Path, i: int, size, duration: float, bg_video: bool, layers: list, captions: list,
+                 fade_out: float = 0.0, pan=None):
     """Dựng 1 cảnh. layers: [(file, (x, y), start, motion)]; captions: [(file, (x, y), từ giây, đến giây)]."""
     W, H = size
     d = f"{duration:.3f}"
@@ -1137,14 +1253,19 @@ def render_scene(work: Path, i: int, size, duration: float, bg_video: bool, laye
                    f"eq=brightness=-0.10:saturation=1.08,trim=duration={d},setpts=PTS-STARTPTS[s0]")
     else:
         inputs += ["-loop", "1", "-framerate", str(FPS), "-t", d, "-i", f"bg{i}.png"]
-        k = f"(t/{d})" if i % 2 == 0 else f"(1-t/{d})"          # đổi hướng trượt mỗi cảnh
+        if pan:                                                   # trượt liên tục xuyên suốt clip: cuối cảnh này = đầu cảnh sau
+            k = f"({pan[0]:.4f}+({pan[1] - pan[0]:.4f})*t/{d})"
+        else:
+            k = f"(t/{d})" if i % 2 == 0 else f"(1-t/{d})"        # đổi hướng trượt mỗi cảnh
         flt.append(f"[0:v]crop={W}:{H}:x='(iw-ow)*{k}':y='(ih-oh)*{k}',setsar=1[s0]")
     cur, n = "s0", 1
     for name, (x, y), start, kind in layers:
         inputs += ["-framerate", str(FPS), "-i", name]
         lx, ly = _motion(kind, x, y, start, min(size))
-        flt.append(f"[{n}:v]format=rgba,loop=loop=-1:size=1:start=0,setpts=N/{FPS}/TB,"
-                   f"fade=t=in:st={start:.2f}:d=0.4:alpha=1[l{n}]")
+        fades = "" if kind == "keep" else f",fade=t=in:st={start:.2f}:d=0.4:alpha=1"
+        if fade_out and kind != "keep":                           # nội dung mờ dần ở cuối cảnh, cảnh sau hiện lên từ nền liền mạch
+            fades += f",fade=t=out:st={max(start + 0.5, duration - fade_out):.2f}:d={fade_out:.2f}:alpha=1"
+        flt.append(f"[{n}:v]format=rgba,loop=loop=-1:size=1:start=0,setpts=N/{FPS}/TB{fades}[l{n}]")
         flt.append(f"[{cur}][l{n}]overlay=x='{lx}':y='{ly}':eof_action=repeat[s{n}]")
         cur, n = f"s{n}", n + 1
     for name, (x, y), a, b in captions:
@@ -1202,7 +1323,11 @@ def join_scenes(work: Path, durations: list, out: Path, music: Path | None,
     names = names or TRANSITIONS
     joined = "joined.mp4" if music else str(out)
     files = [f"scene{k}.mp4" for k in range(len(durations))]
-    if len(files) == 1:
+    if trans <= 0 and len(files) > 1:                  # nền liền mạch + nội dung mờ dần: nối thẳng, không chồng hình
+        (work / "list.txt").write_text("".join(f"file '{f}'\n" for f in files), encoding="utf-8")
+        _ffmpeg(["-f", "concat", "-safe", "0", "-i", "list.txt", "-c:v", "copy", "-af", "aresample=async=1:first_pts=0",
+                 "-c:a", "aac", "-b:a", "160k", "-ar", "44100", "-ac", "2", "-movflags", "+faststart", joined], work)
+    elif len(files) == 1:
         _ffmpeg(["-i", files[0], "-c", "copy", "-movflags", "+faststart", joined], work)
     else:
         try:
@@ -1285,7 +1410,8 @@ def render(video_id: int):
     tech = cfg["look"] == "tech"
     expl = cfg["look"] == "explainer" or tech
     paper = cfg["look"] == "doodle"
-    trans, tnames = (0.3, ["fade"]) if (expl or paper) else (TRANSITION, TRANSITIONS)
+    # explainer / công nghệ: nền liền mạch xuyên suốt + nội dung mờ dần cuối cảnh → nối thẳng (mượt, không chồng hình)
+    trans, tnames = (0.0, ["fade"]) if expl else (0.3, ["fade"]) if paper else (TRANSITION, TRANSITIONS)
     ai_state = doodle.AIState()
     hand = None
     if paper:
@@ -1346,9 +1472,9 @@ def render(video_id: int):
                 mode = "photo" if sc["type"] == "hook" and not sc["headline"] else "blur"
                 render_background(article_img, size, cfg["color"], work / f"bg{i}.png", mode)
             elif tech:
-                techlook.background(size, work / f"bg{i}.png", seed=video_id * 100 + i)
+                techlook.background(size, work / f"bg{i}.png", seed=video_id)          # cùng 1 nền cho cả clip
             elif expl:
-                explainer.background(size, work / f"bg{i}.png", seed=video_id * 100 + i)
+                explainer.background(size, work / f"bg{i}.png", seed=video_id)
             else:
                 render_background(None, size, cfg["color"], work / f"bg{i}.png", "none", seed=video_id * 100 + i)
 
@@ -1377,18 +1503,20 @@ def render(video_id: int):
                 t = end
         step(f"Cảnh {i + 1}/{total}: dựng video")
         try:
-            render_scene(work, i, size, dur, bg_video, layers, captions)
+            render_scene(work, i, size, dur, bg_video, layers, captions, fade_out=0.3 if expl else 0.0,
+                         pan=(i / total, (i + 1) / total) if expl else None)
         except VideoError as e:
             if not bg_video:
                 raise VideoError(f"Cảnh {i + 1}: {e}") from e
             _log(f"Cảnh {i + 1}: video nền lỗi, dùng nền tĩnh — {str(e)[:120]}")      # video tải về hỏng → nền tĩnh, không bỏ cả clip
             if tech:
-                techlook.background(size, work / f"bg{i}.png", seed=video_id * 100 + i)
+                techlook.background(size, work / f"bg{i}.png", seed=video_id)
             elif expl:
-                explainer.background(size, work / f"bg{i}.png", seed=video_id * 100 + i)
+                explainer.background(size, work / f"bg{i}.png", seed=video_id)
             else:
                 render_background(None, size, cfg["color"], work / f"bg{i}.png", "none", seed=video_id * 100 + i)
-            render_scene(work, i, size, dur, False, layers, captions)
+            render_scene(work, i, size, dur, False, layers, captions, fade_out=0.3 if expl else 0.0,
+                         pan=(i / total, (i + 1) / total) if expl else None)
         durations.append(dur)
     music = random.choice(_music_files()) if cfg["music"] and _music_files() else None
     step("Ghép các cảnh + hiệu ứng chuyển cảnh" + (" + nhạc nền" if music else ""))

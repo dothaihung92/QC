@@ -204,36 +204,36 @@ def highlight_flags(words: list, terms: list) -> list:
     return flags
 
 
-def caption_layer(L, words: list, dest: Path):
-    """Phụ đề chữ đậm màu mực; words = [(từ, có tô vàng không)] — từ khóa tô vàng như bút dạ quang."""
+def caption_layer(L, words: list, active: int, dest: Path):
+    """Phụ đề chữ đậm màu mực; từ đang được đọc (chỉ số active) được tô vàng như bút dạ quang."""
     ov = Image.new("RGBA", (L.W, L.H), (0, 0, 0, 0))
     d = ImageDraw.Draw(ov)
     f = V._font(int(L.base * 0.05), bold=True)
     space = d.textlength(" ", font=f)
     lines, cur, cur_w = [], [], 0.0
-    for w, flag in words:
+    for w in words:
         ww = d.textlength(w, font=f)
         if cur and cur_w + space + ww > L.W - 3 * L.pad:
             lines.append(cur)
             cur, cur_w = [], 0.0
-        cur.append((w, flag, ww))
+        cur.append((w, ww))
         cur_w += ww + (space if len(cur) > 1 else 0)
     if cur:
         lines.append(cur)
     lines = lines[:3]
     lh = int(f.size * 1.4)
     top = int(L.H * (0.865 if L.vertical else 0.88)) - lh * len(lines) // 2
+    wi = 0
     for k, line in enumerate(lines):
-        x = (L.W - (sum(w[2] for w in line) + space * (len(line) - 1))) / 2
+        x = (L.W - (sum(w[1] for w in line) + space * (len(line) - 1))) / 2
         y = top + k * lh
-        for idx, (w, flag, ww) in enumerate(line):
-            if flag:
+        for w, ww in line:
+            if wi == active:
                 p = int(f.size * 0.12)
-                nxt = idx + 1 < len(line) and line[idx + 1][1]
-                d.rounded_rectangle((x - p, y + lh * 0.12, x + ww + (space if nxt else p), y + lh * 0.92),
-                                    radius=int(p * 0.8), fill=HIGHLIGHT + (255,))
+                d.rounded_rectangle((x - p, y + lh * 0.12, x + ww + p, y + lh * 0.92), radius=int(p * 0.8), fill=HIGHLIGHT + (255,))
             d.text((x, y + lh / 2), w, font=f, fill=INK, anchor="lm")
             x += ww + space
+            wi += 1
     return V._save_layer(ov, dest)
 
 
@@ -412,19 +412,8 @@ def render_page(L, sc, i, total, work: Path, dur: float, voice_len: float, brand
         flt.append(f"[{hand_at + j}:v]format=rgba[hd{k}]")
         flt.append(f"[{cur}][hd{k}]overlay=x='{hxx}':y='{hyy}':enable='between(t,{s0:.2f},{s0 + dd + 0.12:.2f})':eof_action=repeat[ho{k}]")
         cur = f"ho{k}"
-    captions, chunks = [], V.caption_chunks(sc["narration"], 7)
-    weights = [len(c) + 8 for c in chunks]
-    all_words = " ".join(chunks).split()
-    flags = highlight_flags(all_words, sc.get("hl") or [])
-    t, pos_w = 0.0, 0
-    for k, c in enumerate(chunks):
-        end = dur if k == len(chunks) - 1 else t + voice_len * weights[k] / sum(weights)
-        cw = c.split()
-        p = caption_layer(L, list(zip(cw, flags[pos_w:pos_w + len(cw)])), work / f"dc{i}_{k}.png")
-        pos_w += len(cw)
-        if p:
-            captions.append((f"dc{i}_{k}.png", p, t, end))
-        t = end
+    captions = V.karaoke_captions(L, work, f"dc{i}", sc["narration"], work / f"voice{i}.mp3", dur, voice_len,
+                                  lambda w, k, dest: caption_layer(L, w, k, dest), 7)
     for name, (x, y), a, b in captions:
         inputs += ["-framerate", str(fps), "-i", name]
         flt.append(f"[{n}:v]format=rgba,loop=loop=-1:size=1:start=0,setpts=N/{fps}/TB[l{n}]")

@@ -125,12 +125,11 @@ def _key_word(words):
     return max(long_, key=len) if long_ else max(words, key=len)
 
 
-def caption_layer(L, text, dest: Path):
-    words = text.split()
+def caption_layer(L, words, active, dest: Path):
+    """Phụ đề vàng chữ hẹp; từ đang được đọc (chỉ số active) nổi lên trên nền tím."""
     if not words:
         return None
     size = int(L.base * 0.072)
-    key = _key_word(words)
     imgs = [cond_text(w, size, fill=YELLOW, scale=0.84) for w in words]
     space = int(size * 0.28)
     lines, cur, cur_w = [], [], 0
@@ -145,19 +144,19 @@ def caption_layer(L, text, dest: Path):
     d = ImageDraw.Draw(ov)
     lh = int(size * 1.45)
     top = L.cap_y - lh * len(lines) // 2
-    marked = False
+    wi = 0
     for li, line in enumerate(lines):
         total = sum(im.width for _, im in line) + space * (len(line) - 1)
         x = (L.W - total) / 2
         y = top + li * lh
         for w, im in line:
-            if w == key and not marked:
-                marked = True
+            if wi == active:
                 p = int(size * 0.16)
                 d.rounded_rectangle((x - p, y - p // 2, x + im.width + p, y + im.height + p), radius=p,
                                     fill=PURPLE + (255,))
             ov.alpha_composite(im, (int(x), int(y + (lh - im.height) / 2 - size * 0.18)))
             x += im.width + space
+            wi += 1
     return V._save_layer(ov, dest)
 
 
@@ -183,8 +182,13 @@ def _split_item(t):
 
 class Cards:
     """Gom các lớp của 1 cảnh: mỗi lớp là 1 PNG đã cắt gọn + thời điểm hiện + kiểu chuyển động."""
-    def __init__(self, L, work: Path, i: int):
+    def __init__(self, L, work: Path, i: int, span: float = 8.0):
         self.L, self.work, self.i, self.out, self.n = L, work, i, [], 0
+        self.span = span                    # độ dài lời đọc của cảnh: các mục hiện dần rải đều theo lời đọc
+
+    def when(self, k: int, n: int, base: float = 0.5) -> float:
+        """Giây hiện của mục thứ k trong n mục: mục đầu ngay, các mục sau rải trong ~75% lời đọc."""
+        return base + max(0.0, self.span * 0.75 - base) * k / max(1, n)
 
     def new(self):
         return Image.new("RGBA", (self.L.W, self.L.H), (0, 0, 0, 0))
@@ -276,7 +280,7 @@ def _list(c: Cards, sc, top, bottom):
         for line in dl:
             d.text((tx, ty), line, font=fd, fill=BODY, anchor="lt")
             ty += ld
-        c.add(ov, 0.4 + 0.5 * k)
+        c.add(ov, c.when(k, len(rows), 0.4))
         y += h + gap
 
 
@@ -326,7 +330,49 @@ def _flow(c: Cards, sc, top, bottom):
         for line in tb:
             d.text((cx - cw // 2 + int(L.pad * 0.4), y), line, font=ft, fill=BODY, anchor="lt")
             y += lh
-        c.add(ov, 0.95 + 0.4 * k)
+        c.add(ov, c.when(k + 1, n + 1, 0.95))
+
+
+def _calc(c: Cards, sc, top, bottom):
+    """Ví dụ tính toán từng bước: bảng "Nội dung | Số tiền", dòng cuối là kết quả nổi bật. Mỗi dòng hiện khi lời đọc tới."""
+    L = c.L
+    rows = [_split_item(t) for t in sc["items"][:6]]
+    meas = ImageDraw.Draw(c.new())
+    x0, x1 = L.pad, L.W - L.pad
+    inner = x1 - x0 - 2 * L.pad
+    scale = 1.0
+    while True:
+        fl = V._font(max(14, int(L.base * 0.042 * scale)))
+        fv = V._font(max(14, int(L.base * 0.05 * scale)), bold=True)
+        lh = int(max(fl.size, fv.size) * 1.45)
+        wrapped = [(_wrap_text(meas, a or b, fl, int(inner * 0.58), 3), v if a else "") for a, v in
+                   [(a, b) for a, b in rows]]
+        heights = [max(lh, len(w) * int(fl.size * 1.3)) + int(L.pad * 0.55) for w, _ in wrapped]
+        if sum(heights) + L.pad <= bottom - top or scale < 0.55:
+            break
+        scale *= 0.93
+    total_h = sum(heights) + L.pad
+    ov = c.new()
+    _glass(ov, (x0, top, x1, top + total_h))
+    c.add(ov, 0.25, "rise")
+    y = top + L.pad // 2
+    for k, ((lines, val), h) in enumerate(zip(wrapped, heights)):
+        last = k == len(wrapped) - 1 and len(wrapped) > 1
+        ov = c.new()
+        d = ImageDraw.Draw(ov)
+        if last:                                          # dòng kết quả: nền nổi bật
+            d.rounded_rectangle((x0 + 10, y, x1 - 10, y + h), radius=14, fill=(255, 190, 70, 60), outline=GOLD1 + (255,), width=3)
+        elif k:
+            d.line((x0 + L.pad, y, x1 - L.pad, y), fill=(72, 140, 172, 110), width=2)
+        for j, line in enumerate(lines):
+            d.text((x0 + L.pad, y + h / 2 + (j - (len(lines) - 1) / 2) * int(fl.size * 1.3)), line, font=fl,
+                   fill=(255, 235, 190, 255) if last else BODY, anchor="lm")
+        if val:
+            col = GOLD2 if last else (120, 255, 205)
+            d.text((x1 - L.pad, y + h / 2), val, font=fv, fill=col + (255,), anchor="rm")
+        c.add(ov, c.when(k, len(wrapped), 0.7), "rise")
+        y += h
+    return top + total_h
 
 
 def _steps(c: Cards, sc, top, bottom):
@@ -356,7 +402,7 @@ def _steps(c: Cards, sc, top, bottom):
         for line in dl:
             d.text((cx + r + int(L.pad * 0.5), ty), line, font=fd, fill=BODY, anchor="lt")
             ty += ld
-        c.add(ov, 0.4 + 0.55 * k, "slide")
+        c.add(ov, c.when(k, len(rows), 0.4), "slide")
         y += h + gap
 
 
@@ -367,7 +413,7 @@ def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_l
     if pos:
         layers.append((f"xh{i}.png", pos, 0.0, "head"))
     top, bottom = int(L.H * 0.255), int(L.H * 0.70)
-    c = Cards(L, work, i)
+    c = Cards(L, work, i, voice_len)
     typ, items = sc["type"], sc["items"]
     if typ == "stat" and sc["big"]:
         _stat(c, sc, top, bottom)
@@ -375,6 +421,8 @@ def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_l
         _flow(c, sc, top, bottom)
     elif typ == "steps" and items:
         _steps(c, sc, top, bottom)
+    elif typ == "calc" and items:
+        _calc(c, sc, top, bottom)
     elif items:
         _list(c, sc, top, bottom)
     layers += c.out
@@ -384,14 +432,7 @@ def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_l
                                 fill=(190, 215, 225, 170), anchor="mm")
         pos = V._save_layer(ov, work / f"xb{i}.png")
         if pos:
-            layers.append((f"xb{i}.png", pos, 0.0, "none"))
-    captions, chunks = [], V.caption_chunks(sc["narration"], 5)
-    weights = [len(ch) + 6 for ch in chunks]
-    t = 0.0
-    for k, ch in enumerate(chunks):
-        end = dur if k == len(chunks) - 1 else t + voice_len * weights[k] / sum(weights)
-        p = caption_layer(L, ch, work / f"xc{i}_{k}.png")
-        if p:
-            captions.append((f"xc{i}_{k}.png", p, t, end))
-        t = end
+            layers.append((f"xb{i}.png", pos, 0.0, "keep"))
+    captions = V.karaoke_captions(L, work, f"xc{i}", sc["narration"], work / f"voice{i}.mp3", dur, voice_len,
+                                  lambda w, k, dest: caption_layer(L, w, k, dest), 5)
     return layers, captions

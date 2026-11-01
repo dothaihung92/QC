@@ -481,3 +481,32 @@ def test_join_many_scenes_in_groups_with_transitions_and_fallback(tmp_path, monk
     video.join_scenes(tmp_path, [1.5] * n, out2, None, 0.3, ["fade"])
     assert abs(video.media_duration(out2) - 1.5 * n) < 0.4 and any("nối thẳng" in l for l in video.state["log"])
     monkeypatch.setattr(video, "_xfade_group", real)
+
+
+@pytest.mark.skipif(not HAS_TOOLS, reason="cần pillow + imageio-ffmpeg")
+def test_align_words_snaps_sentences_to_real_pauses(tmp_path):
+    video._ffmpeg(["-f", "lavfi", "-i", "aevalsrc='if(lt(mod(t,2.0),1.5),0.5*sin(2*PI*300*t),0)':d=6", "-c:a", "libmp3lame",
+                   "a.mp3"], tmp_path)
+    begin, end, sils = video.speech_span(tmp_path / "a.mp3", 6.0)
+    assert begin < 0.1 and 5.3 < end < 5.7 and len(sils) == 2
+    words = "Một hai ba bốn, năm sáu bảy tám, chín mười.".split()
+    t = video.align_words(words, tmp_path / "a.mp3", 6.0)
+    assert len(t) == 10 and t == sorted(t)
+    assert abs(t[4] - 2.0) < 0.15 and abs(t[8] - 4.0) < 0.15            # từ đầu câu sau khoảng lặng khớp với âm thanh thật
+    assert video.align_words([], tmp_path / "a.mp3", 6.0) == []
+    assert len(video.align_words(words, tmp_path / "không-có.mp3", 6.0)) == 10   # file lỗi vẫn chia theo độ dài chữ
+
+
+def test_calc_scene_and_karaoke_layers(tmp_path):
+    from app import explainer, techlook
+    L = video.Layout((720, 1280))
+    sc = video.clean_scenes([{"type": "calc", "headline": "A|B", "tag": "VÍ DỤ", "narration": "Doanh thu tám tỷ đồng. Thuế hai trăm triệu.",
+                              "items": ["Doanh thu | 8 tỷ", "Thuế | 200 triệu", "Giảm 30% | − 60 triệu", "Thực nộp | 140 triệu"]}])[0]
+    assert sc["type"] == "calc"
+    for mod in (techlook, explainer):
+        if HAS_TOOLS:
+            video._ffmpeg(["-f", "lavfi", "-i", "sine=duration=3", "-c:a", "libmp3lame", "voice0.mp3"], tmp_path)
+        layers, caps = mod.build(L, sc, 0, 1, tmp_path, "", 3.5, 3.0)
+        assert len([n for n, *_ in layers if n.startswith("xl0_")]) >= 5          # nền bảng + 4 dòng hiện dần
+        assert len(caps) >= 7 and caps[0][2] == 0.0 and caps[-1][3] == 3.5          # mỗi từ một trạng thái, liền nhau
+        assert all(a[3] <= b[2] + 1e-6 for a, b in zip(caps, caps[1:]))
