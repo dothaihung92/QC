@@ -310,6 +310,32 @@ def _is_hard_error(e: Exception) -> bool:
                                   "http 400", "http 401", "http 403", "http 404"))
 
 
+def panel_arts(sc, gkey: str, state: AIState, log, use_ai: bool = True) -> list:
+    """Hình AI (bytes) cho từng hình trong cảnh minh họa; None = dùng bộ hình phác thảo có sẵn. Vẽ song song, dừng sớm khi lỗi cứng."""
+    panels = sc["panels"][:4]
+
+    def one(k):
+        pv = panels[k]
+        if not (use_ai and gkey and pv.get("visual")) or state.off:
+            return None
+        try:
+            art = aimedia.image(IMG_STYLE + pv["visual"], "1:1", gkey)
+            state.ok += 1
+            return art
+        except aimedia.AIError as e:
+            state.fails += 1
+            if not state.reason:
+                state.reason = str(e)[:300]
+            if _is_hard_error(e) and not state.ok:
+                state.off = True
+                log(f"⚠ Gemini không vẽ được hình ({str(e)[:200]}) — dùng bộ hình phác thảo có sẵn.")
+            else:
+                log(f"Hình \"{pv.get('label', '')}\": vẽ AI lỗi, dùng hình phác thảo có sẵn — {str(e)[:140]}")
+            return None
+    with ThreadPoolExecutor(max_workers=3 if use_ai and gkey and not state.off else 1) as ex:
+        return list(ex.map(one, range(len(panels))))
+
+
 def make_panels(sc, size, work: Path, i: int, gkey: str, log, use_ai: bool, state: AIState = None,
                 pen: str = "wipe", dur: float = 0.0):
     """Tạo ảnh các khung của 1 trang (vẽ AI song song nếu có key). Trả về [(file, (x,y,w,h), label)]."""

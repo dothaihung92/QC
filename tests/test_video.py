@@ -107,7 +107,7 @@ def test_long_clip_script_retries_when_too_short(client, monkeypatch):
     v = client.post("/api/videos", json={"text": "Nội dung bài viết về thuế. " * 10, "seconds": 180}).json()
     assert len(v["scenes"]) == 20 and v["scenes"][0]["items"] == ["Ý một", "Ý hai", "Ý ba"]
     assert "20 cảnh" in prompts[0] and "432 từ" in prompts[0] and "QUÁ NGẮN" in prompts[1]
-    assert "NGƯỜI LỚN TUỔI" in prompts[0] and "bác" in prompts[0]                  # mặc định viết cho người lớn tuổi
+    assert "DỄ HIỂU TỐI ĐA" in prompts[0] and "không gọi bác" in prompts[0]        # mặc định: chế độ dễ hiểu nhất, xưng "bạn"
     assert 200 < video.estimate_seconds(v["scenes"]) < 260                        # người lớn tuổi đọc chậm hơn (2,4 từ/giây)
 
 
@@ -520,7 +520,7 @@ def test_audience_general_uses_normal_pace_and_senior_recap_banner(client, monke
     monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: prompts.append(p) or {"scenes": [
         {"type": "list", "headline": "A|B", "narration": "Lời đọc " * 20, "items": ["Tiêu đề | giải thích đủ dài để vượt qua ngưỡng"] * 3}] * 20})
     client.post("/api/videos", json={"text": "Nội dung bài viết về thuế. " * 10, "seconds": 180})
-    assert "540 từ" in prompts[0] and "NGƯỜI LỚN TUỔI" not in prompts[0]
+    assert "540 từ" in prompts[0] and "DỄ HIỂU TỐI ĐA" not in prompts[0]
     assert video.save_config({"audience": "xx"})["audience"] == "senior"
     L = video.Layout((720, 1280))
     L.ts = 1.25
@@ -531,3 +531,41 @@ def test_audience_general_uses_normal_pace_and_senior_recap_banner(client, monke
         video._ffmpeg(["-f", "lavfi", "-i", "sine=duration=3", "-c:a", "libmp3lame", "voice0.mp3"], tmp_path)
     layers, caps = explainer.build(L, sc, 0, 1, tmp_path, "", 3.5, 3.0)
     assert "xr0.png" in [n for n, *_ in layers]
+
+
+def test_visual_bars_and_loss_calc_scenes(tmp_path):
+    from app import doodle, explainer, techlook
+    assert explainer.parse_money("500 triệu") == 500 and explainer.parse_money("− 30 triệu") == -30
+    assert explainer.parse_money("2 tỷ đồng") == 2000 and explainer.parse_money("không có số") is None
+    L = video.Layout((720, 1280))
+    L.ts = 1.25
+    seen = []
+
+    def illus(k, wh):
+        seen.append((k, wh))
+        return doodle.panel_image(None, f"Hình {k}", wh, seed=k, visual="shop")
+    vis = video.clean_scenes([{"type": "visual", "headline": "A|B", "narration": "Lời đọc.", "recap": "Tóm lại ok",
+                               "panels": [{"label": f"H{k}", "visual": "v"} for k in range(4)]}])[0]
+    assert vis["type"] == "visual" and len(vis["panels"]) == 4
+    for mod in (techlook, explainer):
+        seen.clear()
+        layers, caps = mod.build(L, vis, 0, 1, tmp_path, "", 4.0, 3.0, illus=illus)
+        assert len(seen) == 4 and len([n for n, *_ in layers if n.startswith("xl0_")]) == 4
+    bars = video.clean_scenes([{"type": "bars", "headline": "A|B", "narration": "Lời đọc.",
+                                "items": ["Doanh thu | 500 triệu", "Giá vốn | 300 triệu", "Chi phí | 120 triệu", "Lãi | 80 triệu"]}])[0]
+    loss = video.clean_scenes([{"type": "calc", "headline": "A|B", "narration": "Lời đọc.",
+                                "items": ["Doanh thu | 200 triệu", "Chi phí | 230 triệu", "Lỗ | − 30 triệu"]}])[0]
+    bad = video.clean_scenes([{"type": "bars", "headline": "A|B", "narration": "Lời đọc.", "items": ["A | nhiều", "B | ít"]}])[0]
+    for sc in (bars, loss, bad):                                        # bars không đọc được số → tự quay về danh sách
+        layers, caps = techlook.build(L, sc, 1, 1, tmp_path, "", 4.0, 3.0)
+        assert layers and caps
+
+
+def test_audience_prompt_asks_for_profit_loss_examples_and_visuals(client, monkeypatch):
+    video.save_config({"look": "tech", "audience": "senior"})
+    prompts = []
+    monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: prompts.append(p) or {"scenes": [
+        {"type": "list", "headline": "A|B", "narration": "Lời " * 30, "items": ["T | giải thích đủ dài để vượt ngưỡng chi tiết"] * 3}] * 12})
+    client.post("/api/videos", json={"text": "Nội dung thuế về lãi lỗ. " * 10, "seconds": 120})
+    p = prompts[0]
+    assert "CÓ LÃI" in p and "BỊ LỖ" in p and "\"visual\"" in p and "bạn" in p and "không gọi bác" in p

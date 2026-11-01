@@ -340,7 +340,7 @@ def caption_layer(L, words: list, active: int, dest: Path):
     return V._save_layer(ov, dest)
 
 
-def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_len: float):
+def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_len: float, illus=None):
     layers = []
     pos, hb = header(L, sc, i, work)
     if pos:
@@ -371,6 +371,10 @@ def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_l
         X._steps(c, sc, top, bottom)
     elif typ == "calc" and sc["items"]:
         X._calc(c, sc, top, bottom)
+    elif typ == "bars" and sc["items"]:
+        X._bars(c, sc, top, bottom)
+    elif typ == "visual" and sc["panels"]:
+        X._visual(c, sc, top, bottom, illus)
     elif sc["items"]:
         X._list(c, sc, top, bottom)
     elif sc["chips"]:

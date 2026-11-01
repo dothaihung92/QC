@@ -291,10 +291,28 @@ def github_source(url: str) -> dict:
 
 # ---------------------------------------------------------------- 1. kịch bản
 
-SENIOR_BLOCK = '\n\nĐỐI TƯỢNG XEM LÀ NGƯỜI LỚN TUỔI (rất quan trọng, ưu tiên hơn mọi quy tắc về độ ngắn gọn):\n- Gọi người xem là "bác" (hoặc "cô chú"), giọng ấm áp, kiên nhẫn, như con cháu đang giải thích cho ông bà nghe.\n- MỖI CÂU CHỈ MỘT Ý, tối đa 12 từ. Dùng toàn từ thông thường; KHÔNG dùng từ tiếng Anh, không viết tắt, không từ hàn lâm.\n  Thuật ngữ bắt buộc phải nhắc (vd "doanh thu", "kê khai") thì giải nghĩa NGAY bằng lời đời thường ("doanh thu là tổng số tiền bán hàng thu được").\n- Đi chậm từng bước: nói điều gì đó → lấy ví dụ đời thường → nhắc lại. Cuối mỗi cảnh có 1 câu nhắc lại ý chính, bắt đầu bằng "Bác nhớ giúp là..." hoặc "Tóm lại...".\n- Số tiền nói đầy đủ, rõ ràng ("hai trăm triệu đồng"); ví dụ dùng người quen thuộc (bác bán tạp hóa, cô bán bún, chú sửa xe) và con số tròn, dễ nhẩm.\n- Trên màn hình mỗi cảnh TỐI ĐA 3 mục (chữ sẽ rất to): tiêu đề tối đa 5 từ, giải thích tối đa 15 từ. Thêm trường "recap": câu ghi nhớ ngắn (tối đa 12 từ) hiện thành khung nổi bật, vd "Doanh thu dưới 10 tỷ thì được giảm 30% thuế".\n- Mỗi quy định chỉ giải thích MỘT ĐIỀU trong một cảnh; cần nói nhiều thì chia thành nhiều cảnh.\n'
+SENIOR_BLOCK = (
+    "\n\nCHẾ ĐỘ DỄ HIỂU TỐI ĐA (rất quan trọng, ưu tiên hơn mọi quy tắc về độ ngắn gọn). Người xem không rành về thuế / kế toán, "
+    "nhiều người đã lớn tuổi: nghe và nhìn một lần phải HIỂU và HÌNH DUNG ĐƯỢC.\n"
+    "- Xưng hô thân thiện: gọi người xem là \"bạn\" (không gọi bác, cô chú, anh chị).\n"
+    "- MỖI CÂU CHỈ MỘT Ý, tối đa 14 từ. Dùng từ thông thường; KHÔNG dùng từ tiếng Anh, không viết tắt, không từ hàn lâm. "
+    "Thuật ngữ bắt buộc phải nhắc (doanh thu, giá vốn, kê khai...) thì giải nghĩa NGAY bằng lời đời thường.\n"
+    "- LUÔN LẤY VÍ DỤ CỤ THỂ, HÌNH DUNG ĐƯỢC: một cửa hàng / hộ kinh doanh có tên và mặt hàng thật (vd \"cửa hàng quần áo của chị Lan\", "
+    "\"quán bún của anh Nam\") với số tiền cụ thể, con số tròn dễ nhẩm. Không nói chung chung.\n"
+    "- VÍ DỤ TÍNH LÃI / LỖ (bắt buộc khi nội dung liên quan thuế, doanh thu, chi phí): tính TỪNG BƯỚC "
+    "Doanh thu − Giá vốn hàng bán − Chi phí = Lãi (hoặc Lỗ), rồi mới tới thuế. Phải có ĐỦ HAI ví dụ: một cửa hàng CÓ LÃI (tính ra tiền thuế) "
+    "và một cửa hàng BỊ LỖ (nói rõ trường hợp lỗ ảnh hưởng thế nào tới thuế theo nội dung nguồn; nếu nguồn không nói thì ghi \"cần đối chiếu văn bản gốc\"). "
+    "Phép tính phải ĐÚNG. Dùng cảnh \"calc\" (bảng tính từng dòng; dòng cuối là Lãi hoặc Lỗ) và cảnh \"bars\" (biểu đồ cột: "
+    "items là các dòng \"Nhãn | số tiền\" như \"Doanh thu | 500 triệu\", \"Giá vốn | 300 triệu\", \"Chi phí | 120 triệu\", \"Lãi | 80 triệu\").\n"
+    "- HÌNH MINH HỌA CỤ THỂ: ít nhất MỘT NỬA số cảnh là cảnh type \"visual\" gồm 2-4 hình trong \"panels\", mỗi hình có \"label\" (nhãn tiếng Việt tối đa 4 từ) "
+    "và \"visual\" (2-3 câu TIẾNG ANH mô tả một cảnh nhỏ chi tiết minh họa đúng ý đang nói: cửa hàng, hàng hóa, tiền, hóa đơn, máy tính, "
+    "người bán / người mua với biểu cảm, mũi tên chỉ dòng tiền; không có chữ trong hình). Cảnh visual đặt NGAY TRƯỚC cảnh giải thích chi tiết cùng ý đó.\n"
+    "- Cuối mỗi cảnh có 1 câu nhắc lại ý chính bắt đầu bằng \"Tóm lại...\"; điền câu đó vào \"recap\" (tối đa 12 từ).\n"
+    "- Trên màn hình mỗi cảnh chữ sẽ rất to nên TỐI ĐA 3 mục: tiêu đề tối đa 5 từ, giải thích tối đa 15 từ. Mỗi cảnh chỉ giải thích MỘT điều; cần nói nhiều thì chia thành nhiều cảnh.\n"
+)
 SENIOR_WPS = 2.4                 # người lớn tuổi: đọc chậm hơn (từ / giây)
 WORDS_PER_SEC = 3.0                  # tốc độ đọc tiếng Việt trung bình của giọng máy (đo từ clip thật)
-SCENE_TYPES = ("hook", "stat", "list", "flow", "steps", "text", "cta", "doodle", "hero", "browser", "calc")
+SCENE_TYPES = ("hook", "stat", "list", "flow", "steps", "text", "cta", "doodle", "hero", "browser", "calc", "visual", "bars")
 DOODLE_PAGES = {30: 3, 45: 4, 60: 5, 120: 8, 180: 12}   # giây → số trang của clip vẽ tay (~15 giây / trang)
 
 SCRIPT_PROMPT = """Bạn là biên tập viên video (Facebook Reels / TikTok / YouTube) cho một công ty dịch vụ kế toán - thuế ở Việt Nam.
@@ -334,7 +352,7 @@ Mỗi cảnh phải có 3-5 mục thông tin CHI TIẾT hiện trên màn hình,
 Chỉ dùng thông tin có trong nội dung nguồn; chỗ nguồn chưa nói rõ thì ghi "cần đối chiếu văn bản gốc", không tự bịa.
 
 Mỗi cảnh có phần hình trên màn hình:
-- type: "hook" | "stat" | "list" | "flow" | "steps" | "calc" | "text" | "cta"
+- type: "hook" | "stat" | "list" | "flow" | "steps" | "calc" | "bars" | "visual" | "text" | "cta"
   ("flow" = sơ đồ cây: items[0] là ý gốc, các items sau là 2-4 nhánh con, mỗi nhánh dạng "Tiêu đề ngắn | mô tả ngắn";
    "steps" = các bước nối tiếp nhau; "list" = các ý song song; "stat" = một con số nổi bật. Dùng đa dạng các kiểu.)
 - headline: tiêu đề lớn gồm 2 DÒNG NGẮN ngăn bằng dấu "|", tổng tối đa 7 từ, vd "GIẢM 30% THUẾ|CHO HỘ KINH DOANH".
@@ -419,7 +437,7 @@ Lời đọc: câu ngắn tự nhiên như người dẫn chương trình, xưng
 
 Mỗi cảnh có:
 - type: "hero" (cảnh đầu: logo + tiêu đề + 4-6 chip), "stat" (một con số nổi bật + biểu đồ), "browser" (cửa sổ trình duyệt hiển thị đoạn trích / ví dụ),
-  "steps" (các bước), "calc" (ví dụ tính toán từng bước), "list" (các ý), "flow" (sơ đồ cây), "cta" (cảnh cuối: câu hỏi + nút), "text".
+  "steps" (các bước), "calc" (ví dụ tính toán từng bước), "bars" (biểu đồ cột các khoản tiền), "visual" (2-4 hình minh họa trong "panels"), "list" (các ý), "flow" (sơ đồ cây), "cta" (cảnh cuối: câu hỏi + nút), "text".
 - tag: nhãn nhỏ phía trên, viết hoa, vd "01 — ÁP DỤNG", "BẢO MẬT" (tối đa 4 từ).
 - headline: tiêu đề 2 DÒNG ngăn bằng "|", tổng tối đa 7 từ, dòng 2 sẽ tô xanh, vd "Cho AI “mắt”|nhìn Internet".
 - chips: các nhãn ngắn hiện thành chip, mỗi chip dạng "biểu_tượng|Nhãn" với biểu_tượng thuộc: lock, check, warn, star, search, globe, play, bell, chat, no, bolt, doc (vd "lock|Cần đăng nhập"). Cảnh "hero" cần 4-6 chip.
@@ -1494,7 +1512,16 @@ def render(video_id: int):
 
         if expl:
             builder = techlook.build if tech else explainer.build
-            layers, captions = builder(L, sc, i, total, work, cfg["brand"], dur, voice_len)
+            illus_fn = None
+            if sc["type"] == "visual" and sc["panels"]:
+                step(f"Cảnh {i + 1}/{total}: vẽ hình minh họa" + (" (AI)" if gkey else ""))
+                arts = doodle.panel_arts(sc, gkey, ai_state, _log)
+
+                def illus_fn(k, wh, sc=sc, arts=arts, i=i):
+                    pv = sc["panels"][k]
+                    return doodle.panel_image(arts[k] if k < len(arts) else None, pv.get("label", ""), wh, seed=i * 10 + k,
+                                              visual=pv.get("visual", ""))
+            layers, captions = builder(L, sc, i, total, work, cfg["brand"], dur, voice_len, illus=illus_fn)
         else:
             layers = []
             pos = _frame_layer(L, cfg["color"], cfg["brand"], i, total, work / f"frame{i}.png")
@@ -1541,7 +1568,10 @@ def render(video_id: int):
             p.unlink(missing_ok=True)
     length = sum(durations) - trans * (len(durations) - 1)
     note = ""
-    if paper and not gkey:
+    if (paper or ai_state.fails or ai_state.ok) and ai_state.fails and not paper:
+        note = (f"Hình minh họa: AI vẽ được {ai_state.ok} hình, {ai_state.fails} hình lỗi nên dùng hình phác thảo có sẵn. "
+                f"Lý do: {ai_state.reason}")
+    elif paper and not gkey:
         note = "Chưa có Gemini key nên dùng bộ hình phác thảo có sẵn. Nhập key ở tab Tin tức AI để AI vẽ hình riêng cho từng cảnh."
     elif paper and ai_state.fails:
         note = (f"AI vẽ được {ai_state.ok} hình, {ai_state.fails} hình lỗi nên dùng hình phác thảo có sẵn. "

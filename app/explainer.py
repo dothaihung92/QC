@@ -360,21 +360,118 @@ def _calc(c: Cards, sc, top, bottom):
     y = top + L.pad // 2
     for k, ((lines, val), h) in enumerate(zip(wrapped, heights)):
         last = k == len(wrapped) - 1 and len(wrapped) > 1
+        loss = last and (str(val).strip()[:1] in "−-–" or "lỗ" in " ".join(lines).lower())
         ov = c.new()
         d = ImageDraw.Draw(ov)
         if last:                                          # dòng kết quả: nền nổi bật
-            d.rounded_rectangle((x0 + 10, y, x1 - 10, y + h), radius=14, fill=(255, 190, 70, 60), outline=GOLD1 + (255,), width=3)
+            d.rounded_rectangle((x0 + 10, y, x1 - 10, y + h), radius=14,
+                                fill=(244, 112, 104, 60) if loss else (255, 190, 70, 60), outline=(244, 112, 104, 255) if loss else GOLD1 + (255,), width=3)
         elif k:
             d.line((x0 + L.pad, y, x1 - L.pad, y), fill=(72, 140, 172, 110), width=2)
         for j, line in enumerate(lines):
             d.text((x0 + L.pad, y + h / 2 + (j - (len(lines) - 1) / 2) * int(fl.size * 1.3)), line, font=fl,
                    fill=(255, 235, 190, 255) if last else BODY, anchor="lm")
         if val:
-            col = GOLD2 if last else (120, 255, 205)
+            col = (255, 150, 140) if loss else GOLD2 if last else (120, 255, 205)
             d.text((x1 - L.pad, y + h / 2), val, font=fv, fill=col + (255,), anchor="rm")
         c.add(ov, c.when(k, len(wrapped), 0.7), "rise")
         y += h
     return top + total_h
+
+
+def _visual_boxes(L, top: int, bottom: int, n: int) -> list:
+    """Khung đặt các hình minh họa trong vùng [top, bottom]: 1-2 hình xếp dọc, 3 hình (1 to + 2 nhỏ), 4 hình lưới 2×2."""
+    pad, gap = L.pad, int(L.pad * 0.5)
+    w_all, h_all = L.W - 2 * pad, bottom - top
+    n = max(1, min(4, n))
+    if n == 1:
+        s_ = min(w_all, h_all)
+        return [((L.W - s_) // 2, top + (h_all - s_) // 2, s_, s_)]
+    if n == 2:
+        h = (h_all - gap) // 2
+        return [(pad, top + k * (h + gap), w_all, h) for k in range(2)]
+    h = (h_all - gap) // 2
+    cw = (w_all - gap) // 2
+    if n == 3:
+        return [(pad, top, w_all, h), (pad, top + h + gap, cw, h), (pad + cw + gap, top + h + gap, cw, h)]
+    return [(pad + (k % 2) * (cw + gap), top + (k // 2) * (h + gap), cw, h) for k in range(4)]
+
+
+def _visual(c: Cards, sc, top, bottom, illus):
+    """Cảnh minh họa: 2-4 hình (AI vẽ hoặc bộ hình phác thảo có sẵn) trong khung bo góc, hiện lần lượt theo lời đọc."""
+    L = c.L
+    panels = sc["panels"][:4]
+    boxes = _visual_boxes(L, top, bottom, len(panels))
+    for k, ((x, y, w, h), pv) in enumerate(zip(boxes, panels)):
+        img = illus(k, (w, h)) if illus else None
+        if img is None:
+            continue
+        ov = c.new()
+        sh = Image.new("RGBA", ov.size, (0, 0, 0, 0))
+        ImageDraw.Draw(sh).rounded_rectangle((x + 6, y + 10, x + w + 6, y + h + 10), radius=22, fill=(0, 0, 0, 130))
+        ov.alpha_composite(sh.filter(ImageFilter.GaussianBlur(8)))
+        mask = Image.new("L", (w, h), 0)
+        ImageDraw.Draw(mask).rounded_rectangle((0, 0, w, h), radius=22, fill=255)
+        ov.paste(img.convert("RGB").resize((w, h)), (x, y), mask)
+        ImageDraw.Draw(ov).rounded_rectangle((x, y, x + w, y + h), radius=22, outline=(120, 170, 230, 200), width=3)
+        c.add(ov, c.when(k, len(panels), 0.4), "pop")
+    return bottom
+
+
+_UNIT = {"tỷ": 1000.0, "ty": 1000.0, "triệu": 1.0, "trieu": 1.0, "nghìn": 0.001, "ngàn": 0.001, "đồng": 0.000001}
+
+
+def parse_money(text: str):
+    """"500 triệu" → 500.0 (đơn vị: triệu đồng); "−30 triệu" → -30.0; không đọc được → None."""
+    m = re.search(r"([-−–]?)\s*(\d+(?:[.,]\d+)?)\s*(tỷ|ty|triệu|trieu|nghìn|ngàn|đồng)?", text.lower())
+    if not m:
+        return None
+    num = float(m.group(2).replace(",", "."))
+    val = num * _UNIT.get(m.group(3) or "triệu", 1.0)
+    return -val if m.group(1) else val
+
+
+def _bars(c: Cards, sc, top, bottom):
+    """Biểu đồ cột so sánh các khoản (Doanh thu / Giá vốn / Chi phí / Lãi hoặc Lỗ): lãi xanh lá, lỗ đỏ."""
+    L = c.L
+    rows = [(a, b) for a, b in (_split_item(t) for t in sc["items"][:5]) if b]
+    vals = [parse_money(b) for _, b in rows]
+    if not rows or any(v is None for v in vals):
+        return _list(c, sc, top, bottom)
+    n = len(rows)
+    mx = max(abs(v) for v in vals) or 1.0
+    area_h = bottom - top
+    chart_h = int(area_h * 0.62)
+    gap = int(L.pad * 0.4)
+    bw = (L.W - 2 * L.pad - gap * (n - 1)) // n
+    meas = ImageDraw.Draw(c.new())
+    size_v = int(L.base * 0.06 * getattr(L, "ts", 1.0) / 1.1)
+    fv = V._font(size_v, bold=True)
+    widest = max(rows, key=lambda r: meas.textlength(r[1], font=fv))[1]
+    while meas.textlength(widest, font=fv) > bw - 6 and size_v > 12:       # số tiền phải vừa chiều rộng cột
+        size_v -= 1
+        fv = V._font(size_v, bold=True)
+    fl = V._font(int(min(L.base * 0.045, bw * 0.2)))
+    chart_h = int(area_h * 0.58)
+    base_y = top + int(area_h * 0.14) + chart_h
+    ov = c.new()
+    _glass(ov, (L.pad - 8, top, L.W - L.pad + 8, bottom))
+    ImageDraw.Draw(ov).line((L.pad + 4, base_y, L.W - L.pad - 4, base_y), fill=(120, 150, 190, 255), width=3)
+    c.add(ov, 0.25, "rise")
+    for k, ((label, valtxt), v) in enumerate(zip(rows, vals)):
+        low = label.lower()
+        col = (84, 206, 128) if v >= 0 and ("lãi" in low or "lợi nhuận" in low) else (244, 112, 104) if ("lỗ" in low or v < 0) else \
+              (78, 146, 255) if "doanh thu" in low else (255, 170, 70)
+        h = max(8, int(chart_h * abs(v) / mx))
+        x0 = L.pad + k * (bw + gap)
+        ov = c.new()
+        d = ImageDraw.Draw(ov)
+        d.rounded_rectangle((x0 + 4, base_y - h, x0 + bw - 4, base_y), radius=12, fill=col + (255,))
+        d.text((x0 + bw / 2, base_y - h - int(fv.size * 0.9)), valtxt, font=fv, fill=WHITE + (255,), anchor="mm")
+        for j, line in enumerate(V._wrap(meas, label, fl, bw)[:3]):
+            d.text((x0 + bw / 2, base_y + int(fl.size * 0.9) + j * int(fl.size * 1.2)), line, font=fl, fill=BODY, anchor="mm")
+        c.add(ov, c.when(k, n, 0.5), "rise")
+    return bottom
 
 
 def _steps(c: Cards, sc, top, bottom):
@@ -424,7 +521,7 @@ def recap_layer(L, text: str, dest: Path, fill=(255, 190, 70)):
     return V._save_layer(ov, dest), y0
 
 
-def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_len: float):
+def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_len: float, illus=None):
     """Trả về (các lớp hình, các lớp phụ đề) của 1 cảnh kiểu giải thích."""
     layers = []
     pos = heading_layer(L, sc, work / f"xh{i}.png")
@@ -446,6 +543,10 @@ def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_l
         _steps(c, sc, top, bottom)
     elif typ == "calc" and items:
         _calc(c, sc, top, bottom)
+    elif typ == "bars" and items:
+        _bars(c, sc, top, bottom)
+    elif typ == "visual" and sc["panels"]:
+        _visual(c, sc, top, bottom, illus)
     elif items:
         _list(c, sc, top, bottom)
     layers += c.out
