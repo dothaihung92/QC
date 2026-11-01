@@ -309,6 +309,18 @@ Quy tắc lời đọc (narration) — viết như người dẫn chương trìn
 - KHÔNG viết tắt: viết "thu nhập doanh nghiệp" thay "TNDN", "nghị định" thay "NĐ-CP", "hộ kinh doanh" thay "HKD".
 - Ngày tháng viết kiểu nói: "ngày 29 tháng 10 năm 2026". Không emoji, không ký hiệu markdown.
 
+
+NẾU NỘI DUNG LÀ QUY ĐỊNH / VĂN BẢN PHÁP LUẬT / CHÍNH SÁCH THUẾ, phải giải thích RÕ RÀNG, ĐẦY ĐỦ theo trình tự:
+ 1) Căn cứ pháp lý (số hiệu văn bản, cơ quan ban hành, ngày ban hành, ngày hiệu lực);
+ 2) Đối tượng áp dụng và KHÔNG áp dụng;
+ 3) Điều kiện cụ thể (con số, mốc thời gian, cách xác định);
+ 4) Nội dung / mức ưu đãi / nghĩa vụ và cách tính, kèm ví dụ có số liệu;
+ 5) Thủ tục, hồ sơ, thời hạn thực hiện;
+ 6) Lưu ý, sai sót thường gặp, mức phạt nếu có;
+ 7) Tóm tắt và kêu gọi liên hệ tư vấn.
+Mỗi cảnh phải có 3-5 mục thông tin CHI TIẾT hiện trên màn hình, mỗi mục viết dạng "Tiêu đề ngắn | giải thích đầy đủ 10-25 từ" (không chỉ liệt kê từ khóa).
+Chỉ dùng thông tin có trong nội dung nguồn; chỗ nguồn chưa nói rõ thì ghi "cần đối chiếu văn bản gốc", không tự bịa.
+
 Mỗi cảnh có phần hình trên màn hình:
 - type: "hook" | "stat" | "list" | "flow" | "steps" | "text" | "cta"
   ("flow" = sơ đồ cây: items[0] là ý gốc, các items sau là 2-4 nhánh con, mỗi nhánh dạng "Tiêu đề ngắn | mô tả ngắn";
@@ -371,7 +383,19 @@ Từ nội dung dưới đây (thông tin về một công cụ, phần mềm, r
 
 ĐỘ DÀI (BẮT BUỘC): tổng lời đọc khoảng {total} từ, mỗi cảnh {lo}-{hi} từ.
 
-NỘI DUNG: nói rõ công cụ là gì, giải quyết vấn đề gì, điểm mạnh (con số cụ thể: số sao, số kênh, miễn phí, giấy phép), cách cài / dùng, các tình huống áp dụng KÈM VÍ DỤ CỤ THỂ, rủi ro và lưu ý bảo mật,
+
+NẾU NỘI DUNG LÀ QUY ĐỊNH / VĂN BẢN PHÁP LUẬT / CHÍNH SÁCH THUẾ, phải giải thích RÕ RÀNG, ĐẦY ĐỦ theo trình tự:
+ 1) Căn cứ pháp lý (số hiệu văn bản, cơ quan ban hành, ngày ban hành, ngày hiệu lực);
+ 2) Đối tượng áp dụng và KHÔNG áp dụng;
+ 3) Điều kiện cụ thể (con số, mốc thời gian, cách xác định);
+ 4) Nội dung / mức ưu đãi / nghĩa vụ và cách tính, kèm ví dụ có số liệu;
+ 5) Thủ tục, hồ sơ, thời hạn thực hiện;
+ 6) Lưu ý, sai sót thường gặp, mức phạt nếu có;
+ 7) Tóm tắt và kêu gọi liên hệ tư vấn.
+Mỗi cảnh phải có 3-5 mục thông tin CHI TIẾT hiện trên màn hình, mỗi mục viết dạng "Tiêu đề ngắn | giải thích đầy đủ 10-25 từ" (không chỉ liệt kê từ khóa).
+Chỉ dùng thông tin có trong nội dung nguồn; chỗ nguồn chưa nói rõ thì ghi "cần đối chiếu văn bản gốc", không tự bịa.
+
+NỘI DUNG (nếu là công cụ / phần mềm): nói rõ công cụ là gì, giải quyết vấn đề gì, điểm mạnh (con số cụ thể: số sao, số kênh, miễn phí, giấy phép), cách cài / dùng, các tình huống áp dụng KÈM VÍ DỤ CỤ THỂ, rủi ro và lưu ý bảo mật,
 rồi kết bằng câu hỏi tương tác (vd "Bạn muốn ... nào? Bình luận cho mình biết nhé"). Chỉ dùng thông tin có trong nội dung nguồn, không bịa số liệu; ví dụ minh họa phải ghi rõ là ví dụ.
 Lời đọc: câu ngắn tự nhiên như người dẫn chương trình, xưng "bạn", không viết tắt khó đọc, không emoji / markdown; số lớn đọc thành chữ ("một trăm lẻ sáu nghìn chín trăm sao").
 
@@ -384,7 +408,7 @@ Mỗi cảnh có:
 - big: (cho "stat") con số nổi bật, vd "106,9K"; items[0] là dòng chú thích dưới số, vd "trong 8 tháng"; chips[0] là nhãn phụ.
 - url, url_title, items, focus, tone: (cho "browser") url là địa chỉ giả hiển thị (vd "github.com · tên-repo / README"), url_title là tiêu đề trang, items là 3-5 dòng nội dung
   của trang (trích / diễn giải từ nguồn), focus là số thứ tự dòng (từ 0) cần tô khung sáng, tone là "info" | "good" | "bad" (xanh dương | xanh lá | đỏ).
-- items: (cho "steps" / "list" / "flow" / "cta") 2-5 ý ngắn; với "cta": items[0] là câu hỏi hiện trong bong bóng, items[1] là dòng phụ, chips[0] là nhãn nút (vd "bell|Đăng ký kênh").
+- items: (cho "steps" / "list" / "flow" / "cta") 3-5 ý, mỗi ý dạng "Tiêu đề ngắn | giải thích đầy đủ 10-25 từ" (riêng "cta" thì ngắn); với "cta": items[0] là câu hỏi hiện trong bong bóng, items[1] là dòng phụ, chips[0] là nhãn nút (vd "bell|Đăng ký kênh").
 - note: chú thích nhỏ cuối khung nếu nội dung là minh họa, vd "* Ví dụ minh hoạ".
 - description: (một lần ở cuối JSON) lời giới thiệu đăng kèm video, 2-3 câu, kết bằng 3 hashtag.
 {brand}
@@ -418,7 +442,7 @@ def clean_scenes(scenes) -> list:
         items = s.get("items") or []
         if isinstance(items, str):
             items = items.splitlines()
-        items = [str(x).strip(" -•*\t")[:90] for x in items if str(x).strip(" -•*\t")][:4]
+        items = [str(x).strip(" -•*\t")[:220] for x in items if str(x).strip(" -•*\t")][:5]
         typ = str(s.get("type", "")).strip().lower()
         panels = []
         for pv in (s.get("panels") or [])[:4]:
@@ -481,15 +505,22 @@ def make_script(text: str, seconds: int = 45) -> dict:
             raise VideoError(str(e)) from e
         scenes = clean_scenes(out.get("scenes"))
         words = sum(word_count(s["narration"]) for s in scenes)
-        if scenes and (not best or words > best[1]):
-            best = (out, words, scenes)
-        if scenes and words >= total * 0.8 and len(scenes) >= n * 0.75:
+        rich = [x for x in scenes if x["type"] in ("list", "steps", "flow", "browser")]
+        thin = [x for x in rich if len(x["items"]) < 3 or sum(len(t) for t in x["items"]) < 60]
+        enough = not thin or len(thin) <= len(rich) * 0.25 or cfg["look"] in ("doodle", "classic")
+        if scenes and (not best or (enough, words) > (best[3], best[1])):
+            best = (out, words, scenes, enough)
+        if scenes and words >= total * 0.8 and len(scenes) >= n * 0.75 and enough:
             break
+        if scenes and words >= total * 0.8 and not enough:
+            prompt += ("\n\nLƯU Ý: bản trước có quá nhiều cảnh thiếu thông tin trên màn hình. Mỗi cảnh phải có 3-5 mục, mỗi mục "
+                       "\"Tiêu đề | giải thích đầy đủ 10-25 từ\", viết cụ thể, có số liệu, điều kiện, thời hạn.")
+            continue
         prompt += (f"\n\nLƯU Ý: bản trước chỉ có {len(scenes)} {'trang' if doodle else 'cảnh'} / {words} từ — QUÁ NGẮN. Viết lại đủ {n} {'trang' if doodle else 'cảnh'} "
                    f"và khoảng {total} từ lời đọc, giải thích chi tiết hơn.")
     if not best:
         raise VideoError("AI không trả về kịch bản hợp lệ, thử lại")
-    out, words, scenes = best
+    out, words, scenes, _ = best
     return {"title": str(out.get("title", "")).strip()[:200],
             "description": str(out.get("description", "")).strip()[:2000], "scenes": scenes}
 

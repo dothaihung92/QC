@@ -224,27 +224,58 @@ def _stat(c: Cards, sc, top, bottom):
     c.add(ov, 0.45, "pop")
 
 
-def _list(c: Cards, sc, top, bottom):
+def _fit_items(c: Cards, items, text_w: int, avail_h: int, gap: int, pad_v: int, lines_d: int = 4):
+    """Chia mỗi ý thành (tiêu đề | giải thích), thu nhỏ chữ dần cho tới khi cả danh sách vừa khung.
+    Trả về (font tiêu đề, font giải thích, [(dòng tiêu đề, dòng giải thích, chiều cao thẻ)])."""
     L = c.L
-    items = sc["items"][:4]
-    f = V._font(int(L.base * (0.052 if len(items) <= 3 else 0.046)))
     meas = ImageDraw.Draw(c.new())
+    parts = [_split_item(t) for t in items]
+    scale = 1.0
+    while True:
+        ft = V._font(max(14, int(L.base * 0.046 * scale)), bold=True)
+        fd = V._font(max(12, int(L.base * 0.038 * scale)))
+        lt, ld = int(ft.size * 1.28), int(fd.size * 1.32)
+        rows, total = [], 0
+        for title, detail in parts:
+            if not title:                                  # ý không có tiêu đề: chữ đậm là cả câu
+                tl, dl = _wrap_text(meas, detail, ft, text_w, 3), []
+            else:
+                tl, dl = _wrap_text(meas, title, ft, text_w, 2), _wrap_text(meas, detail, fd, text_w, lines_d)
+            h = len(tl) * lt + len(dl) * ld + 2 * pad_v
+            rows.append((tl, dl, h))
+            total += h
+        total += gap * max(0, len(rows) - 1)
+        if total <= avail_h or scale < 0.55:
+            return ft, fd, rows
+        scale *= 0.93
+
+
+def _list(c: Cards, sc, top, bottom):
+    """Danh sách thẻ: số thứ tự + tiêu đề đậm + dòng giải thích chi tiết (viết "Tiêu đề | giải thích")."""
+    L = c.L
+    items = sc["items"][:5]
     r = int(L.base * 0.04)
-    tw = L.W - 2 * L.pad - 3 * r - L.pad
-    rows = [_wrap_text(meas, t, f, tw, 2) for t in items]
-    lh = int(f.size * 1.3)
-    heights = [max(2 * r, len(w) * lh) + int(L.pad * 0.6) for w in rows]
-    gap = int(L.pad * 0.35)
-    y = top + max(0, (bottom - top - sum(heights) - gap * (len(rows) - 1)) // 3)
-    for k, (lines, h) in enumerate(zip(rows, heights)):
+    pad_v = int(L.pad * 0.5)
+    gap = int(L.pad * 0.3)
+    text_w = L.W - 2 * L.pad - 3 * r - L.pad
+    ft, fd, rows = _fit_items(c, items, text_w, bottom - top, gap, pad_v)
+    lt, ld = int(ft.size * 1.28), int(fd.size * 1.32)
+    y = top
+    for k, (tl, dl, h) in enumerate(rows):
         ov = c.new()
         _glass(ov, (L.pad, y, L.W - L.pad, y + h))
         d = ImageDraw.Draw(ov)
         cx, cy = L.pad + int(L.pad * 0.5) + r, y + h // 2
         d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=CYAN + (255,))
         d.text((cx, cy), str(k + 1), font=V._font(int(r * 1.15), bold=True), fill=(4, 28, 42), anchor="mm")
-        for j, line in enumerate(lines):
-            d.text((cx + r + int(L.pad * 0.5), cy + (j - (len(lines) - 1) / 2) * lh), line, font=f, fill=BODY, anchor="lm")
+        tx = cx + r + int(L.pad * 0.5)
+        ty = y + pad_v
+        for line in tl:
+            d.text((tx, ty), line, font=ft, fill=WHITE + (255,), anchor="lt")
+            ty += lt
+        for line in dl:
+            d.text((tx, ty), line, font=fd, fill=BODY, anchor="lt")
+            ty += ld
         c.add(ov, 0.4 + 0.5 * k)
         y += h + gap
 
@@ -299,28 +330,32 @@ def _flow(c: Cards, sc, top, bottom):
 
 
 def _steps(c: Cards, sc, top, bottom):
-    """Các bước nối nhau bằng đường dọc."""
+    """Các bước nối nhau bằng đường dọc; mỗi bước có thể kèm giải thích ("Tiêu đề | giải thích")."""
     L = c.L
-    items = sc["items"][:4]
-    f = V._font(int(L.base * 0.05))
-    meas = ImageDraw.Draw(c.new())
-    r = int(L.base * 0.045)
-    tw = L.W - 2 * L.pad - 3 * r - L.pad
-    rows = [_wrap_text(meas, t, f, tw, 2) for t in items]
-    lh = int(f.size * 1.3)
-    hs = [max(2 * r + 8, len(w) * lh) for w in rows]
-    gap = int(L.pad * 0.55)
-    y = top + max(0, (bottom - top - sum(hs) - gap * (len(rows) - 1)) // 3)
+    items = sc["items"][:5]
+    r = int(L.base * 0.042)
+    gap = int(L.pad * 0.5)
+    text_w = L.W - 2 * L.pad - 3 * r - L.pad
+    ft, fd, rows = _fit_items(c, items, text_w, bottom - top, gap, int(L.pad * 0.15))
+    lt, ld = int(ft.size * 1.28), int(fd.size * 1.32)
+    hs = [max(2 * r + 8, h) for _, _, h in rows]
+    y = top
     cx = L.pad + r + 6
-    for k, (lines, h) in enumerate(zip(rows, hs)):
+    for k, ((tl, dl, _h), h) in enumerate(zip(rows, hs)):
         ov = c.new()
         d = ImageDraw.Draw(ov)
+        mid = y + r + 4
         if k < len(rows) - 1:
-            d.line((cx, y + h // 2, cx, y + h + gap + hs[k + 1] // 2), fill=LINE, width=4)
-        d.ellipse((cx - r, y + h // 2 - r, cx + r, y + h // 2 + r), fill=(6, 50, 70, 255), outline=CYAN + (255,), width=4)
-        d.text((cx, y + h // 2), str(k + 1), font=V._font(int(r * 1.1), bold=True), fill=CYAN + (255,), anchor="mm")
-        for j, line in enumerate(lines):
-            d.text((cx + r + int(L.pad * 0.5), y + h // 2 + (j - (len(lines) - 1) / 2) * lh), line, font=f, fill=BODY, anchor="lm")
+            d.line((cx, mid, cx, y + h + gap + r + 4), fill=LINE, width=4)
+        d.ellipse((cx - r, mid - r, cx + r, mid + r), fill=(6, 50, 70, 255), outline=CYAN + (255,), width=4)
+        d.text((cx, mid), str(k + 1), font=V._font(int(r * 1.1), bold=True), fill=CYAN + (255,), anchor="mm")
+        ty = y
+        for line in tl:
+            d.text((cx + r + int(L.pad * 0.5), ty), line, font=ft, fill=WHITE + (255,), anchor="lt")
+            ty += lt
+        for line in dl:
+            d.text((cx + r + int(L.pad * 0.5), ty), line, font=fd, fill=BODY, anchor="lt")
+            ty += ld
         c.add(ov, 0.4 + 0.55 * k, "slide")
         y += h + gap
 

@@ -438,3 +438,23 @@ def test_tech_look_renders_all_scene_types(client, monkeypatch):
         layers, caps = techlook.build(L, sc, 0, 3, work, "", 3.0, 2.5)
         assert caps and all((work / n).exists() for n, *_ in layers), extra["type"]
     assert techlook.split_chip("lock|Reddit") == ("lock", "Reddit") and techlook.split_chip("Chỉ chữ") == ("dot", "Chỉ chữ")
+
+
+def test_detailed_items_split_and_thin_script_is_retried(client, monkeypatch, tmp_path):
+    from app import explainer
+    video.save_config({"look": "tech"})
+    L = video.Layout((720, 1280))
+    sc = video.clean_scenes([{"type": "list", "headline": "A|B", "narration": "x", "items": [
+        "Doanh nghiệp nhỏ | Doanh thu thực tế cả năm không quá 10 tỷ đồng, tính tổng mọi hoạt động kinh doanh",
+        "Không áp dụng | Doanh nghiệp đã được hưởng ưu đãi thuế khác trùng nội dung"] * 3}])[0]
+    assert len(sc["items"]) == 5 and len(sc["items"][0]) > 80
+    layers, caps = explainer.build(L, sc, 0, 1, tmp_path, "", 3.0, 2.5)
+    assert len([n for n, *_ in layers if n.startswith("xl0_")]) == 5
+
+    thin = {"type": "list", "headline": "A|B", "narration": "Lời đọc " * 60, "items": ["Ý 1", "Ý 2"]}
+    rich = dict(thin, items=[f"Tiêu đề {k} | giải thích đầy đủ có số liệu cụ thể và thời hạn rõ ràng" for k in range(4)])
+    prompts, replies = [], iter([{"scenes": [thin] * 9}, {"scenes": [rich] * 9}])
+    monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: prompts.append(p) or next(replies))
+    v = client.post("/api/videos", json={"text": "Nội dung quy định thuế. " * 20, "seconds": 60}).json()
+    assert len(prompts) == 2 and "thiếu thông tin trên màn hình" in prompts[1]
+    assert all(len(x["items"]) == 4 for x in v["scenes"]) and "căn cứ pháp lý" in prompts[0].lower()
