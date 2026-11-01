@@ -172,7 +172,7 @@ def _glass(layer, box, radius=None, fill=GLASS, edge=EDGE):
 
 
 def _wrap_text(d, text, font, width, limit=3):
-    return V._wrap(d, text, font, width)[:limit]
+    return V.fit_lines(d, text, font, width, limit)
 
 
 def _split_item(t):
@@ -229,27 +229,28 @@ def _stat(c: Cards, sc, top, bottom):
 
 
 def _fit_items(c: Cards, items, text_w: int, avail_h: int, gap: int, pad_v: int, lines_d: int = 5):
-    """Chia mỗi ý thành (tiêu đề | giải thích), thu nhỏ chữ dần cho tới khi cả danh sách vừa khung.
-    Trả về (font tiêu đề, font giải thích, [(dòng tiêu đề, dòng giải thích, chiều cao thẻ)])."""
+    """Chia mỗi ý thành (tiêu đề | giải thích), thu nhỏ chữ dần cho tới khi cả danh sách VỪA khung (không tràn, không đè chữ).
+    Quá dài thì giảm số dòng giải thích rồi cắt "…". Trả về (font tiêu đề, font giải thích, [(dòng tiêu đề, dòng giải thích, chiều cao thẻ)])."""
     L = c.L
     meas = ImageDraw.Draw(c.new())
     parts = [_split_item(t) for t in items]
     scale = 1.9 * getattr(L, "ts", 1.0) / 1.25                  # bắt đầu từ cỡ chữ to nhất rồi thu nhỏ vừa đủ lấp đầy khung
     while True:
-        ft = V._font(max(14, min(int(L.base * 0.046 * scale), int(L.base * 0.075))), bold=True)
-        fd = V._font(max(12, min(int(L.base * 0.038 * scale), int(L.base * 0.06))))
+        ft = V._font(max(13, min(int(L.base * 0.046 * scale), int(L.base * 0.075))), bold=True)
+        fd = V._font(max(11, min(int(L.base * 0.038 * scale), int(L.base * 0.06))))
         lt, ld = int(ft.size * 1.28), int(fd.size * 1.32)
+        ld_max = lines_d if scale >= 0.7 else 3 if scale >= 0.45 else 2
         rows, total = [], 0
         for title, detail in parts:
             if not title:                                  # ý không có tiêu đề: chữ đậm là cả câu
                 tl, dl = _wrap_text(meas, detail, ft, text_w, 3), []
             else:
-                tl, dl = _wrap_text(meas, title, ft, text_w, 2), _wrap_text(meas, detail, fd, text_w, lines_d)
+                tl, dl = _wrap_text(meas, title, ft, text_w, 2), _wrap_text(meas, detail, fd, text_w, ld_max)
             h = len(tl) * lt + len(dl) * ld + 2 * pad_v
             rows.append((tl, dl, h))
             total += h
         total += gap * max(0, len(rows) - 1)
-        if total <= avail_h or scale < 0.55:
+        if total <= avail_h or (ft.size <= 13 and fd.size <= 11):
             return ft, fd, rows
         scale *= 0.93
 
@@ -334,33 +335,41 @@ def _flow(c: Cards, sc, top, bottom):
 
 
 def _calc(c: Cards, sc, top, bottom):
-    """Ví dụ tính toán từng bước: bảng "Nội dung | Số tiền", dòng cuối là kết quả nổi bật. Mỗi dòng hiện khi lời đọc tới."""
+    """Ví dụ tính toán từng bước: bảng "Nội dung | Số tiền", dòng cuối là kết quả nổi bật. Mỗi dòng hiện khi lời đọc tới.
+    Nhãn và số tiền đều tự xuống dòng / thu nhỏ cho vừa khung, không bao giờ tràn hay đè nhau."""
     L = c.L
     rows = [_split_item(t) for t in sc["items"][:6]]
     meas = ImageDraw.Draw(c.new())
     x0, x1 = L.pad, L.W - L.pad
     inner = x1 - x0 - 2 * L.pad
+    gap = int(L.pad * 0.6)
     scale = 1.7 * getattr(L, "ts", 1.0) / 1.25
     while True:
-        fl = V._font(max(14, min(int(L.base * 0.042 * scale), int(L.base * 0.062))))
-        fv = V._font(max(14, min(int(L.base * 0.05 * scale), int(L.base * 0.072))), bold=True)
-        lh = int(max(fl.size, fv.size) * 1.45)
+        fl = V._font(max(12, min(int(L.base * 0.042 * scale), int(L.base * 0.062))))
+        fv = V._font(max(12, min(int(L.base * 0.05 * scale), int(L.base * 0.072))), bold=True)
+        ll, lv = int(fl.size * 1.3), int(fv.size * 1.25)
         wrapped = []
-        for a, b in rows:                                  # chừa chỗ cho số tiền bên phải rồi mới xuống dòng phần nhãn
-            vw = int(meas.textlength(b, font=fv)) if a else 0
-            wrapped.append((_wrap_text(meas, a or b, fl, max(int(inner * 0.3), inner - vw - int(L.pad * 0.8)), 3), b if a else ""))
-        heights = [max(lh, len(w) * int(fl.size * 1.3)) + int(L.pad * 0.55) for w, _ in wrapped]
-        if sum(heights) + L.pad <= bottom - top or scale < 0.55:
+        for a, b in rows:
+            label, value = (a, b) if a else (b, "")
+            vlines = []
+            if value:
+                vlines = [value] if meas.textlength(value, font=fv) <= inner * 0.5 else V.fit_lines(meas, value, fv, int(inner * 0.5), 3)
+            vw = max((int(meas.textlength(t, font=fv)) for t in vlines), default=0)
+            llines = V.fit_lines(meas, label, fl, max(int(inner * 0.3), inner - vw - gap), 4)
+            h = max(len(llines) * ll, len(vlines) * lv) + int(L.pad * 0.55)
+            wrapped.append((llines, vlines, h))
+        total_h = sum(h for _, _, h in wrapped) + L.pad
+        if total_h <= bottom - top or (fl.size <= 12 and fv.size <= 12):
             break
         scale *= 0.93
-    total_h = sum(heights) + L.pad
     ov = c.new()
     _glass(ov, (x0, top, x1, top + total_h))
     c.add(ov, 0.25, "rise")
     y = top + L.pad // 2
-    for k, ((lines, val), h) in enumerate(zip(wrapped, heights)):
+    for k, (lines, vlines, h) in enumerate(wrapped):
         last = k == len(wrapped) - 1 and len(wrapped) > 1
-        loss = last and (str(val).strip()[:1] in "−-–" or "lỗ" in " ".join(lines).lower())
+        val = " ".join(vlines)
+        loss = last and (val.strip()[:1] in "−-–" or "lỗ" in " ".join(lines).lower())
         ov = c.new()
         d = ImageDraw.Draw(ov)
         if last:                                          # dòng kết quả: nền nổi bật
@@ -369,11 +378,11 @@ def _calc(c: Cards, sc, top, bottom):
         elif k:
             d.line((x0 + L.pad, y, x1 - L.pad, y), fill=(72, 140, 172, 110), width=2)
         for j, line in enumerate(lines):
-            d.text((x0 + L.pad, y + h / 2 + (j - (len(lines) - 1) / 2) * int(fl.size * 1.3)), line, font=fl,
+            d.text((x0 + L.pad, y + h / 2 + (j - (len(lines) - 1) / 2) * ll), line, font=fl,
                    fill=(255, 235, 190, 255) if last else BODY, anchor="lm")
-        if val:
-            col = (255, 150, 140) if loss else GOLD2 if last else (120, 255, 205)
-            d.text((x1 - L.pad, y + h / 2), val, font=fv, fill=col + (255,), anchor="rm")
+        col = (255, 150, 140) if loss else GOLD2 if last else (120, 255, 205)
+        for j, line in enumerate(vlines):
+            d.text((x1 - L.pad, y + h / 2 + (j - (len(vlines) - 1) / 2) * lv), line, font=fv, fill=col + (255,), anchor="rm")
         c.add(ov, c.when(k, len(wrapped), 0.7), "rise")
         y += h
     return top + total_h

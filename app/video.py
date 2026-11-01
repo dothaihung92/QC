@@ -855,9 +855,30 @@ def _font(size: int, bold=False, black=False):
     return _font_cache[key]
 
 
+def _break_word(draw, word: str, font, width: int) -> list:
+    """Từ dài hơn bề rộng (số tiền dài, đường dẫn...) thì cắt theo ký tự để không tràn khỏi khung."""
+    parts, cur = [], ""
+    for ch in word:
+        if cur and draw.textlength(cur + ch, font=font) > width:
+            parts.append(cur)
+            cur = ch
+        else:
+            cur += ch
+    if cur:
+        parts.append(cur)
+    return parts
+
+
 def _wrap(draw, text: str, font, width: int) -> list:
     lines, cur = [], ""
     for word in text.split():
+        if draw.textlength(word, font=font) > width:                  # từ quá dài: cắt ký tự
+            pieces = _break_word(draw, word, font, width)
+            if cur:
+                lines.append(cur)
+            lines.extend(pieces[:-1])
+            cur = pieces[-1]
+            continue
         trial = f"{cur} {word}".strip()
         if draw.textlength(trial, font=font) <= width or not cur:
             cur = trial
@@ -867,6 +888,36 @@ def _wrap(draw, text: str, font, width: int) -> list:
     if cur:
         lines.append(cur)
     return lines
+
+
+def fit_lines(draw, text: str, font, width: int, max_lines: int) -> list:
+    """Xuống dòng vừa bề rộng, tối đa max_lines dòng; dư thì cắt và thêm "…" (không bao giờ tràn / đè chữ khác)."""
+    lines = _wrap(draw, text, font, width)
+    if len(lines) <= max_lines:
+        return lines
+    lines = lines[:max_lines]
+    last = lines[-1]
+    while last and draw.textlength(last + "…", font=font) > width:
+        last = last[:-1]
+    lines[-1] = last.rstrip(" ,.;:") + "…"
+    return lines
+
+
+def check_layers(L, work: Path, layers: list, captions: list = ()) -> list:
+    """Kiểm tra bố cục: lớp nào nằm ngoài khung hình (chữ bị cắt) thì trả về mô tả lỗi."""
+    from PIL import Image
+    bad = []
+    for name, (x, y), start, kind in list(layers) + [(n, p, a, "cap") for n, p, a, b in captions]:
+        if kind in ("head", "slide"):                      # vị trí lúc đang trượt vào có thể lệch; chỉ kiểm tra khi đã nằm yên
+            pass
+        try:
+            with Image.open(work / name) as im:
+                w, h = im.size
+        except OSError:
+            continue
+        if x < -2 or y < -2 or x + w > L.W + 2 or y + h > L.H + 2:
+            bad.append(f"{name}: ({x},{y}) {w}x{h} vượt khung {L.W}x{L.H}")
+    return bad
 
 
 def _hex(color: str):
@@ -1549,6 +1600,8 @@ def render(video_id: int):
                     return doodle.panel_image(arts[k] if k < len(arts) else None, pv.get("label", ""), wh, seed=i * 10 + k,
                                               visual=pv.get("visual", ""))
             layers, captions = builder(L, sc, i, total, work, cfg["brand"], dur, voice_len, illus=illus_fn)
+            for msg in check_layers(L, work, layers, captions):
+                _log(f"⚠ Cảnh {i + 1}: bố cục — {msg}")
         else:
             layers = []
             pos = _frame_layer(L, cfg["color"], cfg["brand"], i, total, work / f"frame{i}.png")

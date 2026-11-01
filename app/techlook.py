@@ -115,7 +115,7 @@ class Layers(X.Cards):
 
 
 def _wrap(d, text, font, width, limit):
-    return V._wrap(d, text, font, width)[:limit]
+    return V.fit_lines(d, text, font, width, limit)
 
 
 def header(L, sc, i: int, work: Path):
@@ -187,15 +187,20 @@ def browser(c: X.Cards, L, sc, top: int, bottom: int, start=0.45):
     W = L.W
     x0, x1 = L.pad, W - L.pad
     lines = sc["items"][:6]
-    f = V._font(int(L.base * 0.032 * getattr(L, "ts", 1.0)))
-    ft = V._font(int(L.base * 0.045 * getattr(L, "ts", 1.0)), bold=True)
     meas = ImageDraw.Draw(c.new())
     tw = x1 - x0 - 3 * L.pad
-    wrapped = [_wrap(meas, t, f, tw, 3) for t in lines]
-    lh = int(f.size * 1.35)
     bar = int(L.base * 0.075)
     title = sc["url_title"] or ""
-    body_h = (int(ft.size * 1.8) if title else 0) + sum(len(w) * lh + int(lh * 0.55) for w in wrapped) + L.pad
+    size = int(L.base * 0.032 * getattr(L, "ts", 1.0))
+    while True:                                           # thu nhỏ chữ cho tới khi cả trang vừa cửa sổ (không tràn khỏi khung)
+        f = V._font(size)
+        ft = V._font(int(size * 1.4), bold=True)
+        wrapped = [_wrap(meas, t, f, tw, 4 if size > 20 else 3) for t in lines]
+        lh = int(f.size * 1.35)
+        body_h = (int(ft.size * 1.8) if title else 0) + sum(len(w) * lh + int(lh * 0.55) for w in wrapped) + L.pad
+        if top + bar + body_h <= bottom or size <= 12:
+            break
+        size -= 1
     y1 = min(bottom, top + bar + body_h)
     ov = c.new()
     d = ImageDraw.Draw(ov)

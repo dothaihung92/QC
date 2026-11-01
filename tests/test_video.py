@@ -604,3 +604,46 @@ def test_show_title_off_hides_heading_and_prompt_is_story_driven(tmp_path):
     assert "th0.png" in [n for n, *_ in layers]
     assert "KỂ CHUYỆN THU HÚT" in video.EXPERT_BLOCK and "KHÔNG NHỒI CHỮ" in video.EXPERT_BLOCK
     assert video.get_config()["show_title"] is True
+
+
+def test_long_text_never_overflows_frame(tmp_path):
+    """Nhãn/số tiền/tiêu đề rất dài không được tràn khung hay cắt mất chữ (lỗi clip-13)."""
+    from app import explainer, techlook
+    long_label = "Thu nhập chịu thuế từ tiền lương tiền công của người lao động có hai nguồn thu nhập trở lên trong năm"
+    long_value = "1.234.567.890.123.456 đồng (một nghìn hai trăm ba mươi bốn tỷ)"
+    long_detail = "Doanh nghiệp phải kê khai bổ sung hồ sơ khai thuế và nộp đủ số tiền thuế thiếu cùng tiền chậm nộp trước khi cơ quan thuế ra quyết định xử phạt " * 2
+    items_pair = [f"{long_label} {i} | {long_value}" for i in range(5)]
+    items_detail = [f"{long_label} {i} | {long_detail}" for i in range(5)]
+    scenes = [
+        {"type": "calc", "items": items_pair},
+        {"type": "list", "items": items_detail},
+        {"type": "steps", "items": items_detail},
+        {"type": "flow", "items": items_detail[:4]},
+        {"type": "bars", "items": [f"{long_label} {i} | {500 + i * 100} triệu" for i in range(4)]},
+        {"type": "stat", "big": "1.234.567.890.123 đ", "items": items_detail[:3]},
+        {"type": "text", "items": items_detail[:3]},
+        {"type": "browser", "url": "https://thuvienphapluat.vn/van-ban/" + "a" * 120, "url_title": long_label,
+         "focus": long_detail, "items": items_detail[:2]},
+        {"type": "hero", "chips": [f"idea|{long_label}"] * 4, "items": items_detail[:2]},
+        {"type": "cta", "items": items_detail[:2]},
+    ]
+    for size in ((1080, 1920), (720, 1280), (1280, 720)):
+        L = video.Layout(size)
+        L.ts = 1.25
+        for raw in scenes:
+            sc = video.clean_scenes([{"headline": long_label + "|" + long_label, "tag": long_label, "narration": "Lời đọc dài. " * 20, **raw}])[0]
+            for mod in (techlook, explainer):
+                work = tmp_path / f"{mod.__name__}_{size[0]}_{raw['type']}"
+                work.mkdir(exist_ok=True)
+                layers, caps = mod.build(L, sc, 0, 1, work, "", 12.0, 10.0)
+                assert layers, (mod.__name__, size, raw["type"])
+                assert video.check_layers(L, work, layers, caps) == [], (mod.__name__, size, raw["type"])
+
+
+def test_fit_lines_hard_breaks_and_truncates():
+    from PIL import Image, ImageDraw
+    d = ImageDraw.Draw(Image.new("RGB", (10, 10)))
+    f = video._font(30, True)
+    lines = video.fit_lines(d, "1234567890123456789012345678901234567890 " * 4, f, 200, 3)
+    assert len(lines) == 3 and lines[-1].endswith("…")
+    assert all(d.textlength(x, font=f) <= 200 for x in lines)
