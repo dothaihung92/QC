@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, quote_plus, urljoin, urlparse
 
 import requests
 
-from . import config, db, facebook, legallinks
+from . import config, db, facebook, legallinks, wordpress
 from .facebook import FacebookError
 
 log = logging.getLogger("qc.news")
@@ -84,7 +84,7 @@ def save_config(body: dict) -> dict:
             v = str(v or "").strip()
         cur[k] = v
     cur["public_url"] = cur["public_url"].rstrip("/")
-    cur["wp_url"] = cur["wp_url"].rstrip("/")
+    cur["wp_url"] = wordpress.site_root(cur["wp_url"])
     db.set_setting("newsagent", cur)
     return public_config()
 
@@ -405,7 +405,7 @@ def _unique_slug(base: str, item_id: int) -> str:
 
 
 def post_to_wordpress(item: dict, cfg: dict) -> str:
-    r = requests.post(f"{cfg['wp_url']}/wp-json/wp/v2/posts",
+    r = requests.post(f"{wordpress.site_root(cfg['wp_url'])}/wp-json/wp/v2/posts",
                       auth=(cfg["wp_user"], cfg["wp_app_password"]), timeout=60,
                       json={"title": item["title"], "content": article_html(item),
                             "excerpt": item["summary"], "status": "publish"})

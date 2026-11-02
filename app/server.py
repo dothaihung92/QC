@@ -18,7 +18,8 @@ from fastapi.responses import (FileResponse, HTMLResponse, PlainTextResponse, Re
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
-from . import autoreply, bot, config, content, db, facebook, legallinks, newsagent, replies, video
+from . import (autoreply, bot, config, content, db, facebook, legallinks, newsagent, replies, video,
+               wordpress)
 from .facebook import FacebookError
 
 try:
@@ -824,6 +825,19 @@ def sync_stats(limit: int = 20):
     except FacebookError as e:
         raise _fb_error(e, "stats")
     return _stats_payload()
+
+
+# ----- WordPress REST qua máy chủ QC (tab Viết bài SEO) ----------------------
+# Trình duyệt gọi thẳng website khác bị chặn CORS ("Failed to fetch") → chuyển tiếp qua đây.
+
+@admin.api_route("/api/wp-proxy", methods=["GET", "POST", "PUT", "PATCH", "DELETE"])
+async def wp_proxy(request: Request, url: str):
+    from starlette.concurrency import run_in_threadpool
+    from fastapi.responses import Response
+    body = await request.body()
+    status, ctype, content = await run_in_threadpool(
+        wordpress.forward, request.method, url, dict(request.headers), body)
+    return Response(content=content, status_code=status, media_type=ctype or "application/json")
 
 
 # ----- Link văn bản pháp luật (tab Viết bài SEO) -----------------------------

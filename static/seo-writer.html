@@ -715,8 +715,16 @@ textarea{resize:vertical;min-height:70px;line-height:1.6}
               </div>
             </div>
             <div id="wp-help" style="display:none;background:var(--bg-info);border:.5px solid var(--bi);border-radius:var(--r);padding:10px 12px;margin-bottom:12px;font-size:12px;color:var(--text2);line-height:1.7">
-              <strong style="color:var(--info)">Lấy Application Password:</strong><br>
-              Dashboard → Users → Profile → <strong>Application Passwords</strong> → Add New → Copy password (chỉ hiện 1 lần!)
+              <strong style="color:var(--info)">Kết nối WordPress (làm 1 lần):</strong><br>
+              <b>1. URL WordPress:</b> chỉ nhập tên miền, vd <code>https://dailythuehungphuc.com</code> (KHÔNG thêm /wp-admin — phần mềm tự bỏ nếu có).<br>
+              <b>2. Username:</b> tên đăng nhập WordPress (tài khoản Quản trị viên hoặc Biên tập viên).<br>
+              <b>3. App Password:</b> vào trang quản trị WordPress → <b>Thành viên → Hồ sơ</b> (Users → Profile) → kéo xuống
+              <b>Mật khẩu ứng dụng</b> (Application Passwords) → đặt tên "QC SEO" → <b>Thêm mới</b> → copy chuỗi 24 ký tự (chỉ hiện 1 lần). Đây KHÔNG phải mật khẩu đăng nhập.<br>
+              <b>4. Category ID:</b> Bài viết → Chuyên mục → rê chuột vào tên chuyên mục, xem số sau <code>tag_ID=</code> trên thanh trạng thái (để 1 nếu chưa có).<br>
+              <b>5.</b> Bấm <b>Kiểm tra kết nối</b>.<br>
+              <b>Không thấy mục Mật khẩu ứng dụng?</b> Website cần HTTPS và WordPress ≥ 5.6; plugin bảo mật (Wordfence, iThemes, All-In-One Security…) có thể đang tắt — bật lại "Application Passwords" trong plugin.<br>
+              <b>Báo "không nhận được thông tin đăng nhập" (rest_not_logged_in)?</b> Hosting chặn header Authorization: thêm dòng
+              <code>SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1</code> vào đầu file <code>.htaccess</code> của website (hoặc nhờ bên hosting).
             </div>
             <div class="g2" style="margin-bottom:12px">
               <div>

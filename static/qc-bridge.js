@@ -572,7 +572,57 @@
   window.qcImages = { matchScore: matchScore, pickStock: pickStock, titleCard: titleCard, viToEn: viToEn,
                       setJobImage: function (u) { jobImage = u || null; } };
 
+  // ── Kết nối WordPress ─────────────────────────────────────────────────────
+  // Trang này chạy ở 127.0.0.1 nên trình duyệt chặn gọi thẳng sang website khác (CORS → "Failed to fetch").
+  // Mọi yêu cầu .../wp-json/... được chuyển qua máy chủ QC (/api/wp-proxy) — website không cần cài thêm gì.
+  function siteRoot(u) {
+    u = String(u || '').trim();
+    if (!u) return '';
+    if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+    u = u.split(/\/(?:wp-admin|wp-login\.php|wp-json)(?:[\/?#]|$)/i)[0];
+    return u.split('#')[0].split('?')[0].replace(/\/+$/, '');
+  }
+  function fixWpUrl() {
+    var el = document.getElementById('wp-url');
+    if (!el || !el.value.trim()) return;
+    var root = siteRoot(el.value);
+    if (root !== el.value) {
+      el.value = root;
+      try {
+        var pub = JSON.parse(localStorage.getItem('pub') || '{}');
+        pub['wp-url'] = root;
+        localStorage.setItem('pub', JSON.stringify(pub));
+      } catch (e) {}
+    }
+  }
+  function wrapFetch() {
+    if (window.fetch._qc) return;
+    var orig = window.fetch.bind(window);
+    window.fetch = function (input, opts) {
+      var url = typeof input === 'string' ? input : (input && input.url) || '';
+      var abs = /^https?:\/\//i.test(url) && url.indexOf(location.origin) !== 0;
+      if (abs && /\/wp-json\//.test(url)) {
+        var i = url.indexOf('/wp-json/');
+        var fixed = siteRoot(url.slice(0, i)) + url.slice(i);
+        // Header Authorization của WordPress đổi tên (Authorization dành cho đăng nhập bảng điều khiển QC)
+        var o = Object.assign({}, opts || {}), h = {};
+        new Headers((opts && opts.headers) || (typeof input !== 'string' && input.headers) || {}).forEach(function (v, k) {
+          h[k.toLowerCase() === 'authorization' ? 'X-WP-Authorization' : k] = v;
+        });
+        o.headers = h;
+        if (!o.method && typeof input !== 'string' && input.method) o.method = input.method;
+        return orig('/api/wp-proxy?url=' + encodeURIComponent(fixed), o);
+      }
+      return orig(input, opts);
+    };
+    window.fetch._qc = true;
+  }
+  wrapFetch();
+
   function init() {
+    fixWpUrl();
+    var wpEl = document.getElementById('wp-url');
+    if (wpEl) wpEl.addEventListener('change', function () { fixWpUrl(); if (typeof savePub === 'function') savePub(); });
     wrapLimits();
     wrapImages();
     addVerifyOption();

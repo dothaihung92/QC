@@ -44,6 +44,7 @@ FILES = [
     "app/groupbot.py",
     "app/newsagent.py",
     "app/legallinks.py",
+    "app/wordpress.py",
     "app/video.py",
     "app/aimedia.py",
     "app/explainer.py",
