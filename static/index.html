@@ -778,7 +778,7 @@ function renderNews() {
         <label>Nội dung bài web</label><textarea id="nb${n.id}" rows="8">${esc(n.body)}</textarea>
         <label>Bài Facebook</label><textarea id="nf${n.id}" rows="5">${esc(n.fb_text)}</textarea>
         ${n.image_url ? `<img src="${esc(n.image_url)}" style="max-height:120px;border-radius:6px" referrerpolicy="no-referrer">` : ''}
-        <div class="btns"><button class="btn pri" onclick="newsPublish(${n.id})">🚀 Đăng web + Fanpage</button>
+        <div class="btns"><button class="btn pri" onclick="newsToSeo(${n.id})">✍️ SEO bài viết</button>
         <button class="btn" onclick="newsReject(${n.id})">Bỏ bài này</button>
         <button class="btn" onclick="vdFromNews(${n.id})">🎬 Tạo clip</button></div>`
         : `<div class="btns">${n.body ? `<button class="btn" onclick="vdFromNews(${n.id})">🎬 Tạo clip</button>` : ''}
@@ -809,6 +809,19 @@ async function newsPublish(id) {
   await api('/api/news/' + id, { method: 'PUT', body: { title: $('nt' + id).value, body: $('nb' + id).value, fb_text: $('nf' + id).value } });
   const r = await api('/api/news/' + id + '/publish', { method: 'POST' });
   toast(r.status === 'published' ? '🚀 Đã đăng' : '⚠ ' + (r.error || 'Đăng thất bại')); loadNews();
+}
+// Chuyển bài sang tab "Viết bài SEO" và tự tạo bài chuẩn SEO từ nội dung bài tin này.
+async function newsToSeo(id) {
+  const n = NEWS.find(x => x.id === id); if (!n) return;
+  const val = (p) => $(p + id)?.value ?? '';
+  const job = { id: Date.now(), title: val('nt') || n.title || n.orig_title, body: val('nb') || n.body || n.summary || '',
+                url: n.url, source: n.source || '' };
+  await api('/api/news/' + id, { method: 'PUT', body: { title: val('nt'), body: val('nb'), fb_text: val('nf') } }).catch(() => {});
+  try { localStorage.setItem('qc_seo_job', JSON.stringify(job)); } catch (e) {}
+  const seen = !!$('seoFrame').src;                 // tab SEO đã nạp rồi → gửi thẳng; chưa thì tab tự đọc khi mở
+  openTab('seo');
+  if (seen) $('seoFrame').contentWindow?.postMessage({ qc: 'seo-job', job }, location.origin);
+  toast('✍️ Đang chuyển sang tab Viết bài SEO và tạo bài...');
 }
 async function newsReject(id) { await api('/api/news/' + id + '/reject', { method: 'POST' }); loadNews(); }
 async function newsDel(id) { await api('/api/news/' + id, { method: 'DELETE' }); loadNews(); }

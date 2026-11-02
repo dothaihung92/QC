@@ -68,8 +68,42 @@
     document.body.appendChild(a);
   }
 
+  // Nhận bài tin từ tab "Tin tức AI" → điền form → tự bấm "Tạo bài viết chuẩn SEO".
+  function legalRef(text) {
+    var m = /(Nghị định|Thông tư|Công văn|Nghị quyết|Quyết định)\s+(?:số\s+)?\d+\/[\w\u00C0-\u1EF9\-\/]+/i.exec(text || '');
+    return m ? m[0].replace(/[.,;:]+$/, '') : '';
+  }
+  var lastJob = 0;
+  function runJob(job) {
+    if (!job || job.id === lastJob) return;
+    if (typeof generate !== 'function' || !document.getElementById('kw')) { setTimeout(function () { runJob(job); }, 300); return; }
+    lastJob = job.id;
+    try { localStorage.removeItem('qc_seo_job'); } catch (e) {}
+    var set = function (id, v) { var el = document.getElementById(id); if (el) el.value = v; };
+    var body = String(job.body || '').replace(/\s+\n/g, '\n').slice(0, 7000);
+    set('kw', job.title || '');
+    set('legal-ref', legalRef((job.title || '') + ' ' + body));
+    set('legal-link', '');
+    set('legal-content', 'BÀI TIN GỐC' + (job.source ? ' (' + job.source + ')' : '') + ': ' + (job.title || '') +
+      (job.url ? '\nNguồn: ' + job.url : '') + '\n\n' + body);
+    window._answerQuestionContext = null;
+    if (!(document.getElementById('gkey') || {}).value) {
+      notify('⚠ Chưa có Gemini API Key — nhập key ở mục 1 rồi bấm "Tạo bài viết chuẩn SEO" (đã điền sẵn nội dung).');
+      return;
+    }
+    notify('✍️ Đang tạo bài SEO từ bài tin...');
+    generate();
+  }
+  window.addEventListener('message', function (e) {
+    if (e.origin === location.origin && e.data && e.data.qc === 'seo-job') runJob(e.data.job);
+  });
+  function checkPendingJob() {
+    try { var raw = localStorage.getItem('qc_seo_job'); if (raw) runJob(JSON.parse(raw)); } catch (e) {}
+  }
+
   function init() {
     addButtons();
+    setTimeout(checkPendingJob, 400);
     if (window.parent === window) addBackLink(); // mở trong tab của bảng điều khiển thì không cần
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();

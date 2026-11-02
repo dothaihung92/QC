@@ -112,6 +112,13 @@ def test_seo_writer_served_with_bridge(client):
     js = client.get("/qc-bridge.js")
     assert js.status_code == 200 and "javascript" in js.headers["content-type"]
     assert "/api/posts" in js.text
+    assert "qc_seo_job" in js.text and "generate()" in js.text          # nhận bài tin và tự tạo bài SEO
+
+
+def test_news_button_sends_article_to_seo_tab(client):
+    html = client.get("/").text
+    assert "newsToSeo(${n.id})" in html and "✍️ SEO bài viết" in html
+    assert "newsPublish(${n.id})\">🚀 Đăng web + Fanpage" not in html
 
 
 def test_post_from_seo_writer_keeps_link(client):
