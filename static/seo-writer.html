@@ -4118,7 +4118,7 @@ async function generate() {
 
   const sys = `Bạn là SEO Content Writer Việt Nam chuyên nghiệp. Viết bài chuẩn SEO cho doanh nghiệp kế toán – thuế.
 Yêu cầu kỹ thuật:
-- Title/H1: 55-70 ký tự (đếm kỹ trước khi viết!), viết CÂU LIỀN MẠCH đủ ý nghĩa trọn vẹn, TUYỆT ĐỐI KHÔNG dùng dấu phân cách (: - – — | /), KHÔNG CẮT NGANG câu, phải là một câu hoàn chỉnh có đủ chủ - vị - tân ngữ
+- Title/H1: 50-65 ký tự (đếm kỹ trước khi viết!), PHẢI CHỨA NGUYÊN VĂN từ khóa "${kw}" (đúng chính tả, đúng thứ tự, nên đặt ở đầu), viết CÂU LIỀN MẠCH đủ ý nghĩa trọn vẹn, TUYỆT ĐỐI KHÔNG dùng dấu phân cách (: - – — | /), KHÔNG CẮT NGANG câu, phải là một câu hoàn chỉnh có đủ chủ - vị - tân ngữ
 - Slug: tối đa 75 ký tự, chữ thường, không dấu
 - Meta: ĐÚNG 140-160 ký tự, keyword đầu câu, kết bằng CTA. KHÔNG thêm ...
 - Giọng văn: ${tmLabel}
@@ -4139,7 +4139,7 @@ Yêu cầu kỹ thuật:
 ${angleNote}
 
 CHỈ trả về JSON hợp lệ (không markdown, không backtick, không text ngoài JSON):
-{"title":"50-60 ký tự có keyword không dùng dấu :","metaDescription":"140-160 ký tự CÓ KEYWORD + CTA","slug":"url-slug","focusKeyword":"keyword","readingTime":6,"sections":[{"type":"intro","heading":"","content":"<p>intro</p>","imageQuery":"vietnamese accounting office professional"},{"type":"h2","heading":"H2 tiêu đề","content":"<p>nội dung đầy đủ 2+ đoạn</p>","imageQuery":"asian business tax document"},{"type":"h2","heading":"H2 tiêu đề","content":"<p>nội dung</p>","imageQuery":"vietnamese small business owner"},{"type":"h2","heading":"H2 tiêu đề","content":"<p>nội dung</p>","imageQuery":"tax accounting vietnam"},{"type":"h2","heading":"H2 tiêu đề","content":"<p>nội dung</p>","imageQuery":"vietnamese entrepreneur laptop"}],"qa":[{"q":"câu hỏi 1 về ${kw}?","a":"trả lời chi tiết"},{"q":"câu hỏi 2?","a":"trả lời"},{"q":"câu hỏi 3?","a":"trả lời"},{"q":"câu hỏi 4?","a":"trả lời"},{"q":"câu hỏi 5?","a":"trả lời"}],"conclusion":"kết luận có CTA","tags":["tag1","tag2","tag3","tag4","tag5"]}`;
+{"title":"câu hoàn chỉnh 50-65 ký tự chứa nguyên văn từ khóa, không dùng dấu :","metaDescription":"140-160 ký tự CÓ KEYWORD + CTA","slug":"url-slug","focusKeyword":"${kw}","readingTime":6,"sections":[{"type":"intro","heading":"","content":"<p>intro</p>","imageQuery":"vietnamese accounting office professional"},{"type":"h2","heading":"H2 tiêu đề","content":"<p>nội dung đầy đủ 2+ đoạn</p>","imageQuery":"asian business tax document"},{"type":"h2","heading":"H2 tiêu đề","content":"<p>nội dung</p>","imageQuery":"vietnamese small business owner"},{"type":"h2","heading":"H2 tiêu đề","content":"<p>nội dung</p>","imageQuery":"tax accounting vietnam"},{"type":"h2","heading":"H2 tiêu đề","content":"<p>nội dung</p>","imageQuery":"vietnamese entrepreneur laptop"}],"qa":[{"q":"câu hỏi 1 về ${kw}?","a":"trả lời chi tiết"},{"q":"câu hỏi 2?","a":"trả lời"},{"q":"câu hỏi 3?","a":"trả lời"},{"q":"câu hỏi 4?","a":"trả lời"},{"q":"câu hỏi 5?","a":"trả lời"}],"conclusion":"kết luận có CTA","tags":["tag1","tag2","tag3","tag4","tag5"]}`;
 
   try {
     showProg(0);

@@ -93,7 +93,7 @@
       return;
     }
     notify('✍️ Đang tạo bài SEO từ bài tin...');
-    generate();
+    shortKeyword(job.title || '', body).then(function (k) { if (k) set('kw', k); generate(); });
   }
   window.addEventListener('message', function (e) {
     if (e.origin === location.origin && e.data && e.data.qc === 'seo-job') runJob(e.data.job);
@@ -184,6 +184,125 @@
   }
   window.qcLinkLegalDocs = linkArticle;
 
+  // ── Tiêu đề trọn câu + chứa ĐÚNG từ khóa ──────────────────────────────────
+  // Trước đây: tiêu đề dài bị cắt cứng ở 70 ký tự → cụt câu; dấu "/" "-" bị xóa làm hỏng số hiệu
+  // (398/2026/NĐ-CP → "398 2026 NĐ CP"); tiêu đề không bắt buộc chứa đúng từ khóa.
+  var DANGLING = /\s(và|của|cho|với|để|các|những|khi|từ|theo|trong|về|là|có|được|tại|đến|nếu|hay|hoặc|thì|mà|bị|như|một|vào|tới|bao|nhằm|gồm)$/i;
+  function norm(t) { return String(t || '').toLowerCase().replace(/\s+/g, ' ').trim(); }
+  function hasKw(text, kw) { return !!kw && norm(text).indexOf(norm(kw)) >= 0; }
+  function cap(t) { t = String(t || '').trim(); return t.charAt(0).toUpperCase() + t.slice(1); }
+  function isShortKw(k) { k = String(k || '').trim(); return k.length >= 3 && k.length <= 60 && k.split(/\s+/).length <= 9; }
+  function titleOk(t, kw) {
+    t = String(t || '').trim();
+    return t.length >= 35 && t.length <= 70 && hasKw(t, kw) && !DANGLING.test(t) && !/[,;:–—\-|]$/.test(t) && !/\.\.\.|…$/.test(t);
+  }
+  function metaOk(m, kw) {
+    m = String(m || '').trim();
+    return m.length >= 120 && m.length <= 160 && hasKw(m, kw) && /[.!?)]$/.test(m);
+  }
+  function cleanTitle(t) {     // bỏ dấu phân cách có khoảng trắng, GIỮ "/" "-" trong số hiệu văn bản, năm 2026-2027
+    return String(t || '').replace(/\s*[:|]\s+|\s+[–—\-]\s+/g, ', ').replace(/,\s*,/g, ',').replace(/\s{2,}/g, ' ')
+      .replace(/^[,\s]+|[,\s]+$/g, '').trim();
+  }
+  async function askJSON(prompt) {
+    var gkey = ((document.getElementById('gkey') || {}).value || '').trim();
+    if (!gkey || typeof callGeminiWithFallback !== 'function') return null;
+    try {
+      var res = await callGeminiWithFallback(gkey, {
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.4, maxOutputTokens: 1500, responseMimeType: 'application/json' }
+      });
+      var c = ((res.data.candidates || [])[0] || {}).content;
+      var raw = c ? (c.parts || []).map(function (p) { return p.text || ''; }).join('') : '';
+      return typeof extractJSON === 'function' ? extractJSON(raw) : JSON.parse(raw);
+    } catch (e) { return null; }
+  }
+  async function shortKeyword(title, body) {
+    var j = await askJSON('Đặt 1 TỪ KHÓA SEO chính (2-6 từ, cách người Việt gõ tìm trên Google, viết thường, có dấu) cho bài sau. ' +
+      'Chỉ trả về JSON {"keyword":"..."}.\nTiêu đề: ' + title + '\nNội dung: ' + String(body || '').slice(0, 1500));
+    var k = j && String(j.keyword || '').trim();
+    if (isShortKw(k)) return k;
+    return isShortKw(title) ? title : title.split(/\s+/).slice(0, 6).join(' ').replace(/[,:;.]+$/, '');
+  }
+  function fallbackTitle(kw, oldTitle) {
+    var K = cap(kw);
+    var tails = [' và những điều doanh nghiệp cần biết', ' mới nhất doanh nghiệp cần biết', ' hướng dẫn chi tiết và dễ hiểu',
+                 ' mới nhất năm ' + new Date().getFullYear(), ' cần biết'];
+    for (var i = 0; i < tails.length; i++) if ((K + tails[i]).length <= 70 && (K + tails[i]).length >= 35) return K + tails[i];
+    return K.length <= 70 ? K : oldTitle;
+  }
+  function refreshSidebar(a) {
+    var te = document.getElementById('seo-title-edit');
+    if (te) te.value = a.title;
+    if (typeof updateSEOField === 'function') updateSEOField('title', a.title);
+    var ke = document.getElementById('seo-kw-edit');
+    if (ke) ke.value = a.focusKeyword;
+    document.querySelectorAll('#sidebar .meta-pill').forEach(function (p) {
+      var lbl = p.querySelector('.meta-lbl'), val = p.querySelector('.meta-val');
+      if (lbl && val && /Meta Description/i.test(lbl.textContent)) {
+        val.textContent = a.metaDescription;
+        if (typeof charBadge === 'function') lbl.innerHTML = 'Meta Description ' + charBadge(a.metaDescription, 160);
+      }
+    });
+    if (typeof seoScore === 'function') {          // chấm lại điểm SEO
+      var card = document.querySelector('#sidebar .side-card');
+      var r = seoScore(a);
+      if (card && r) card.innerHTML = '<div class="side-title"><i class="ti ti-chart-bar" style="font-size:14px"></i>SEO Score</div>' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px"><span style="font-size:13px;color:var(--text2)">Điểm tổng</span>' +
+        '<span style="font-size:26px;font-weight:700;color:' + r.cl + '">' + r.sc + '%</span></div>' +
+        '<div class="sc-bar"><div class="sc-fill" style="width:' + r.sc + '%;background:' + r.cl + '"></div></div>' +
+        r.checks.map(function (c) { return '<div class="chk-row"><i class="ti ' + (c.ok ? 'ti-circle-check' : 'ti-circle-x') +
+          '" style="color:' + (c.ok ? 'var(--success)' : 'var(--danger)') + '"></i><span>' + c.lbl + '</span></div>'; }).join('');
+    }
+  }
+  async function fixTitleKeyword(a) {
+    var kwEl = document.getElementById('kw');
+    var userKw = ((kwEl || {}).value || '').trim();
+    var kw = isShortKw(userKw) ? userKw : (isShortKw(a.focusKeyword) ? String(a.focusKeyword).trim() : await shortKeyword(userKw || a.title, ''));
+    a.focusKeyword = kw;
+    var full = cleanTitle(a._qcFullTitle || a.title);
+    if (titleOk(full, kw) && metaOk(a.metaDescription, kw)) {
+      if (full !== a.title) { a.title = full; refreshSidebar(a); }
+      return;
+    }
+    notify('✏️ Đang chỉnh tiêu đề cho trọn câu và chứa đúng từ khóa "' + kw + '"...');
+    var bodyTxt = (a.sections || []).map(function (s) { return (s.heading || '') + ' ' + plain(s.content); }).join(' ').slice(0, 1500);
+    var j = await askJSON('Từ khóa SEO chính: "' + kw + '".\nTiêu đề hiện tại: "' + full + '".\nNội dung bài: ' + bodyTxt +
+      '\n\nViết 6 TIÊU ĐỀ (H1) khác nhau. Mỗi tiêu đề: là MỘT CÂU HOÀN CHỈNH, trọn nghĩa, không bị bỏ lửng; dài 45-65 ký tự (đếm cả dấu cách); ' +
+      'chứa NGUYÊN VĂN cụm từ khóa "' + kw + '" (đúng chính tả, đúng dấu, đúng thứ tự), ưu tiên đặt từ khóa ở đầu; ' +
+      'không dùng dấu ":" "|" " - " để ngăn cách; không kết thúc bằng "..." hay giới từ/liên từ; giữ nguyên số hiệu văn bản, con số trong bài.\n' +
+      'Viết thêm 2 META DESCRIPTION: 140-155 ký tự, mở đầu bằng từ khóa "' + kw + '", là câu hoàn chỉnh, kết bằng lời mời hành động và dấu chấm.\n' +
+      'Chỉ trả về JSON {"titles":["..."],"metas":["..."]}');
+    var titles = ((j && j.titles) || []).map(function (t) { return cleanTitle(t).replace(/["“”]/g, ''); });
+    var good = titles.filter(function (t) { return titleOk(t, kw); });
+    var lead = function (x) { return norm(x).indexOf(norm(kw)) === 0 ? 1 : 0; };   // từ khóa đứng đầu → ưu tiên
+    good.sort(function (x, y) { return lead(y) - lead(x); });
+    var t = titleOk(full, kw) ? full : (good[0] || fallbackTitle(kw, full));
+    var metas = ((j && j.metas) || []).map(function (m) { return String(m || '').trim(); }).filter(function (m) { return metaOk(m, kw); });
+    a.title = t;
+    if (!metaOk(a.metaDescription, kw) && metas[0]) a.metaDescription = metas[0];
+    refreshSidebar(a);
+    notify(titleOk(t, kw) ? '✅ Tiêu đề: "' + t + '" (' + t.length + ' ký tự, có từ khóa)' : '⚠ Nên xem lại tiêu đề — chưa tạo được tiêu đề đạt chuẩn');
+  }
+  // Giới hạn SEO của trang gốc: không cắt cụt tiêu đề / meta nữa (tiêu đề dài sẽ được AI viết lại trọn câu).
+  function wrapLimits() {
+    if (typeof enforceSEOLimits === 'function' && !enforceSEOLimits._qc) {
+      var orig = enforceSEOLimits;
+      window.enforceSEOLimits = function (a) {
+        if (!a) return a;
+        var title = cleanTitle(a.title), meta = a.metaDescription;
+        var out = orig.apply(this, arguments) || a;
+        out.title = title;                      // giữ nguyên câu (chỉ bỏ dấu phân cách)
+        out._qcFullTitle = title;
+        if (meta) out.metaDescription = meta;
+        return out;
+      };
+      window.enforceSEOLimits._qc = true;
+    }
+  }
+  wrapLimits();
+  window.qcTitle = { titleOk: titleOk, metaOk: metaOk, cleanTitle: cleanTitle, fallbackTitle: fallbackTitle, fix: fixTitleKeyword };
+
   function wrapGenerator() {
     if (typeof generate === 'function' && !generate._qc) {
       var origGen = generate;
@@ -192,8 +311,14 @@
         var sel = document.getElementById('legal-link-mode');
         var verify = sel && sel.value === VERIFY;
         if (verify) { sel.value = 'strip'; window._qcVerifying = true; }
+        var before = typeof curArticle !== 'undefined' ? curArticle : null;
         try { return await origGen.apply(this, arguments); }
-        finally { if (verify) { sel.value = VERIFY; window._qcVerifying = false; } }
+        finally {
+          if (verify) { sel.value = VERIFY; window._qcVerifying = false; }
+          if (typeof curArticle !== 'undefined' && curArticle && curArticle !== before) {
+            try { await fixTitleKeyword(curArticle); } catch (e) { console.warn('fixTitleKeyword', e); }
+          }
+        }
       };
       window.generate._qc = true;
     }
@@ -448,6 +573,7 @@
                       setJobImage: function (u) { jobImage = u || null; } };
 
   function init() {
+    wrapLimits();
     wrapImages();
     addVerifyOption();
     wrapGenerator();

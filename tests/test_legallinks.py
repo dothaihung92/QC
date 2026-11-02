@@ -173,3 +173,11 @@ def test_bridge_picks_matching_images_not_random():
     assert "ẢNH KHO" in js and "OFF_TOPIC" in js and "titleCard" in js
     assert "picsum.photos/seed" not in js                           # không còn ảnh ngẫu nhiên
     assert "image: n.image_url" in c.get("/").text                  # bài từ Tin tức AI mang theo ảnh của bài tin
+
+
+def test_bridge_keeps_titles_whole_and_with_keyword():
+    c = TestClient(server.app)
+    js = c.get("/qc-bridge.js").text
+    assert "window.enforceSEOLimits = function" in js and "fixTitleKeyword" in js and "NGUYÊN VĂN" in js
+    page = c.get("/seo-writer").text
+    assert '"focusKeyword":"${kw}"' in page and "PHẢI CHỨA NGUYÊN VĂN từ khóa" in page
