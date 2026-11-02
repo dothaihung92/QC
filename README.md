@@ -138,6 +138,7 @@ trình duyệt như trên. Bài đăng trong nhóm **không có** thống kê/b�
 ## Viết bài bằng AI
 
 - **✍️ Viết bài SEO** (nút trên thanh menu, mở `/seo-writer`): công cụ SEO Article Writer dùng Gemini. Ở tab *Tin tức AI*, nút **✍️ SEO bài viết** chuyển bài tin sang đây, tự điền form (từ khóa, văn bản pháp luật, nội dung nguồn) và tự bấm tạo bài chuẩn SEO (cần Gemini key đã nhập ở tab này).
+- **🔎 Tự gắn link văn bản pháp luật**: bài Tin tức AI và bài ở tab Viết bài SEO (chế độ "Tự tìm & gắn link THẬT") được tự tìm các Nghị định / Thông tư / Luật / Công văn có số hiệu trong bài trên thuvienphapluat.vn, vanban.chinhphu.vn, luatvietnam.vn…; phần mềm mở thử từng link (đúng số hiệu, không 404) rồi mới gắn vào lần nhắc đầu tiên. Bài web có thêm mục "Văn bản pháp luật liên quan", bài Facebook có dòng "📄 Xem văn bản gốc". Không tìm được link chắc chắn thì giữ nguyên tên văn bản.
   Viết xong, trong khung "Đăng lên Facebook" có thêm 2 nút **💾 Lưu nháp vào QC** và
   **📤 Đăng ngay lên Fanpage** — bài được đưa thẳng vào tab *Bài đăng* (kèm link bài viết).
   Thay `static/seo-writer.html` bằng bản mới hơn vẫn giữ 2 nút này (máy chủ tự chèn `qc-bridge.js`).

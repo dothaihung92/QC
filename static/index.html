@@ -607,6 +607,7 @@
         <label style="font-weight:400"><input type="checkbox" id="nwFb" style="width:auto"> Đăng lên Fanpage</label>
         <label style="font-weight:400"><input type="checkbox" id="nwSlot" style="width:auto"> Bài Fanpage xếp vào <b>khung giờ vàng</b> kế tiếp (không đăng ngay)</label>
         <label style="font-weight:400"><input type="checkbox" id="nwImg" style="width:auto"> Dùng ảnh của bài nguồn (chú ý bản quyền ảnh)</label>
+        <label style="font-weight:400"><input type="checkbox" id="nwLegal" style="width:auto"> 🔎 Tự tìm Nghị định / Thông tư / Luật trong bài và gắn link văn bản gốc (phần mềm mở thử, chỉ gắn link đúng)</label>
         <label style="font-weight:400"><input type="checkbox" id="nwEnabled" style="width:auto"> Bật chạy tự động theo lịch</label>
         <label style="font-weight:400"><input type="checkbox" id="nwAuto" style="width:auto"> Tự đăng luôn, không cần duyệt (không khuyến nghị)</label>
       </div>
@@ -756,7 +757,7 @@ async function loadNews() {
   $('nwBrand').value = c.brand_note; $('nwPublic').value = c.public_url;
   $('nwWpUrl').value = c.wp_url; $('nwWpUser').value = c.wp_user;
   $('nwInterval').value = c.interval_hours; $('nwMax').value = c.max_per_run; $('nwAge').value = c.max_age_days;
-  $('nwWeb').checked = c.post_to_web; $('nwFb').checked = c.post_to_fb; $('nwSlot').checked = c.on_slot; $('nwImg').checked = c.use_images;
+  $('nwWeb').checked = c.post_to_web; $('nwFb').checked = c.post_to_fb; $('nwSlot').checked = c.on_slot; $('nwImg').checked = c.use_images; $('nwLegal').checked = c.legal_links;
   $('nwEnabled').checked = c.enabled; $('nwAuto').checked = c.auto_publish;
   $('nwKeyState').textContent = c.has_gemini_key ? '— đã lưu' : '— chưa có';
   $('nwWpState').textContent = c.has_wp_password ? '— đã lưu' : '';
@@ -791,7 +792,7 @@ async function newsSave() {
     keywords: nl('nwKeywords'), feeds: nl('nwFeeds'), gemini_key: $('nwKey').value, brand_note: $('nwBrand').value,
     public_url: $('nwPublic').value, wp_url: $('nwWpUrl').value, wp_user: $('nwWpUser').value,
     wp_app_password: $('nwWpPass').value, interval_hours: $('nwInterval').value, max_per_run: $('nwMax').value, max_age_days: $('nwAge').value,
-    post_to_web: $('nwWeb').checked, post_to_fb: $('nwFb').checked, on_slot: $('nwSlot').checked, use_images: $('nwImg').checked,
+    post_to_web: $('nwWeb').checked, post_to_fb: $('nwFb').checked, on_slot: $('nwSlot').checked, use_images: $('nwImg').checked, legal_links: $('nwLegal').checked,
     enabled: $('nwEnabled').checked, auto_publish: $('nwAuto').checked } });
   $('nwKey').value = ''; $('nwWpPass').value = '';
   toast('✅ Đã lưu cài đặt'); loadNews();

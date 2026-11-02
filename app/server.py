@@ -1,5 +1,6 @@
 """Máy chủ: bảng điều khiển + webhook Facebook + lịch đăng bài."""
 import csv
+import html
 import io
 import logging
 import re
@@ -17,7 +18,7 @@ from fastapi.responses import (FileResponse, HTMLResponse, PlainTextResponse, Re
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
-from . import autoreply, bot, config, content, db, facebook, newsagent, replies, video
+from . import autoreply, bot, config, content, db, facebook, legallinks, newsagent, replies, video
 from .facebook import FacebookError
 
 try:
@@ -823,6 +824,18 @@ def sync_stats(limit: int = 20):
     except FacebookError as e:
         raise _fb_error(e, "stats")
     return _stats_payload()
+
+
+# ----- Link văn bản pháp luật (tab Viết bài SEO) -----------------------------
+
+@admin.post("/api/legal/links")
+def legal_links(body: dict):
+    """Nhận các đoạn HTML của bài → tìm văn bản pháp luật được nhắc, kiểm tra link thật rồi gắn vào."""
+    parts = [str(p or "") for p in (body.get("parts") or [])][:80]
+    text = re.sub(r"<[^>]+>", " ", "\n".join(parts) + "\n" + str(body.get("text") or ""))
+    key = str(body.get("gemini_key") or "").strip() or newsagent.get_config().get("gemini_key", "")
+    refs = legallinks.resolve(html.unescape(text), key)
+    return {"parts": legallinks.link_html(parts, refs), "refs": refs}
 
 
 # ----- AI agent tin tức -------------------------------------------------------

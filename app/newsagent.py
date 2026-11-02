@@ -17,7 +17,7 @@ from urllib.parse import parse_qs, quote_plus, urljoin, urlparse
 
 import requests
 
-from . import config, db, facebook
+from . import config, db, facebook, legallinks
 from .facebook import FacebookError
 
 log = logging.getLogger("qc.news")
@@ -34,6 +34,7 @@ DEFAULTS = {
     "post_to_fb": True,
     "on_slot": True,              # bài Facebook xếp vào khung giờ vàng kế tiếp thay vì đăng ngay
     "use_images": True,
+    "legal_links": True,          # tự tìm Nghị định/Thông tư... trong bài và gắn link thật (đã kiểm tra)
     "public_url": "",             # địa chỉ web của bạn, vd https://dailythuehungphuc.com
     "brand_note": "",             # câu giới thiệu dịch vụ/phần mềm chèn cuối bài
     "wp_url": "", "wp_user": "", "wp_app_password": "",
@@ -319,15 +320,56 @@ def slugify(title: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s).strip("-")[:70] or "bai-viet"
 
 
+def _inline(text: str) -> str:
+    """Chữ trong 1 dòng: escape HTML, **đậm**, [chữ](link)."""
+    out = html.escape(text, quote=False)
+    out = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", out)
+    return re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)",
+                  lambda m: f'<a href="{html.escape(html.unescape(m.group(2)))}" target="_blank" '
+                            f'rel="noopener">{m.group(1)}</a>', out)
+
+
 def body_to_html(body: str) -> str:
     parts = []
     for block in re.split(r"\n\s*\n", body.strip()):
         block = block.strip()
         if block.startswith("## "):
-            parts.append(f"<h2>{html.escape(block[3:])}</h2>")
-        elif block:
-            parts.append("<p>" + html.escape(block).replace("\n", "<br>") + "</p>")
+            parts.append(f"<h2>{_inline(block[3:])}</h2>")
+            continue
+        para, items = [], []
+        for line in block.split("\n"):
+            m = re.match(r"\s*[-*•]\s+(.*)", line)
+            if m:
+                if para:
+                    parts.append("<p>" + "<br>".join(para) + "</p>")
+                    para = []
+                items.append(f"<li>{_inline(m.group(1))}</li>")
+            else:
+                if items:
+                    parts.append("<ul>" + "".join(items) + "</ul>")
+                    items = []
+                if line.strip():
+                    para.append(_inline(line.strip()))
+        if para:
+            parts.append("<p>" + "<br>".join(para) + "</p>")
+        if items:
+            parts.append("<ul>" + "".join(items) + "</ul>")
     return "\n".join(parts)
+
+
+def add_legal_links(item: dict, cfg: dict) -> dict:
+    """Tìm văn bản pháp luật trong bài → gắn link thật vào bài web + thêm dòng "Xem văn bản gốc" cho Facebook."""
+    if not cfg.get("legal_links", True) or not item.get("body"):
+        return {}
+    try:
+        refs = legallinks.resolve(f"{item.get('title', '')}\n{item['body']}", cfg.get("gemini_key", ""))
+    except Exception as e:                                         # noqa: BLE001 — lỗi tìm link không chặn bài
+        log.info("legal links: %s", e)
+        return {}
+    if not any(r.get("url") for r in refs):
+        return {}
+    return {"body": legallinks.link_markdown(item["body"], refs),
+            "fb_text": legallinks.fb_footer(item.get("fb_text", ""), refs)}
 
 
 def article_html(item: dict, with_source=True) -> str:
@@ -381,6 +423,7 @@ def process_url(it: dict, cfg: dict) -> int:
         if not res["relevant"] or not res["body"]:
             db.news_update(item_id, status="skipped", error="AI: không liên quan kế toán/thuế")
             return item_id
+        res |= add_legal_links(res, cfg)
         db.news_update(item_id, status="pending", title=res["title"] or it["title"],
                        summary=res["summary"], body=res["body"], fb_text=res["fb_text"],
                        image_url=art["image"] if cfg["use_images"] else "")
@@ -414,6 +457,10 @@ def publish_item(item_id: int, cfg=None) -> dict:
     item = db.news_get(item_id)
     if not item or item["status"] not in ("pending", "failed"):
         raise ValueError("Bài không ở trạng thái chờ đăng")
+    linked = add_legal_links(item, cfg)               # bài sửa tay / bài cũ: gắn link văn bản còn thiếu
+    if linked:
+        db.news_update(item_id, **linked)
+        item |= linked
     web_url, errors, web_ok = "", [], False
     slug = _unique_slug(slugify(item["title"]), item_id)
     db.news_update(item_id, slug=slug)
