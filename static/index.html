@@ -816,7 +816,7 @@ async function newsToSeo(id) {
   const n = NEWS.find(x => x.id === id); if (!n) return;
   const val = (p) => $(p + id)?.value ?? '';
   const job = { id: Date.now(), title: val('nt') || n.title || n.orig_title, body: val('nb') || n.body || n.summary || '',
-                url: n.url, source: n.source || '' };
+                url: n.url, source: n.source || '', image: n.image_url || '' };
   await api('/api/news/' + id, { method: 'PUT', body: { title: val('nt'), body: val('nb'), fb_text: val('nf') } }).catch(() => {});
   try { localStorage.setItem('qc_seo_job', JSON.stringify(job)); } catch (e) {}
   const seen = !!$('seoFrame').src;                 // tab SEO đã nạp rồi → gửi thẳng; chưa thì tab tự đọc khi mở

@@ -81,6 +81,7 @@
     try { localStorage.removeItem('qc_seo_job'); } catch (e) {}
     var set = function (id, v) { var el = document.getElementById(id); if (el) el.value = v; };
     var body = String(job.body || '').replace(/\s+\n/g, '\n').slice(0, 7000);
+    jobImage = job.image || null;              // ảnh của bài tin → dùng làm ảnh đầu bài SEO
     set('kw', job.title || '');
     set('legal-ref', legalRef((job.title || '') + ' ' + body));
     set('legal-link', '');
@@ -222,7 +223,232 @@
   }
   wrapGenerator();
 
+  // ── Ảnh khớp nội dung bài ─────────────────────────────────────────────
+  // Trước đây: từ khóa ảnh chung chung + "vietnam" → ra ảnh du lịch/phong cảnh; chọn ảnh ngẫu nhiên
+  // trong 5 trang kết quả; không có key thì lấy ảnh ngẫu nhiên (picsum.photos) → ảnh không liên quan.
+  // Bây giờ: AI đọc TỪNG ĐOẠN rồi đặt từ khóa ảnh tiếng Anh cụ thể; chấm điểm mô tả ảnh (Pexels alt,
+  // Pixabay tags) với từ khóa, loại ảnh du lịch/phong cảnh; không có ảnh khớp thì tạo ảnh bìa có
+  // tiêu đề đoạn (luôn đúng nội dung) thay vì ảnh ngẫu nhiên. Bài từ "Tin tức AI" dùng ảnh của bài tin.
+  var STOP = { a: 1, an: 1, the: 1, of: 1, and: 1, or: 1, in: 1, on: 1, at: 1, to: 1, for: 1, with: 1, by: 1,
+    is: 1, are: 1, from: 1, vietnam: 1, vietnamese: 1, asian: 1, asia: 1, photo: 1, image: 1, stock: 1, scene: 1 };
+  var OFF_TOPIC = /\b(temple|pagoda|beach|landscape|mountain|lake|river|noodle|pho|motorbike|scooter|rice field|terrace|bay|tourist|travel|boat|lantern|vacation|wedding|church|sunset|forest|waterfall|island|hotel|resort|dish|food|cuisine|dance|festival|flower|animal|dog|cat|bird)\b/i;
+  var VI_EN = [[/hóa đơn/i, 'invoice receipt'], [/thuế/i, 'tax documents calculator'], [/kế toán/i, 'accountant bookkeeping'],
+    [/quyết toán/i, 'tax return forms'], [/hộ kinh doanh|cửa hàng|tiểu thương/i, 'small shop owner'],
+    [/doanh nghiệp|công ty/i, 'business office team'], [/lương|tiền công|người lao động/i, 'employee salary payroll'],
+    [/bảo hiểm|bhxh/i, 'social insurance documents'], [/ngân hàng|tài khoản/i, 'bank account payment'],
+    [/phạt|vi phạm|cưỡng chế/i, 'penalty notice documents'], [/doanh thu|lợi nhuận|lãi|lỗ/i, 'revenue profit chart'],
+    [/hợp đồng/i, 'contract signing'], [/luật|nghị định|thông tư|quy định/i, 'law regulation documents'],
+    [/kê khai|tờ khai|nộp/i, 'filling tax form laptop'], [/hoàn thuế/i, 'tax refund money']];
+
+  function words(s) {
+    return String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)
+      .filter(function (w) { return w.length > 2 && !STOP[w]; })
+      .map(function (w) { return w.replace(/(ies)$/, 'y').replace(/([^s])s$/, '$1'); });
+  }
+  function matchScore(query, desc) {
+    var q = words(query), d = {};
+    words(desc).forEach(function (w) { d[w] = 1; });
+    if (!q.length) return 0;
+    var hit = q.filter(function (w) { return d[w]; }).length;
+    var sc = hit / q.length;
+    if (OFF_TOPIC.test(desc) && !OFF_TOPIC.test(query)) sc -= 1;        // ảnh du lịch/món ăn… cho bài thuế
+    return sc;
+  }
+  function plain(html) { return String(html || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); }
+  function viToEn(text) {
+    var out = [];
+    VI_EN.forEach(function (p) { if (p[0].test(text) && out.length < 3) out.push(p[1]); });
+    return out.length ? out : ['business documents office'];
+  }
+
+  async function stockCandidates(q) {
+    var out = [], pex = localStorage.getItem('pexkey'), pxb = localStorage.getItem('pkey');
+    if (pex) {
+      try {
+        var r = await fetch('https://api.pexels.com/v1/search?per_page=40&orientation=landscape&query=' + encodeURIComponent(q),
+          { headers: { Authorization: pex } });
+        if (r.ok) ((await r.json()).photos || []).forEach(function (p) {
+          var src = p.src && (p.src.large || p.src.medium);
+          if (src) out.push({ src: src, desc: (p.alt || '') + ' ' + String(p.url || '').split('/').slice(-2, -1)[0].replace(/-/g, ' ') });
+        });
+      } catch (e) {}
+    }
+    if (pxb) {
+      try {
+        var r2 = await fetch('https://pixabay.com/api/?image_type=photo&orientation=horizontal&safesearch=true&per_page=40&min_width=600&key=' +
+          pxb + '&q=' + encodeURIComponent(q));
+        if (r2.ok) ((await r2.json()).hits || []).forEach(function (h) { out.push({ src: h.webformatURL, desc: h.tags || '' }); });
+      } catch (e) {}
+    }
+    return out;
+  }
+
+  // Chọn ảnh có mô tả khớp từ khóa nhất (bỏ ảnh đã dùng); skip = số ảnh tốt bỏ qua (nút "Tìm ảnh mới").
+  async function pickStock(queries, used, skip) {
+    var pool = [];
+    for (var i = 0; i < queries.length; i++) {
+      var cands = await stockCandidates(queries[i]);
+      cands.forEach(function (c, rank) {
+        if (used[c.src]) return;
+        // điểm khớp + ưu tiên nhẹ kết quả đứng đầu + ưu tiên từ khóa đầu (cụ thể nhất)
+        pool.push({ src: c.src, sc: matchScore(queries[i], c.desc) + (0.15 * (1 - rank / 40)) - i * 0.05 });
+      });
+      var good = pool.filter(function (p) { return p.sc >= 0.6; });
+      if (good.length > (skip || 0)) break;                     // đủ ảnh khớp → khỏi tìm thêm
+    }
+    pool.sort(function (a, b) { return b.sc - a.sc; });
+    pool = pool.filter(function (p) { return p.sc >= 0.35; });  // dưới ngưỡng = không liên quan → bỏ
+    return pool.length ? pool[(skip || 0) % pool.length].src : null;
+  }
+
+  // Ảnh bìa có tiêu đề đoạn — luôn khớp nội dung (dùng khi không có ảnh kho phù hợp / chưa có key ảnh).
+  function titleCard(heading, idx) {
+    return new Promise(function (resolve) {
+      var c = document.createElement('canvas');
+      c.width = 1200; c.height = 630;
+      var g = c.getContext('2d');
+      var themes = [['#0f3d91', '#1e6fd9'], ['#0b6e4f', '#18a274'], ['#7a2e8e', '#b04fc9'], ['#9a3412', '#ea580c'], ['#1e3a5f', '#2f6aa3']];
+      var t = themes[(idx || 0) % themes.length];
+      var grd = g.createLinearGradient(0, 0, 1200, 630);
+      grd.addColorStop(0, t[0]); grd.addColorStop(1, t[1]);
+      g.fillStyle = grd; g.fillRect(0, 0, 1200, 630);
+      g.globalAlpha = 0.08; g.fillStyle = '#fff';
+      for (var k = 0; k < 6; k++) { g.beginPath(); g.arc(1000 - k * 60, 120 + k * 70, 160 - k * 18, 0, 7); g.fill(); }
+      g.globalAlpha = 1;
+      var icon = /hóa đơn/i.test(heading) ? '🧾' : /lương|lao động/i.test(heading) ? '👥' : /phạt|vi phạm/i.test(heading) ? '⚠️'
+        : /doanh thu|lãi|lỗ|lợi nhuận|%/i.test(heading) ? '📊' : /luật|nghị định|thông tư|quy định/i.test(heading) ? '⚖️'
+        : /hỏi|\?/.test(heading) ? '💬' : '📌';
+      // Chữ canh giữa, chừa lề rộng 2 bên: khung xem trước cắt ảnh theo chiều ngang vẫn không mất chữ
+      g.textAlign = 'center';
+      g.font = '96px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif';
+      g.fillText(icon, 600, 160);
+      g.fillStyle = '#fff';
+      var size = 64, lines;
+      do {                                                     // thu nhỏ chữ cho vừa tối đa 4 dòng
+        g.font = 'bold ' + size + 'px "Segoe UI",Roboto,Arial,sans-serif';
+        lines = []; var cur = '';
+        String(heading || '').split(/\s+/).forEach(function (w) {
+          var tr = cur ? cur + ' ' + w : w;
+          if (g.measureText(tr).width > 760 && cur) { lines.push(cur); cur = w; } else cur = tr;
+        });
+        if (cur) lines.push(cur);
+        size -= 4;
+      } while (lines.length > 4 && size > 30);
+      var lh = size + 18, top = 330 - (Math.min(lines.length, 4) - 1) * lh / 2;
+      lines.slice(0, 4).forEach(function (l, i) { g.fillText(l, 600, top + i * lh); });
+      var brand = ((document.getElementById('cta-title') || {}).value || '').trim();
+      if (brand) { g.font = '600 30px "Segoe UI",Roboto,Arial,sans-serif'; g.globalAlpha = 0.85; g.fillText(brand, 600, 580); }
+      c.toBlob(function (b) { resolve(b ? URL.createObjectURL(b) : c.toDataURL('image/jpeg', 0.9)); }, 'image/jpeg', 0.9);
+    });
+  }
+
+  // AI đọc từng đoạn → 3 từ khóa ảnh tiếng Anh cụ thể cho mỗi đoạn.
+  async function aiImageQueries(a) {
+    var gkey = ((document.getElementById('gkey') || {}).value || '').trim();
+    var secs = (a.sections || []).map(function (s, i) { return { i: i, s: s }; }).filter(function (x) { return x.s.imageQuery; });
+    if (!gkey || !secs.length || typeof callGeminiWithFallback !== 'function') return null;
+    var list = secs.map(function (x) {
+      return '#' + x.i + ' | ' + (x.s.heading || a.title || '') + ' | ' + plain(x.s.content).slice(0, 350);
+    }).join('\n');
+    var prompt = 'Bài viết: "' + (a.title || '') + '". Với MỖI đoạn dưới đây, đặt 3 từ khóa tìm ẢNH KHO (Pexels/Pixabay) bằng TIẾNG ANH, ' +
+      'mỗi từ khóa 2-4 từ, mô tả VẬT/NGƯỜI/HÀNH ĐỘNG cụ thể nhìn thấy được, khớp đúng nội dung đoạn đó ' +
+      '(vd đoạn về giảm thuế cho hộ kinh doanh → "small shop owner calculator", "tax form documents", "cashier counting money"; ' +
+      'đoạn về hóa đơn điện tử → "electronic invoice laptop"; đoạn về lương → "payroll salary envelope"). ' +
+      'KHÔNG dùng tên quốc gia, phong cảnh, du lịch, địa danh, món ăn, từ trừu tượng (policy, success, growth). ' +
+      'Từ khóa đầu tiên là cụ thể nhất. Các đoạn khác nhau phải có ảnh khác nhau.\n' + list +
+      '\nTrả về CHỈ JSON: {"items":[{"i":0,"q":["...","...","..."]}]}';
+    try {
+      var res = await callGeminiWithFallback(gkey, {
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.3, maxOutputTokens: 2000, responseMimeType: 'application/json' }
+      });
+      var raw = ((res.data.candidates || [])[0] || {}).content;
+      raw = raw ? (raw.parts || []).map(function (p) { return p.text || ''; }).join('') : '';
+      var j = typeof extractJSON === 'function' ? extractJSON(raw) : JSON.parse(raw);
+      var map = {};
+      ((j && j.items) || []).forEach(function (it) {
+        var q = (it.q || []).map(String).filter(function (x) { return x && !/viet|asia/i.test(x); }).slice(0, 3);
+        if (q.length) map[it.i] = q;
+      });
+      return map;
+    } catch (e) { return null; }
+  }
+
+  function sectionQueries(s, a, aiMap, i) {
+    if (s._qcQueries) return s._qcQueries;
+    var q = (aiMap && aiMap[i]) || [];
+    var base = String(s.imageQuery || '').replace(/\b(vietnam(ese)?|asian?)\b/gi, '').replace(/\s+/g, ' ').trim();
+    if (!q.length) {
+      if (base && !/[à-ỹđ]/i.test(base)) q.push(base);       // từ khóa AI viết bài (đã bỏ "vietnam")
+      q = q.concat(viToEn((s.heading || '') + ' ' + plain(s.content).slice(0, 300) + ' ' + (a.title || '')));
+    }
+    s._qcQueries = q;
+    return q;
+  }
+
+  function loadable(src) {
+    return new Promise(function (ok) {
+      var im = new Image();
+      im.referrerPolicy = 'no-referrer';
+      im.onload = function () { ok(im.naturalWidth >= 300); };
+      im.onerror = function () { ok(false); };
+      im.src = src;
+    });
+  }
+
+  var jobImage = null;                         // ảnh của bài tin gửi sang từ tab "Tin tức AI"
+  async function qcLoadImages(sections) {
+    var a = (typeof curArticle !== 'undefined' && curArticle) || { sections: sections };
+    var idxs = [];
+    (sections || []).forEach(function (s, i) { if (s.imageQuery) idxs.push(i); });
+    if (!idxs.length) return;
+    notify('🖼 Đang chọn ảnh khớp nội dung từng đoạn...');
+    var aiMap = await aiImageQueries(a);
+    var used = {};
+    for (var k = 0; k < idxs.length; k++) {
+      var i = idxs[k], s = sections[i];
+      var box = document.getElementById('imgbox-sec-' + i);
+      if (!box) continue;
+      var src = null;
+      if (k === 0 && jobImage && await loadable(jobImage)) src = jobImage;       // ảnh đầu = ảnh bài tin gốc
+      if (!src) src = await pickStock(sectionQueries(s, a, aiMap, i), used, 0);
+      if (!src) src = await titleCard(s.heading || a.title || '', k);
+      used[src] = 1;
+      s._imgUrl = src; s._blobUrl = null; s._localFile = null;
+      setImg(box, src);
+    }
+    jobImage = null;
+  }
+
+  async function qcRefreshImg(sectionIdx, event) {
+    if (event && event.stopPropagation) event.stopPropagation();
+    if (typeof curArticle === 'undefined' || !curArticle || !curArticle.sections) return;
+    var s = curArticle.sections[sectionIdx];
+    var box = document.getElementById('imgbox-sec-' + sectionIdx);
+    if (!s || !s.imageQuery || !box) return;
+    var loadEl = box.querySelector('.img-loading'), imgEl = box.querySelector('img');
+    if (loadEl) loadEl.style.display = 'flex';
+    if (imgEl) imgEl.style.display = 'none';
+    s._qcRefresh = (s._qcRefresh || 0) + 1;
+    var used = {};
+    curArticle.sections.forEach(function (x) { if (x._imgUrl) used[x._imgUrl] = 1; });
+    var src = await pickStock(sectionQueries(s, curArticle, null, sectionIdx), used, s._qcRefresh - 1)
+      || await titleCard(s.heading || curArticle.title || '', sectionIdx + s._qcRefresh);
+    s._imgUrl = src; s._blobUrl = null; s._localFile = null;
+    setImg(box, src);
+    notify('🖼 Đã đổi ảnh khớp nội dung cho đoạn ' + (sectionIdx + 1));
+  }
+
+  function wrapImages() {
+    if (typeof loadImages === 'function' && !loadImages._qc) { window.loadImages = qcLoadImages; window.loadImages._qc = true; }
+    if (typeof refreshImg === 'function' && !refreshImg._qc) { window.refreshImg = qcRefreshImg; window.refreshImg._qc = true; }
+  }
+  wrapImages();
+  window.qcImages = { matchScore: matchScore, pickStock: pickStock, titleCard: titleCard, viToEn: viToEn,
+                      setJobImage: function (u) { jobImage = u || null; } };
+
   function init() {
+    wrapImages();
     addVerifyOption();
     wrapGenerator();
     addButtons();

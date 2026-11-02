@@ -164,3 +164,12 @@ def test_legal_links_endpoint(web):
     assert d["parts"][2] == "<p>TT 1</p>"
     assert d["refs"][0]["code"] == "398/2026/NĐ-CP"
     assert "qcLinkLegalDocs" in c.get("/qc-bridge.js").text
+
+
+def test_bridge_picks_matching_images_not_random():
+    c = TestClient(server.app)
+    js = c.get("/qc-bridge.js").text
+    assert "window.loadImages = qcLoadImages" in js and "window.refreshImg = qcRefreshImg" in js
+    assert "ẢNH KHO" in js and "OFF_TOPIC" in js and "titleCard" in js
+    assert "picsum.photos/seed" not in js                           # không còn ảnh ngẫu nhiên
+    assert "image: n.image_url" in c.get("/").text                  # bài từ Tin tức AI mang theo ảnh của bài tin
