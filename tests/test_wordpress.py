@@ -10,6 +10,7 @@ class R:
         self.status_code, self.url = status, url
         self.headers = {"Content-Type": ctype}
         self.content = (text if text is not None else json.dumps(body or {})).encode()
+        self.text = self.content.decode()
 
     def json(self):
         return json.loads(self.content)
@@ -56,3 +57,56 @@ def test_bridge_routes_wordpress_calls_through_qc():
     js = c.get("/qc-bridge.js").text
     assert "/api/wp-proxy?url=" in js and "fixWpUrl" in js and "X-WP-Authorization" in js
     assert "Mật khẩu ứng dụng" in c.get("/seo-writer").text
+
+
+class FakeSession:
+    """Website WordPress giả: hosting bỏ header Authorization; đăng nhập wp-login.php bằng mật khẩu thường."""
+    logins = []
+
+    def __init__(self):
+        import requests
+        self.cookies = requests.cookies.RequestsCookieJar()
+        self.headers = {}
+
+    def get(self, url, params=None, **k):
+        if url.endswith("/wp-login.php"):
+            return R(200, text="<form id=loginform></form>", ctype="text/html", url=url)
+        if "admin-ajax.php" in url:
+            ok = any(c.name.startswith("wordpress_logged_in") for c in self.cookies)
+            return R(200, text="a1b2c3d4e5" if ok else "0", ctype="text/html", url=url)
+        raise AssertionError(url)
+
+    def post(self, url, data=None, **k):
+        FakeSession.logins.append(data["log"])
+        if data["pwd"] == "MatKhau$Dang!Nhap":
+            self.cookies.set("wordpress_logged_in_abc", "1")
+            return R(200, text="<html>dashboard</html>", ctype="text/html", url=url)
+        return R(200, text='<div id="login_error"><strong>Lỗi:</strong> Mật khẩu không đúng.</div>', ctype="text/html", url=url)
+
+    def request(self, method, url, headers=None, data=None, **k):
+        if headers.get("X-WP-Nonce") == "a1b2c3d4e5" and any(c.name.startswith("wordpress_logged_in") for c in self.cookies):
+            return R(201 if method == "POST" else 200, {"id": 7, "name": "Đỗ Hưng", "link": "https://x.vn/bai"})
+        return R(401, {"code": "rest_cookie_invalid_nonce", "message": "nonce"})
+
+
+def test_falls_back_to_browser_style_login_when_auth_header_is_stripped(monkeypatch):
+    monkeypatch.setattr(wordpress.requests, "request",
+                        lambda *a, **k: R(401, {"code": "rest_not_logged_in", "message": "Bạn hiện chưa đăng nhập."}))
+    monkeypatch.setattr(wordpress.requests, "Session", FakeSession)
+    wordpress._sessions.clear()
+    import base64
+    auth = "Basic " + base64.b64encode("DOHUNG:MatKhau$Dang!Nhap".encode()).decode()
+    c = TestClient(server.app)
+    r = c.get("/api/wp-proxy", params={"url": "https://x.vn/wp-json/wp/v2/users/me"}, headers={"X-WP-Authorization": auth})
+    assert r.status_code == 200 and r.json()["name"] == "Đỗ Hưng"
+    n = len(FakeSession.logins)
+    c.get("/api/wp-proxy", params={"url": "https://x.vn/wp-json/wp/v2/users/me"}, headers={"X-WP-Authorization": auth})
+    assert len(FakeSession.logins) == n                                   # dùng lại phiên đã đăng nhập
+    bad = "Basic " + base64.b64encode(b"DOHUNG:abcdABCDefgh1234ijkl5678").decode()     # trông như Mật khẩu ứng dụng
+    r = c.get("/api/wp-proxy", params={"url": "https://x.vn/wp-json/wp/v2/users/me"}, headers={"X-WP-Authorization": bad})
+    msg = r.json()["message"]
+    assert r.status_code == 401 and ".htaccess" in msg and "MẬT KHẨU ĐĂNG NHẬP" in msg and "Mật khẩu không đúng" in msg
+    # Tin tức AI đăng WordPress cũng dùng cơ chế này
+    item = {"title": "T", "summary": "s", "body": "b", "image_url": "", "url": "", "source": ""}
+    cfg = {"wp_url": "https://x.vn/wp-admin/", "wp_user": "DOHUNG", "wp_app_password": "MatKhau$Dang!Nhap"}
+    assert newsagent.post_to_wordpress(item, cfg) == "https://x.vn/bai"

@@ -723,6 +723,8 @@ textarea{resize:vertical;min-height:70px;line-height:1.6}
               <b>4. Category ID:</b> Bài viết → Chuyên mục → rê chuột vào tên chuyên mục, xem số sau <code>tag_ID=</code> trên thanh trạng thái (để 1 nếu chưa có).<br>
               <b>5.</b> Bấm <b>Kiểm tra kết nối</b>.<br>
               <b>Không thấy mục Mật khẩu ứng dụng?</b> Website cần HTTPS và WordPress ≥ 5.6; plugin bảo mật (Wordfence, iThemes, All-In-One Security…) có thể đang tắt — bật lại "Application Passwords" trong plugin.<br>
+              <b>Cách dễ nhất nếu vẫn báo "chưa đăng nhập":</b> ô App Password nhập luôn <b>mật khẩu đăng nhập WordPress</b> của tài khoản đó —
+              phần mềm tự đăng nhập như trình duyệt (không cần sửa hosting). Không dùng được khi trang đăng nhập có captcha / xác thực 2 lớp.<br>
               <b>Báo "không nhận được thông tin đăng nhập" (rest_not_logged_in)?</b> Hosting chặn header Authorization: thêm dòng
               <code>SetEnvIf Authorization "(.*)" HTTP_AUTHORIZATION=$1</code> vào đầu file <code>.htaccess</code> của website (hoặc nhờ bên hosting).
             </div>

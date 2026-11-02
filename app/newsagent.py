@@ -405,16 +405,11 @@ def _unique_slug(base: str, item_id: int) -> str:
 
 
 def post_to_wordpress(item: dict, cfg: dict) -> str:
-    r = requests.post(f"{wordpress.site_root(cfg['wp_url'])}/wp-json/wp/v2/posts",
-                      auth=(cfg["wp_user"], cfg["wp_app_password"]), timeout=60,
-                      json={"title": item["title"], "content": article_html(item),
-                            "excerpt": item["summary"], "status": "publish"})
-    try:
-        data = r.json()
-    except ValueError:
-        data = {}
-    if r.status_code >= 400:
-        raise RuntimeError(f"WordPress: {data.get('message', r.text[:200])}")
+    status, data = wordpress.request("POST", cfg["wp_url"], "wp/v2/posts", cfg["wp_user"], cfg["wp_app_password"],
+                                     {"title": item["title"], "content": article_html(item),
+                                      "excerpt": item["summary"], "status": "publish"})
+    if status >= 400:
+        raise RuntimeError(f"WordPress: {data.get('message', status)}")
     return data.get("link", "")
 
 
