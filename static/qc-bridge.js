@@ -106,6 +106,9 @@
   function addVerifyOption() {
     var sel = document.getElementById('legal-link-mode');
     if (!sel || sel.querySelector('option[value="' + VERIFY + '"]')) return;
+    // Bỏ chế độ "Để AI tự tìm link" (AI hay gắn link sai / tự bịa link)
+    var aiOpt = sel.querySelector('option[value="ai"]');
+    if (aiOpt) aiOpt.remove();
     var o = document.createElement('option');
     o.value = VERIFY;
     o.textContent = '🔎 Tự tìm & gắn link THẬT (phần mềm kiểm tra từng link) — khuyên dùng';
@@ -118,6 +121,7 @@
         'Không tìm được link chắc chắn thì chỉ ghi tên văn bản.';
     }
     try {                                   // lần đầu dùng bản này: chuyển sang chế độ tự tìm link
+      if (localStorage.getItem('legal_link_mode') === 'ai') localStorage.setItem('legal_link_mode', VERIFY);
       if (!localStorage.getItem('qc_legal_verify_default')) {
         localStorage.setItem('qc_legal_verify_default', '1');
         localStorage.setItem('legal_link_mode', VERIFY);
@@ -139,7 +143,8 @@
     try {
       var r = await fetch('/api/legal/links', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ parts: parts, gemini_key: (document.getElementById('gkey') || {}).value || '' })
+        body: JSON.stringify({ parts: parts, gemini_key: (document.getElementById('gkey') || {}).value || '',
+                               keep: [(document.getElementById('legal-link') || {}).value || ''] })
       });
       var d = await r.json().catch(function () { return {}; });
       if (!r.ok) { notify('⚠ Không gắn được link văn bản: ' + (d.detail || r.statusText)); return; }
@@ -200,7 +205,8 @@
           var strip = function (h) {
             return String(h || '').replace(/<a\s+[^>]*href=["']([^"']*)["'][^>]*>([\s\S]*?)<\/a>/gi, function (m, url, text) {
               var legal = typeof isLegalLink === 'function' ? isLegalLink(url) : /thuvienphapluat|luatvietnam|chinhphu\.vn/i.test(url);
-              return legal && !verified[url] ? '<strong>' + text + '</strong>' : m;
+              var own = ((document.getElementById('legal-link') || {}).value || '').trim();
+              return legal && !verified[url] && url !== own ? '<strong>' + text + '</strong>' : m;
             });
           };
           (a.sections || []).forEach(function (s) { if (s.content) s.content = strip(s.content); });

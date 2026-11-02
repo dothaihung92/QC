@@ -273,6 +273,7 @@ Quy tắc:
 - Nếu bài KHÔNG liên quan kế toán / thuế / hóa đơn / BHXH / quy định cho doanh nghiệp thì đặt "relevant": false.
 - body: văn bản thường, đoạn cách nhau một dòng trống, tiêu đề phụ bắt đầu bằng "## ". Không dùng HTML.
 - fb_text: bài đăng Facebook 4-8 dòng, mở bằng ý chính, có 1-2 emoji, kết bằng 3 hashtag. Không chèn link.
+- TUYỆT ĐỐI KHÔNG tự viết đường link / URL nào (kể cả link văn bản luật) trong body và fb_text — chỉ ghi tên + số hiệu văn bản. Phần mềm sẽ tự tìm và gắn link đã kiểm tra.
 {brand}
 Trả về DUY NHẤT một JSON: {{"relevant": true, "title": "...", "summary": "1-2 câu", "body": "...", "fb_text": "..."}}
 
@@ -358,18 +359,28 @@ def body_to_html(body: str) -> str:
 
 
 def add_legal_links(item: dict, cfg: dict) -> dict:
-    """Tìm văn bản pháp luật trong bài → gắn link thật vào bài web + thêm dòng "Xem văn bản gốc" cho Facebook."""
-    if not cfg.get("legal_links", True) or not item.get("body"):
-        return {}
-    try:
-        refs = legallinks.resolve(f"{item.get('title', '')}\n{item['body']}", cfg.get("gemini_key", ""))
-    except Exception as e:                                         # noqa: BLE001 — lỗi tìm link không chặn bài
-        log.info("legal links: %s", e)
-        return {}
-    if not any(r.get("url") for r in refs):
-        return {}
-    return {"body": legallinks.link_markdown(item["body"], refs),
-            "fb_text": legallinks.fb_footer(item.get("fb_text", ""), refs)}
+    """Tìm văn bản pháp luật trong bài → gắn link thật (đã kiểm tra) vào bài web + dòng "Xem văn bản gốc" cho Facebook.
+    Link luật do AI tự viết (chưa kiểm tra) LUÔN bị gỡ, kể cả khi tắt tính năng tự tìm link."""
+    body, fb = item.get("body") or "", item.get("fb_text") or ""
+    refs = []
+    if cfg.get("legal_links", True) and body:
+        try:
+            refs = legallinks.resolve(f"{item.get('title', '')}\n{body}", cfg.get("gemini_key", ""))
+        except Exception as e:                                     # noqa: BLE001 — lỗi tìm link không chặn bài
+            log.info("legal links: %s", e)
+    elif body:
+        refs = legallinks.cached(f"{item.get('title', '')}\n{body}\n{fb}")      # giữ link đã kiểm tra từ trước
+    new_body = legallinks.strip_unverified(body, refs)
+    new_fb = legallinks.strip_unverified(fb, refs)
+    if cfg.get("legal_links", True) and any(r.get("url") for r in refs):
+        new_body = legallinks.link_markdown(new_body, refs)
+        new_fb = legallinks.fb_footer(new_fb, refs)
+    out = {}
+    if new_body != body:
+        out["body"] = new_body
+    if new_fb != fb:
+        out["fb_text"] = new_fb
+    return out
 
 
 def article_html(item: dict, with_source=True) -> str:

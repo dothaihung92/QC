@@ -1,12 +1,16 @@
 """Tự tìm văn bản pháp luật được nhắc trong bài (Nghị định, Thông tư, Luật, Công văn...) và gắn link THẬT.
 
-Cách làm để không gắn link sai / link 404:
+Nguyên tắc: KHÔNG BAO GIỜ dùng link do AI tự viết ra; chỉ gắn link lấy từ kết quả tìm kiếm thật
+và đã mở thử đúng văn bản. Không chắc chắn → không gắn (chỉ ghi tên văn bản).
 1. Tách số hiệu văn bản trong bài (vd "Nghị định 398/2026/NĐ-CP").
-2. Tìm trên công cụ tìm kiếm (Bing, DuckDuckGo; có Gemini key thì thêm Google qua Gemini)
-   — chỉ nhận kết quả thuộc trang văn bản pháp luật tin cậy.
-3. Mở thử từng link: trang phải tồn tại và đúng số hiệu (trong địa chỉ hoặc tiêu đề trang).
-4. Ghi nhớ kết quả (tìm được: 30 ngày, chưa tìm được: 12 giờ) để lần sau nhanh.
-Không tìm được link chắc chắn thì giữ nguyên tên văn bản, không gắn gì.
+2. Tìm trên ô tìm kiếm thuvienphapluat.vn, Bing, DuckDuckGo; có Gemini key thì thêm nguồn Google
+   (chỉ lấy địa chỉ trong danh sách nguồn Google trả về, bỏ mọi URL AI tự viết trong câu trả lời).
+3. Chỉ nhận TRANG VĂN BẢN của cơ sở dữ liệu pháp luật (thuvienphapluat.vn/van-ban/…aspx,
+   vanban.chinhphu.vn …docid=…, luatvietnam.vn …-d1.html) — không nhận bài báo/bài tin nhắc tới văn bản.
+4. Mở thử link: trang phải tồn tại (không 404, không bị chuyển về trang khác) và văn bản ĐẦU TIÊN
+   trong tiêu đề trang phải đúng số hiệu (để không nhầm "Thông tư 20 hướng dẫn Nghị định 398").
+   Trang chặn máy đọc thì chỉ nhận khi CẢ địa chỉ lẫn tiêu đề kết quả tìm kiếm đều mở đầu bằng đúng số hiệu.
+5. Ghi nhớ kết quả (tìm được: 30 ngày, chưa tìm được: 12 giờ) để lần sau nhanh.
 """
 import html
 import logging
@@ -25,16 +29,17 @@ log = logging.getLogger("qc.legal")
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
-# Trang tin cậy, xếp theo thứ tự ưu tiên. (tên miền, đoạn đường dẫn bắt buộc)
+# Cơ sở dữ liệu văn bản tin cậy, theo thứ tự ưu tiên: (tên miền, mẫu địa chỉ của TRANG VĂN BẢN)
 TRUSTED = [
-    ("thuvienphapluat.vn", "/van-ban/"),
-    ("vanban.chinhphu.vn", ""),
-    ("luatvietnam.vn", ""),
-    ("congbao.chinhphu.vn", ""),
-    ("mof.gov.vn", ""),
-    ("gdt.gov.vn", ""),
-    ("moj.gov.vn", ""),
+    ("thuvienphapluat.vn", re.compile(r"^/van-ban/.+\.aspx$", re.I)),
+    ("vanban.chinhphu.vn", re.compile(r"docid=\d+", re.I)),
+    ("luatvietnam.vn", re.compile(r"-d\d+\.html$", re.I)),
 ]
+# Tên miền văn bản luật: link tới đây mà KHÔNG do phần mềm kiểm tra thì gỡ bỏ
+LEGAL_DOMAINS = ("thuvienphapluat.vn", "luatvietnam.vn", "chinhphu.vn", "moj.gov.vn", "mof.gov.vn",
+                 "gdt.gov.vn", "luatminhkhue.vn", "vbpl.vn", "congbao.gov.vn", "quochoi.vn")
+CHALLENGE = re.compile(r"just a moment|captcha|access denied|attention required|checking your browser", re.I)
+CODE_SLUG = re.compile(r"-\d{1,6}-(?:\d{4}-)?[A-Z]{1,8}\d{0,2}(?=-)")
 OK_TTL = 30 * 86400
 MISS_TTL = 12 * 3600
 MAX_REFS = 8
@@ -66,6 +71,14 @@ def _has(want: str, text: str) -> bool:
     return f"-{want}-" in f"-{_slug(text)}-"
 
 
+def _leads(want: str, text: str) -> bool:
+    """Văn bản ĐẦU TIÊN nhắc trong chuỗi (tiêu đề / đường dẫn) đúng là số hiệu cần tìm."""
+    s = f"-{_slug(text)}-"
+    i = s.find(f"-{want}-")
+    m = CODE_SLUG.search(s)
+    return i >= 0 and m is not None and m.start() == i
+
+
 def find_refs(text: str) -> list:
     """Các văn bản được nhắc trong bài: [{"text", "code", "kind"}] — mỗi số hiệu một lần, theo thứ tự xuất hiện."""
     out, seen = [], set()
@@ -86,11 +99,20 @@ def find_refs(text: str) -> list:
 # ---------------------------------------------------------------- tìm kiếm
 
 def _rank(url: str) -> int:
-    host = urlparse(url).netloc.lower()
-    for i, (dom, path) in enumerate(TRUSTED):
+    """Thứ tự ưu tiên nếu là TRANG VĂN BẢN của nguồn tin cậy; -1 nếu không phải."""
+    u = urlparse(url)
+    if u.scheme not in ("http", "https"):
+        return -1
+    host = u.netloc.lower().split(":")[0]
+    for i, (dom, pat) in enumerate(TRUSTED):
         if host == dom or host.endswith("." + dom):
-            return i if (not path or path in urlparse(url).path) else -1
+            return i if pat.search(u.path + ("?" + u.query if u.query else "")) else -1
     return -1
+
+
+def is_legal_url(url: str) -> bool:
+    host = urlparse(url).netloc.lower().split(":")[0]
+    return any(host == d or host.endswith("." + d) for d in LEGAL_DOMAINS)
 
 
 def _bing(query: str) -> list:
@@ -148,33 +170,40 @@ def _gemini(ref: dict, key: str, model: str = "gemini-2.5-flash") -> list:
                 uri = ""
         if uri:
             out.append((uri, (ch.get("web") or {}).get("title", "")))
-    text = "".join(p.get("text", "") for p in (cand.get("content") or {}).get("parts") or [])
-    out += [(u.rstrip(").,;"), "") for u in re.findall(r"https?://[^\s<>\"')\]]+", text)]
-    return out
+    return out                     # KHÔNG lấy URL trong câu trả lời của AI (có thể do AI tự bịa)
 
 
 def verify(url: str, code: str, title: str = "") -> bool:
-    """Link phải tồn tại và đúng văn bản: số hiệu nằm trong địa chỉ, hoặc trong tiêu đề trang."""
+    """Chỉ True khi CHẮC CHẮN link mở được và đúng văn bản này (xem nguyên tắc ở đầu file)."""
     if _rank(url) < 0:
         return False
     want = _slug(code)
-    in_url = _has(want, unquote(url))
+    path = urlparse(unquote(url)).path
+    url_ok = _leads(want, path.rsplit("/", 1)[-1])     # đường dẫn mở đầu bằng đúng số hiệu
     try:
         r = requests.get(url, headers={"User-Agent": UA, "Accept-Language": "vi"}, timeout=15)
     except requests.RequestException:
-        return in_url                                  # mạng chập chờn: tin địa chỉ do công cụ tìm kiếm trả về
-    if r.status_code in (404, 410) or (r.ok and "404" in urlparse(r.url).path):
-        return False
-    if not r.ok:                                       # trang chặn máy (403/429...) → dựa vào địa chỉ
-        return in_url
-    if not r.encoding or r.encoding.lower() == "iso-8859-1":
-        r.encoding = r.apparent_encoding
-    page = r.text[:400000]
+        return False                                   # không mở được → không gắn
+    final = getattr(r, "url", "") or url
+    if r.status_code in (404, 410) or "404" in urlparse(final).path or (r.ok and _rank(final) < 0):
+        return False                                   # link chết / bị chuyển về trang khác
+    page = ""
+    if r.ok:
+        if not r.encoding or r.encoding.lower() == "iso-8859-1":
+            r.encoding = r.apparent_encoding
+        page = r.text[:400000]
     m = re.search(r"<title[^>]*>(.*?)</title>", page, re.S | re.I)
-    if in_url or (m and _has(want, html.unescape(m.group(1)))):
+    page_title = html.unescape(m.group(1)).strip() if m else ""
+    blocked = not r.ok or bool(CHALLENGE.search(page_title)) or (r.ok and not page_title and len(page) < 2000)
+    if blocked:                                        # trang chặn máy đọc: cần cả địa chỉ + tiêu đề kết quả tìm kiếm
+        return r.status_code in (200, 403, 429, 503) and url_ok and _leads(want, title)
+    if _leads(want, page_title) or (url_ok and _has(want, page_title)):
         return True
-    # vanban.chinhphu.vn: tiêu đề trang chung chung → xem số hiệu trong nội dung
-    return urlparse(url).netloc.endswith("vanban.chinhphu.vn") and _has(want, html.unescape(re.sub(r"<[^>]+>", " ", page)))
+    # vanban.chinhphu.vn: tiêu đề trang chung chung → đọc ô "Số ký hiệu" của văn bản
+    if urlparse(url).netloc.endswith("vanban.chinhphu.vn"):
+        body = f"-{_slug(html.unescape(re.sub(r'<[^>]+>', ' ', page)))}-"
+        return f"-SO-KY-HIEU-{want}-" in body or f"-SO-HIEU-{want}-" in body
+    return False
 
 
 def lookup(ref: dict, gemini_key: str = "", fresh: bool = False) -> dict:
@@ -196,7 +225,7 @@ def lookup(ref: dict, gemini_key: str = "", fresh: bool = False) -> dict:
             found += [(u, t) for u, t in src(q) if _rank(u) >= 0]
         except Exception as e:                        # noqa: BLE001 — một nguồn lỗi thì thử nguồn khác
             log.info("legal search %s %s: %s", src.__name__, q, e)
-        if any(_has(want, unquote(u)) or _has(want, t) for u, t in found):
+        if any(_leads(want, urlparse(unquote(u)).path.rsplit("/", 1)[-1]) or _leads(want, t) for u, t in found):
             break                                     # đã có kết quả đúng số hiệu → khỏi tìm thêm
     if not found and gemini_key:
         try:
@@ -204,7 +233,8 @@ def lookup(ref: dict, gemini_key: str = "", fresh: bool = False) -> dict:
         except Exception as e:                        # noqa: BLE001
             log.info("legal gemini %s: %s", code, e)
     # ưu tiên: địa chỉ/tiêu đề có đúng số hiệu, rồi trang tin cậy hơn
-    found.sort(key=lambda x: (not (_has(want, unquote(x[0])) or _has(want, x[1])), _rank(x[0])))
+    found.sort(key=lambda x: (not (_leads(want, urlparse(unquote(x[0])).path.rsplit("/", 1)[-1])
+                                   or _leads(want, x[1])), _rank(x[0])))
     res = {"url": "", "title": ""}
     for url, title in found:
         url = url.split("#")[0]
@@ -218,6 +248,15 @@ def lookup(ref: dict, gemini_key: str = "", fresh: bool = False) -> dict:
             break
     db.set_setting(ck, res | {"t": int(time.time())})
     return res
+
+
+def cached(text: str) -> list:
+    """Như resolve() nhưng chỉ dùng link đã kiểm tra trước đó (không tìm mới, không cần mạng)."""
+    out = []
+    for r in find_refs(text):
+        hit = db.get_setting(f"legal:{r['code']}") or {}
+        out.append(r | {"url": hit.get("url", ""), "title": hit.get("title", "")})
+    return out
 
 
 def resolve(text: str, gemini_key: str = "") -> list:
@@ -235,6 +274,19 @@ def resolve(text: str, gemini_key: str = "") -> list:
 def _ref_pattern(ref: dict):
     """Khớp cả cụm "Nghị định (số) 398/2026/NĐ-CP" hoặc chỉ số hiệu."""
     return re.compile(rf"(?:(?:{KINDS}|Công văn|Văn bản)\s+(?:số\s+)?)?{re.escape(ref['code'])}", re.I)
+
+
+def strip_unverified(text: str, refs: list, keep=()) -> str:
+    """Gỡ mọi link tới trang luật mà phần mềm KHÔNG kiểm tra (AI tự gắn) — giữ chữ, bỏ link.
+    Dùng được cho markdown [chữ](url), thẻ <a> và URL trần."""
+    ok = {r["url"] for r in refs if r.get("url")} | {k for k in keep if k}
+    bad = lambda u: is_legal_url(u) and u not in ok and html.unescape(u) not in ok   # noqa: E731
+    text = re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", lambda m: m.group(1) if bad(m.group(2)) else m.group(0), text)
+    text = re.sub(r"<a\s[^>]*href=[\"']([^\"']+)[\"'][^>]*>([\s\S]*?)</a>",
+                  lambda m: m.group(2) if bad(m.group(1)) else m.group(0), text, flags=re.I)
+    text = re.sub(r"(?<![\"'(=])https?://[^\s<>\"')\]]+",
+                  lambda m: "" if bad(m.group(0).rstrip(".,;:")) else m.group(0), text)
+    return text
 
 
 def link_markdown(body: str, refs: list) -> str:

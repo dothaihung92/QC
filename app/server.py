@@ -835,6 +835,8 @@ def legal_links(body: dict):
     text = re.sub(r"<[^>]+>", " ", "\n".join(parts) + "\n" + str(body.get("text") or ""))
     key = str(body.get("gemini_key") or "").strip() or newsagent.get_config().get("gemini_key", "")
     refs = legallinks.resolve(html.unescape(text), key)
+    keep = [str(u) for u in (body.get("keep") or [])][:5]           # link người dùng tự nhập
+    parts = [legallinks.strip_unverified(p, refs, keep) for p in parts]   # gỡ link luật AI tự gắn
     return {"parts": legallinks.link_html(parts, refs), "refs": refs}
 
 
