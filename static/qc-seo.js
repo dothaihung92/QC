@@ -261,7 +261,9 @@
     if (!a.focusKeyword || a.focusKeyword === 'undefined') a.focusKeyword = ((document.getElementById('kw') || {}).value || '').trim();
     try { await ensureQA(a); } catch (e) { console.warn('ensureQA', e); }
     cleanTags(a);
+    if (!a._aiSlug) a._aiSlug = a.slug;               // slug AI đề xuất (để nhận ra bài này trong danh sách link)
     a.slug = buildSlug(a.focusKeyword, a.title);
+    stripSelfLinks(a);
     if (!a._qcFinal || force) {
       try { await optimizeContent(a); } catch (e) { console.warn('optimizeContent', e); }
       a._qcFinal = true;
@@ -335,11 +337,53 @@
     (h.match(/href=["']([^"']+)["']/gi) || []).forEach(function (m) { out[m.replace(/^href=["']|["']$/gi, '').replace(/\/$/, '')] = 1; });
     return out;
   }
+  // Bài trong danh sách có phải CHÍNH bài đang viết không (cùng đường dẫn / cùng từ khóa chính / cùng tiêu đề)?
+  function selfSlugs(a) {
+    return [a.slug, a._aiSlug, slugify(a.title), a._publishedUrl ? String(a._publishedUrl).replace(/\/+$/, '').split('/').pop() : '']
+      .filter(function (x) { return x && x.length >= 6; });
+  }
+  function titleSim(x, y) {
+    var A = toks(x), B = toks(y), set = {}, inter = 0;
+    if (!A.length || !B.length) return 0;
+    A.forEach(function (w) { set[w] = 1; });
+    B.forEach(function (w) { if (set[w]) { inter++; set[w] = 0; } });
+    return inter / Math.min(A.length, B.length);
+  }
+  function isSelf(it, a) {
+    var urlSlug = String(it.url || '').replace(/[?#].*$/, '').replace(/\/+$/, '').split('/').pop();
+    var slugs = selfSlugs(a), kwSlug = slugify(a.focusKeyword || '');
+    if (slugs.indexOf(it.slug) >= 0 || slugs.indexOf(urlSlug) >= 0) return true;
+    if (a._publishedUrl && String(it.url).replace(/\/+$/, '') === String(a._publishedUrl).replace(/\/+$/, '')) return true;
+    if (kwSlug && slugify(it.focusKeyword || '') === kwSlug) return true;              // cùng từ khóa chính = cùng bài
+    // bản cũ trong danh sách có từ khóa chính sai (lấy theo thẻ): cùng từ khóa ở đầu đường dẫn + tiêu đề gần giống → cùng bài
+    if (kwSlug.length >= 8 && (urlSlug.indexOf(kwSlug) === 0 || String(it.slug || '').indexOf(kwSlug) === 0) && titleSim(it.title, a.title) >= 0.6) return true;
+    return !!it.title && slugify(it.title) === slugify(a.title);
+  }
+  // gỡ link trỏ về chính bài này (do cách gắn cũ để lại), giữ nguyên chữ
+  function stripSelfLinks(a) {
+    var slugs = selfSlugs(a);
+    dbItems().forEach(function (it) {                 // bài trong danh sách được nhận ra là chính bài này
+      if (it && it.url && isSelf(it, a)) slugs.push(String(it.url).replace(/[?#].*$/, '').replace(/\/+$/, '').split('/').pop());
+    });
+    if (!slugs.length) return;
+    (a.sections || []).forEach(function (s, i) {
+      if (!s.content) return;
+      var out = s.content.replace(/<a\s[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, function (m, href, txt) {
+        var last = String(href).replace(/[?#].*$/, '').replace(/\/+$/, '').split('/').pop();
+        return slugs.indexOf(last) >= 0 ? txt : m;
+      });
+      if (out !== s.content) {
+        s.content = out;
+        var el = document.getElementById('ed-content-' + i);
+        if (el) el.innerHTML = out;
+      }
+    });
+  }
   async function internalLinks(a) {
     if (!ilinkOn() || !a || !(a.sections || []).length) return { added: [], reason: 'off' };
-    var slug = a.slug || '', have = existingLinks(a);
+    var have = existingLinks(a);
     var cands = dbItems().filter(function (it) {
-      return it && it.url && it.slug !== slug && it.url.indexOf('/' + slug + '/') < 0 && !have[it.url.replace(/\/$/, '')];
+      return it && it.url && !isSelf(it, a) && !have[it.url.replace(/\/$/, '')];
     }).map(function (it) { return { it: it, sc: relevance(it, a) }; })
       .filter(function (x) { return x.sc >= 2; }).sort(function (x, y) { return y.sc - x.sc; }).slice(0, 5);
     if (!cands.length) return { added: [], reason: 'no-related' };
@@ -575,6 +619,29 @@
     }
   }
   function installLinks() {
+    // Tắt cách gắn link cũ lúc hiển thị bài (gắn theo nguyên văn từ khóa, không kiểm tra link, có thể trỏ về chính bài).
+    // Việc gắn link nội bộ do internalLinks() làm sau khi bài viết xong.
+    if (typeof autoInjectILinks === 'function' && !autoInjectILinks._qc) {
+      window.autoInjectILinks = function (sections) { return { sections: sections, injected: [] }; };
+      window.autoInjectILinks._qc = true;
+    }
+    // Danh sách bài: lưu ĐÚNG từ khóa chính của bài (bản gốc lấy thẻ đầu tiên làm từ khóa chính)
+    if (typeof addToLinksDB === 'function' && !addToLinksDB._qc) {
+      var oa = addToLinksDB;
+      window.addToLinksDB = function (article) {
+        var entry = oa.apply(this, arguments);
+        if (entry && article && article.focusKeyword) {
+          var db = dbItems(), e = db[0];
+          if (e && e.url === entry.url) {
+            e.focusKeyword = article.focusKeyword;
+            if ((e.keywords || []).map(norm).indexOf(norm(article.focusKeyword)) < 0) e.keywords = [article.focusKeyword].concat(e.keywords || []);
+            saveLinksDB(db);
+          }
+        }
+        return entry;
+      };
+      window.addToLinksDB._qc = true;
+    }
     if (typeof getServiceLinkUrl === 'function' && !getServiceLinkUrl._qc) {      // thiếu https:// → link bị hiểu là đường dẫn tương đối
       var og = getServiceLinkUrl;
       window.getServiceLinkUrl = function () {
@@ -606,6 +673,6 @@
   installLinks();
   document.addEventListener('DOMContentLoaded', function () { install(); installLinks(); setTimeout(syncLinksDB, 600); });
   install();
-  window.qcSeo = { internalLinks: internalLinks, linkPhrase: linkPhrase, relevance: relevance, finalize: finalize, buildSlug: buildSlug, slugify: slugify, rmChecks: rmChecks, maxSlug: maxSlug,
+  window.qcSeo = { isSelf: isSelf, internalLinks: internalLinks, linkPhrase: linkPhrase, relevance: relevance, finalize: finalize, buildSlug: buildSlug, slugify: slugify, rmChecks: rmChecks, maxSlug: maxSlug,
                    decorateContent: decorateContent, publish: qcPublish };
 })();

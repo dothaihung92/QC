@@ -188,3 +188,10 @@ def test_seo_job_finishes_cleanly_with_keyword_and_faq():
     assert "window._qcJobInfo" in js and "inf.style.display = 'none'" in js        # tắt khung "Đang tự tạo..." khi xong
     assert "async function ensureQA" in js and "renderQA" in js and "HỎI ĐÁP (FAQ)" in js
     assert "a.focusKeyword === 'undefined'" in js and "refresh: refreshSidebar" in js
+
+
+def test_internal_links_never_point_to_the_article_itself():
+    js = TestClient(server.app).get("/qc-bridge.js").text
+    assert "function isSelf(it, a)" in js and "!isSelf(it, a)" in js and "function stripSelfLinks" in js
+    assert "window.autoInjectILinks = function (sections) { return { sections: sections, injected: [] }; }" in js
+    assert "e.focusKeyword = article.focusKeyword" in js
