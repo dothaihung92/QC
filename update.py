@@ -55,6 +55,7 @@ FILES = [
     "static/index.html",
     "static/seo-writer.html",
     "static/qc-bridge.js",
+    "static/qc-seo.js",
 ]
 
 # File nao thay doi thi bat cho khoi dong lai (start.bat doc lai chinh no,

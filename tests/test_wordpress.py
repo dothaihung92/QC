@@ -138,3 +138,25 @@ def test_post_without_auth_401_cannot_create_falls_back_but_real_403_does_not(mo
     st, _, body = wordpress.forward("POST", "https://z.vn/wp-json/wp/v2/pages",
                                     {"Content-Type": "application/json"}, b"{}")
     assert st == 403 and "Biên tập viên" in json.loads(body)["message"]
+
+
+def test_seo_publish_script_is_served_and_img_proxy_is_safe(monkeypatch):
+    c = TestClient(server.app)
+    js = c.get("/qc-bridge.js").text
+    assert "window.publishArticle = qcPublish" in js and "rankmath/v1/updateMeta" in js
+    assert "wp/v2/tags" in js and "alt_text" in js and "featured_media" in js and "categories" in js
+    assert "'Basic ' + auth" not in js                                       # lỗi cũ: "Basic Basic ..." làm tải ảnh thất bại
+    assert c.get("/api/img-proxy", params={"url": "http://127.0.0.1/x.png"}).status_code == 400   # chặn địa chỉ nội bộ
+    assert c.get("/api/img-proxy", params={"url": "file:///etc/passwd"}).status_code == 400
+
+    class Img:
+        status_code = 200
+        headers = {"Content-Type": "image/jpeg"}
+        def iter_content(self, n):
+            yield b"\xff\xd8\xff"
+
+    monkeypatch.setattr(wordpress.socket if hasattr(wordpress, "socket") else __import__("socket"), "getaddrinfo",
+                        lambda *a, **k: [(2, 1, 6, "", ("93.184.216.34", 0))])
+    monkeypatch.setattr(wordpress.requests, "get", lambda *a, **k: Img())
+    r = c.get("/api/img-proxy", params={"url": "https://images.pexels.com/a.jpg"})
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg" and r.content == b"\xff\xd8\xff"

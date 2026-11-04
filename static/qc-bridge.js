@@ -217,11 +217,11 @@
   function isShortKw(k) { k = String(k || '').trim(); return k.length >= 3 && k.length <= 60 && k.split(/\s+/).length <= 9; }
   function titleOk(t, kw) {
     t = String(t || '').trim();
-    return t.length >= 35 && t.length <= 70 && hasKw(t, kw) && !DANGLING.test(t) && !/[,;:–—\-|]$/.test(t) && !/\.\.\.|…$/.test(t);
+    return t.length >= 35 && t.length <= 60 && hasKw(t, kw) && !DANGLING.test(t) && !/[,;:–—\-|]$/.test(t) && !/\.\.\.|…$/.test(t);
   }
   function metaOk(m, kw) {
     m = String(m || '').trim();
-    return m.length >= 120 && m.length <= 160 && hasKw(m, kw) && /[.!?)]$/.test(m);
+    return m.length >= 120 && m.length <= 158 && hasKw(m, kw) && /[.!?)]$/.test(m);
   }
   function cleanTitle(t) {     // bỏ dấu phân cách có khoảng trắng, GIỮ "/" "-" trong số hiệu văn bản, năm 2026-2027
     return String(t || '').replace(/\s*[:|]\s+|\s+[–—\-]\s+/g, ', ').replace(/,\s*,/g, ',').replace(/\s{2,}/g, ' ')
@@ -251,8 +251,8 @@
     var K = cap(kw);
     var tails = [' và những điều doanh nghiệp cần biết', ' mới nhất doanh nghiệp cần biết', ' hướng dẫn chi tiết và dễ hiểu',
                  ' mới nhất năm ' + new Date().getFullYear(), ' cần biết'];
-    for (var i = 0; i < tails.length; i++) if ((K + tails[i]).length <= 70 && (K + tails[i]).length >= 35) return K + tails[i];
-    return K.length <= 70 ? K : oldTitle;
+    for (var i = 0; i < tails.length; i++) if ((K + tails[i]).length <= 60 && (K + tails[i]).length >= 35) return K + tails[i];
+    return K.length <= 60 ? K : oldTitle;
   }
   function refreshSidebar(a) {
     var te = document.getElementById('seo-title-edit');
@@ -291,10 +291,10 @@
     notify('✏️ Đang chỉnh tiêu đề cho trọn câu và chứa đúng từ khóa "' + kw + '"...');
     var bodyTxt = (a.sections || []).map(function (s) { return (s.heading || '') + ' ' + plain(s.content); }).join(' ').slice(0, 1500);
     var j = await askJSON('Từ khóa SEO chính: "' + kw + '".\nTiêu đề hiện tại: "' + full + '".\nNội dung bài: ' + bodyTxt +
-      '\n\nViết 6 TIÊU ĐỀ (H1) khác nhau. Mỗi tiêu đề: là MỘT CÂU HOÀN CHỈNH, trọn nghĩa, không bị bỏ lửng; dài 45-65 ký tự (đếm cả dấu cách); ' +
+      '\n\nViết 6 TIÊU ĐỀ (H1) khác nhau. Mỗi tiêu đề: là MỘT CÂU HOÀN CHỈNH, trọn nghĩa, không bị bỏ lửng; dài 45-58 ký tự (đếm cả dấu cách, TỐI ĐA 60); ' +
       'chứa NGUYÊN VĂN cụm từ khóa "' + kw + '" (đúng chính tả, đúng dấu, đúng thứ tự), ưu tiên đặt từ khóa ở đầu; ' +
       'không dùng dấu ":" "|" " - " để ngăn cách; không kết thúc bằng "..." hay giới từ/liên từ; giữ nguyên số hiệu văn bản, con số trong bài.\n' +
-      'Viết thêm 2 META DESCRIPTION: 140-155 ký tự, mở đầu bằng từ khóa "' + kw + '", là câu hoàn chỉnh, kết bằng lời mời hành động và dấu chấm.\n' +
+      'Viết thêm 2 META DESCRIPTION: 140-155 ký tự (tối đa 158), mở đầu bằng từ khóa "' + kw + '", là câu hoàn chỉnh, kết bằng lời mời hành động và dấu chấm.\n' +
       'Chỉ trả về JSON {"titles":["..."],"metas":["..."]}');
     var titles = ((j && j.titles) || []).map(function (t) { return cleanTitle(t).replace(/["“”]/g, ''); });
     var good = titles.filter(function (t) { return titleOk(t, kw); });
@@ -342,6 +342,8 @@
           if (typeof curArticle !== 'undefined' && curArticle && curArticle !== before) {
             setBusy(true, 'Đang chỉnh tiêu đề...');
             try { await fixTitleKeyword(curArticle); } catch (e) { console.warn('fixTitleKeyword', e); }
+            setBusy(true, 'Đang tối ưu SEO (URL, từ khóa, ảnh)...');
+            try { if (window.qcSeo) await window.qcSeo.finalize(curArticle, true); } catch (e) { console.warn('qcSeo.finalize', e); }
           }
           setBusy(false);
         }

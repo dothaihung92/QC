@@ -203,8 +203,11 @@ def seo_writer(request: Request):
 
 @admin.get("/qc-bridge.js")
 def qc_bridge():
-    path = STATIC / "qc-bridge.js"
-    js = path.read_text(encoding="utf-8") if path.exists() else ""
+    js = ""
+    for name in ("qc-bridge.js", "qc-seo.js"):                    # qc-seo.js: tối ưu SEO khi đăng WordPress
+        path = STATIC / name
+        if path.exists():
+            js += path.read_text(encoding="utf-8") + "\n"
     return Response(js, media_type="application/javascript; charset=utf-8")
 
 
@@ -838,6 +841,17 @@ async def wp_proxy(request: Request, url: str):
     status, ctype, content = await run_in_threadpool(
         wordpress.forward, request.method, url, dict(request.headers), body)
     return Response(content=content, status_code=status, media_type=ctype or "application/json")
+
+
+@admin.get("/api/img-proxy")
+async def img_proxy(url: str):
+    from starlette.concurrency import run_in_threadpool
+    from fastapi.responses import Response
+    try:
+        ctype, data = await run_in_threadpool(wordpress.fetch_image, url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return Response(content=data, media_type=ctype)
 
 
 # ----- Link văn bản pháp luật (tab Viết bài SEO) -----------------------------

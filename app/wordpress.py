@@ -214,3 +214,33 @@ def request(method: str, root: str, path: str, user: str, pwd: str, payload=None
 
 def _err(code, msg):
     return json.dumps({"code": code, "message": msg}, ensure_ascii=False).encode()
+
+
+def fetch_image(url: str, limit: int = 12 * 1024 * 1024):
+    """Tải ảnh từ internet thay cho trình duyệt (ảnh Pexels/Pixabay... bị chặn CORS khi tải lên WordPress).
+    Trả về (content_type, bytes); lỗi → ValueError."""
+    import ipaddress
+    import socket
+    p = urlparse(url)
+    if p.scheme not in ("http", "https") or not p.hostname:
+        raise ValueError("Địa chỉ ảnh không hợp lệ")
+    try:
+        for fam, _, _, _, addr in socket.getaddrinfo(p.hostname, None):
+            ip = ipaddress.ip_address(addr[0])
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                raise ValueError("Không tải ảnh từ địa chỉ nội bộ")
+    except socket.gaierror:
+        raise ValueError("Không phân giải được tên miền ảnh")
+    try:
+        r = requests.get(url, headers={"User-Agent": BROWSER_UA, "Accept": "image/*"}, timeout=30, stream=True)
+    except requests.RequestException as e:
+        raise ValueError(f"Không tải được ảnh ({type(e).__name__})")
+    ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+    if r.status_code >= 400 or not ctype.startswith("image/"):
+        raise ValueError(f"Không phải ảnh (mã {r.status_code}, {ctype or 'không rõ loại'})")
+    data = b""
+    for chunk in r.iter_content(65536):
+        data += chunk
+        if len(data) > limit:
+            raise ValueError("Ảnh quá lớn")
+    return ctype, data
