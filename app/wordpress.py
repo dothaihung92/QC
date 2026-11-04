@@ -113,6 +113,19 @@ def cookie_login(root: str, user: str, pwd: str, fresh: bool = False):
     return s, nonce
 
 
+_cookie_sites = set()     # (website|user) mà header Authorization không tới được WordPress
+
+
+class _fake_401:
+    status_code = 401
+    url = ""
+    headers = {"Content-Type": "application/json"}
+    content = b'{"code": "rest_not_logged_in"}'
+
+    def json(self):
+        return {"code": "rest_not_logged_in"}
+
+
 def _json(r):
     try:
         return r.json()
@@ -132,17 +145,23 @@ def forward(method: str, url: str, headers: dict, body: bytes):
     wp_auth = next((v for k, v in headers.items() if k.lower() == "x-wp-authorization"), "")
     send = dict(keep, **({"Authorization": wp_auth} if wp_auth else {}))
     send["User-Agent"] = UA
+    creds = _creds(wp_auth)
+    root = site_root(url[:url.index("/wp-json/")])
+    ckey = f"{root}|{creds[0]}" if creds else ""
     try:
-        r = requests.request(method, url, headers=send, data=body or None, timeout=120, allow_redirects=True)
+        if ckey in _cookie_sites:                        # website này đã biết bỏ qua header → đăng nhập kiểu trình duyệt luôn
+            r = _fake_401()
+        else:
+            r = requests.request(method, url, headers=send, data=body or None, timeout=120, allow_redirects=True)
     except requests.exceptions.SSLError:
         return 502, "application/json", _err("ssl", "Lỗi chứng chỉ HTTPS của website — kiểm tra SSL hoặc thử http://")
     except requests.RequestException as e:
         return 502, "application/json", _err("connect", f"Không kết nối được tới {p.netloc}: kiểm tra tên miền / mạng ({type(e).__name__}).")
 
-    creds = _creds(wp_auth)
     code = str(_json(r).get("code", "")) if r.status_code in (401, 403) else ""
-    if creds and code in FALLBACK_CODES:
-        root = site_root(url[:url.index("/wp-json/")])
+    # 401 = WordPress coi như CHƯA đăng nhập (kể cả mã rest_cannot_create khi đăng bài / tải ảnh);
+    # 403 = đã đăng nhập nhưng thiếu quyền thật → không thử lại.
+    if creds and (r.status_code == 401 or code in FALLBACK_CODES):
         try:
             for fresh in (False, True):
                 sess, nonce = cookie_login(root, creds[0], creds[1], fresh=fresh)
@@ -150,6 +169,8 @@ def forward(method: str, url: str, headers: dict, body: bytes):
                 if not (r2.status_code in (401, 403) and "nonce" in str(_json(r2).get("code", ""))):
                     break
             r = r2
+            if r.status_code < 400:
+                _cookie_sites.add(ckey)
         except LoginError as e:
             looks_app = bool(re.fullmatch(r"[A-Za-z0-9]{24}", creds[1].replace(" ", "")))
             msg = ("Không đăng nhập được WordPress. "
@@ -171,6 +192,8 @@ def forward(method: str, url: str, headers: dict, body: bytes):
     if r.status_code >= 400:
         data = _json(r)
         hint = HINTS.get(str(data.get("code", ""))) if isinstance(data, dict) else None
+        if r.status_code == 401 and str(data.get("code", "")).startswith("rest_cannot"):
+            hint = HINTS["rest_not_logged_in"]                    # 401 = chưa đăng nhập, không phải thiếu quyền
         if hint:
             data["message"] = f"{data.get('message', '')} — {hint}".strip(" —").rstrip(".")
             content = json.dumps(data, ensure_ascii=False).encode()

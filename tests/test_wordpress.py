@@ -110,3 +110,31 @@ def test_falls_back_to_browser_style_login_when_auth_header_is_stripped(monkeypa
     item = {"title": "T", "summary": "s", "body": "b", "image_url": "", "url": "", "source": ""}
     cfg = {"wp_url": "https://x.vn/wp-admin/", "wp_user": "DOHUNG", "wp_app_password": "MatKhau$Dang!Nhap"}
     assert newsagent.post_to_wordpress(item, cfg) == "https://x.vn/bai"
+
+
+def test_post_without_auth_401_cannot_create_falls_back_but_real_403_does_not(monkeypatch):
+    calls = []
+
+    def req(method, url, headers=None, data=None, **k):
+        calls.append(url)
+        if url.endswith("/posts"):        # hosting bỏ header → WordPress coi như khách: 401 rest_cannot_create
+            return R(401, {"code": "rest_cannot_create", "message": "Bạn không được phép tạo bài viết bằng tài khoản này."})
+        if url.endswith("/pages"):        # đã đăng nhập nhưng thiếu quyền thật
+            return R(403, {"code": "rest_cannot_create", "message": "no"})
+        return R(401, {"code": "rest_not_logged_in", "message": "x"})
+    monkeypatch.setattr(wordpress.requests, "request", req)
+    monkeypatch.setattr(wordpress.requests, "Session", FakeSession)
+    wordpress._sessions.clear()
+    wordpress._cookie_sites.clear()
+    import base64
+    auth = {"X-WP-Authorization": "Basic " + base64.b64encode("hungphuc:MatKhau$Dang!Nhap".encode()).decode(),
+            "Content-Type": "application/json"}
+    st, _, body = wordpress.forward("POST", "https://y.vn/wp-json/wp/v2/posts", auth, b'{"title":"T"}')
+    assert st == 201 and json.loads(body)["link"] == "https://x.vn/bai"
+    n = len(calls)
+    st, _, _ = wordpress.forward("POST", "https://y.vn/wp-json/wp/v2/posts", auth, b'{"title":"T2"}')
+    assert st == 201 and len(calls) == n          # lần sau đi thẳng đăng nhập kiểu trình duyệt
+    wordpress._cookie_sites.clear()
+    st, _, body = wordpress.forward("POST", "https://z.vn/wp-json/wp/v2/pages",
+                                    {"Content-Type": "application/json"}, b"{}")
+    assert st == 403 and "Biên tập viên" in json.loads(body)["message"]
