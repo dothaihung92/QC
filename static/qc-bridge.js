@@ -88,16 +88,39 @@
     set('legal-content', 'BÀI TIN GỐC' + (job.source ? ' (' + job.source + ')' : '') + ': ' + (job.title || '') +
       (job.url ? '\nNguồn: ' + job.url : '') + '\n\n' + body);
     window._answerQuestionContext = null;
+    var rs = document.getElementById('research-status');
+    if (rs) rs.innerHTML = '';                               // xóa kết quả nghiên cứu của bài trước
+    window.scrollTo({ top: 0, behavior: 'smooth' });
     if (!(document.getElementById('gkey') || {}).value) {
-      notify('⚠ Chưa có Gemini API Key — nhập key ở mục 1 rồi bấm "Tạo bài viết chuẩn SEO" (đã điền sẵn nội dung).');
+      var msg = '⚠ Chưa có Gemini API Key — nhập key ở mục 1 rồi bấm "Tạo bài viết chuẩn SEO" (nội dung bài tin đã điền sẵn).';
+      if (typeof showErr === 'function') showErr(msg); else notify(msg);
       return;
     }
-    notify('✍️ Đang tạo bài SEO từ bài tin...');
+    var info = '✍️ Đang tự tạo bài SEO từ bài tin: "' + (job.title || '') + '" — AI đặt từ khóa, nghiên cứu nguồn rồi viết bài (khoảng 1–3 phút)...';
+    if (typeof showInfo === 'function') showInfo(info); else notify(info);
+    setBusy(true, 'Đang đặt từ khóa...');
     shortKeyword(job.title || '', body).then(function (k) { if (k) set('kw', k); generate(); });
   }
   window.addEventListener('message', function (e) {
     if (e.origin === location.origin && e.data && e.data.qc === 'seo-job') runJob(e.data.job);
   });
+  // Đường dự phòng: tab Tin tức AI ghi bài vào bộ nhớ chung → trang này nhận được ngay cả khi lỡ tin nhắn
+  window.addEventListener('storage', function (e) {
+    if (e.key === 'qc_seo_job' && e.newValue) { try { runJob(JSON.parse(e.newValue)); } catch (err) {} }
+  });
+  function setBusy(on, text) {
+    var b = document.getElementById('genbtn');
+    if (!b) return;
+    if (on) {
+      if (!b._qcHtml) b._qcHtml = b.innerHTML;
+      b.disabled = true;
+      b.innerHTML = '<i class="ti ti-loader-2 spin"></i> ' + (text || 'Đang viết bài...');
+    } else if (b._qcHtml) {
+      b.disabled = false;
+      b.innerHTML = b._qcHtml;
+      b._qcHtml = null;
+    }
+  }
   function checkPendingJob() {
     try { var raw = localStorage.getItem('qc_seo_job'); if (raw) runJob(JSON.parse(raw)); } catch (e) {}
   }
@@ -312,12 +335,15 @@
         var verify = sel && sel.value === VERIFY;
         if (verify) { sel.value = 'strip'; window._qcVerifying = true; }
         var before = typeof curArticle !== 'undefined' ? curArticle : null;
+        setBusy(true, 'Đang nghiên cứu & viết bài...');      // nút hiện rõ đang chạy (trang gốc không đổi nút)
         try { return await origGen.apply(this, arguments); }
         finally {
           if (verify) { sel.value = VERIFY; window._qcVerifying = false; }
           if (typeof curArticle !== 'undefined' && curArticle && curArticle !== before) {
+            setBusy(true, 'Đang chỉnh tiêu đề...');
             try { await fixTitleKeyword(curArticle); } catch (e) { console.warn('fixTitleKeyword', e); }
           }
+          setBusy(false);
         }
       };
       window.generate._qc = true;

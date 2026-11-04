@@ -821,7 +821,8 @@ async function newsToSeo(id) {
   try { localStorage.setItem('qc_seo_job', JSON.stringify(job)); } catch (e) {}
   const seen = !!$('seoFrame').src;                 // tab SEO đã nạp rồi → gửi thẳng; chưa thì tab tự đọc khi mở
   openTab('seo');
-  if (seen) $('seoFrame').contentWindow?.postMessage({ qc: 'seo-job', job }, location.origin);
+  const send = () => $('seoFrame').contentWindow?.postMessage({ qc: 'seo-job', job }, location.origin);
+  if (seen) send(); else $('seoFrame').addEventListener('load', () => setTimeout(send, 800), { once: true });
   toast('✍️ Đang chuyển sang tab Viết bài SEO và tạo bài...');
 }
 async function newsReject(id) { await api('/api/news/' + id + '/reject', { method: 'POST' }); loadNews(); }
