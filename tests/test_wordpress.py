@@ -160,3 +160,24 @@ def test_seo_publish_script_is_served_and_img_proxy_is_safe(monkeypatch):
     monkeypatch.setattr(wordpress.requests, "get", lambda *a, **k: Img())
     r = c.get("/api/img-proxy", params={"url": "https://images.pexels.com/a.jpg"})
     assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg" and r.content == b"\xff\xd8\xff"
+
+
+def test_internal_links_engine_draft_status_and_default_length(monkeypatch):
+    c = TestClient(server.app)
+    js = c.get("/qc-bridge.js").text
+    assert "async function internalLinks" in js and "/api/url-check" in js and "data-qc-related" in js
+    assert "window.reapplyILinks = async function" in js and "getServiceLinkUrl" in js
+    assert "XUẤT BẢN CÔNG KHAI" in js and "wantLive" in js                    # Nháp chỉ lưu nháp; Live phải xác nhận
+    assert "post.php?post=" in js and "action=edit" in js                      # bản nháp mở bằng trang sửa bài, không phải ?p=ID
+    page = c.get("/seo-writer").text
+    assert '<option value="short" selected>' in page and '<option value="medium" selected>Vừa (~1200' not in page   # mặc định 800–1000 từ
+    # danh sách bài đã đăng lưu trên máy chủ
+    assert c.put("/api/seo/links-db", json=[{"url": "https://x.vn/a/", "title": "A"}, {"url": "javascript:1"}]).json() == {"saved": 1}
+    assert c.get("/api/seo/links-db").json()[0]["url"] == "https://x.vn/a/"
+
+    class Resp:
+        def __init__(self, st, url): self.status_code, self.url = st, url
+        def close(self): pass
+    monkeypatch.setattr(wordpress.requests, "get", lambda u, **k: Resp(404 if "nhap" in u else 200, u))
+    assert c.get("/api/url-check", params={"url": "https://x.vn/bai/"}).json()["ok"] is True
+    assert c.get("/api/url-check", params={"url": "https://x.vn/nhap/"}).json()["ok"] is False

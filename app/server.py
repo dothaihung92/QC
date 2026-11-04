@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
-from fastapi import (APIRouter, BackgroundTasks, Depends, FastAPI, HTTPException,
+from fastapi import (APIRouter, BackgroundTasks, Body, Depends, FastAPI, HTTPException,
                      Request)
 from fastapi.responses import (FileResponse, HTMLResponse, PlainTextResponse, RedirectResponse,
                                Response)
@@ -841,6 +841,25 @@ async def wp_proxy(request: Request, url: str):
     status, ctype, content = await run_in_threadpool(
         wordpress.forward, request.method, url, dict(request.headers), body)
     return Response(content=content, status_code=status, media_type=ctype or "application/json")
+
+
+@admin.get("/api/url-check")
+async def url_check(url: str):
+    """Link nội bộ chỉ được gắn khi trang thật sự mở được (không 404, không còn là bản nháp)."""
+    from starlette.concurrency import run_in_threadpool
+    return await run_in_threadpool(wordpress.url_alive, url)
+
+
+@admin.get("/api/seo/links-db")
+def seo_links_get():
+    return db.get_setting("seo_links_db", [])
+
+
+@admin.put("/api/seo/links-db")
+def seo_links_put(body: list = Body(...)):
+    items = [x for x in body if isinstance(x, dict) and str(x.get("url", "")).startswith(("http://", "https://"))][:500]
+    db.set_setting("seo_links_db", items)
+    return {"saved": len(items)}
 
 
 @admin.get("/api/img-proxy")

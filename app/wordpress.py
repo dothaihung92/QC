@@ -244,3 +244,18 @@ def fetch_image(url: str, limit: int = 12 * 1024 * 1024):
         if len(data) > limit:
             raise ValueError("Ảnh quá lớn")
     return ctype, data
+
+
+def url_alive(url: str) -> dict:
+    """{"ok": bool, "status": int}: trang công khai mở được (kể cả sau chuyển hướng) và không phải trang đăng nhập."""
+    p = urlparse(url)
+    if p.scheme not in ("http", "https") or not p.hostname:
+        return {"ok": False, "status": 0}
+    try:
+        r = requests.get(url, headers={"User-Agent": BROWSER_UA}, timeout=20, allow_redirects=True, stream=True)
+        final = getattr(r, "url", url) or url
+        ok = r.status_code < 400 and "wp-login" not in final
+        r.close()
+        return {"ok": bool(ok), "status": r.status_code}
+    except requests.RequestException:
+        return {"ok": False, "status": 0}
