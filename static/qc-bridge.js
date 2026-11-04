@@ -98,6 +98,7 @@
     }
     var info = '✍️ Đang tự tạo bài SEO từ bài tin: "' + (job.title || '') + '" — AI đặt từ khóa, nghiên cứu nguồn rồi viết bài (khoảng 1–3 phút)...';
     if (typeof showInfo === 'function') showInfo(info); else notify(info);
+    window._qcJobInfo = true;
     setBusy(true, 'Đang đặt từ khóa...');
     shortKeyword(job.title || '', body).then(function (k) { if (k) set('kw', k); generate(); });
   }
@@ -285,7 +286,8 @@
     a.focusKeyword = kw;
     var full = cleanTitle(a._qcFullTitle || a.title);
     if (titleOk(full, kw) && metaOk(a.metaDescription, kw)) {
-      if (full !== a.title) { a.title = full; refreshSidebar(a); }
+      a.title = full;
+      refreshSidebar(a);                       // luôn cập nhật ô Từ khóa SEO (AI có lúc không trả focusKeyword → "undefined")
       return;
     }
     notify('✏️ Đang chỉnh tiêu đề cho trọn câu và chứa đúng từ khóa "' + kw + '"...');
@@ -324,7 +326,7 @@
     }
   }
   wrapLimits();
-  window.qcTitle = { titleOk: titleOk, metaOk: metaOk, cleanTitle: cleanTitle, fallbackTitle: fallbackTitle, fix: fixTitleKeyword };
+  window.qcTitle = { refresh: refreshSidebar, titleOk: titleOk, metaOk: metaOk, cleanTitle: cleanTitle, fallbackTitle: fallbackTitle, fix: fixTitleKeyword };
 
   function wrapGenerator() {
     if (typeof generate === 'function' && !generate._qc) {
@@ -346,6 +348,13 @@
             try { if (window.qcSeo) await window.qcSeo.finalize(curArticle, true); } catch (e) { console.warn('qcSeo.finalize', e); }
           }
           setBusy(false);
+          if (window._qcJobInfo) {                // tắt khung "Đang tự tạo bài..." (vòng xoay) khi đã xong
+            window._qcJobInfo = false;
+            var inf = document.getElementById('ainfo');
+            if (inf) inf.style.display = 'none';
+            if (typeof curArticle !== 'undefined' && curArticle && curArticle !== before)
+              notify('✅ Đã tạo xong bài SEO — kiểm tra lại rồi bấm "Đăng lên website"');
+          }
         }
       };
       window.generate._qc = true;

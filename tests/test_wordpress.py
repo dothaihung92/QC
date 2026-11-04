@@ -181,3 +181,10 @@ def test_internal_links_engine_draft_status_and_default_length(monkeypatch):
     monkeypatch.setattr(wordpress.requests, "get", lambda u, **k: Resp(404 if "nhap" in u else 200, u))
     assert c.get("/api/url-check", params={"url": "https://x.vn/bai/"}).json()["ok"] is True
     assert c.get("/api/url-check", params={"url": "https://x.vn/nhap/"}).json()["ok"] is False
+
+
+def test_seo_job_finishes_cleanly_with_keyword_and_faq():
+    js = TestClient(server.app).get("/qc-bridge.js").text
+    assert "window._qcJobInfo" in js and "inf.style.display = 'none'" in js        # tắt khung "Đang tự tạo..." khi xong
+    assert "async function ensureQA" in js and "renderQA" in js and "HỎI ĐÁP (FAQ)" in js
+    assert "a.focusKeyword === 'undefined'" in js and "refresh: refreshSidebar" in js

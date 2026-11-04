@@ -103,7 +103,8 @@
       { ok: words >= 600, lbl: 'Độ dài ≥ 600 từ (' + words + ' từ)' },
       { ok: lk.ext > 0, lbl: 'Có link ra ngoài (' + lk.ext + ')' },
       { ok: lk.int > 0, lbl: 'Có link nội bộ (' + lk.int + ')' },
-      { ok: (a.tags || []).length >= 3, lbl: 'Có ≥ 3 thẻ (tags)' }
+      { ok: (a.tags || []).length >= 3, lbl: 'Có ≥ 3 thẻ (tags)' },
+      { ok: (a.qa || []).length >= 3, lbl: 'Có phần Hỏi đáp (' + (a.qa || []).length + ' câu)' }
     ];
   }
   function renderChecklist(a) {
@@ -198,8 +199,67 @@
     a.tags = out.slice(0, 7);
   }
 
+  // ── Hỏi đáp (Q&A) ─────────────────────────────────────────────────────────
+  // AI có lúc không trả mục "qa" mà viết câu hỏi thành một đoạn thường (chỉ có câu hỏi, không có trả lời)
+  // → tự tạo lại 5 câu hỏi + trả lời từ nội dung bài, hiện đúng khung "Câu Hỏi Thường Gặp" như trước.
+  var FAQ_RE = /câu hỏi thường gặp|hỏi\s*(?:&amp;|&|và)?\s*đáp|faq|giải đáp thắc mắc|thắc mắc thường gặp/i;
+  function faqQuestions(html) {
+    var items = (String(html || '').match(/<(li|p)[^>]*>[\s\S]*?<\/\1>/gi) || []).map(plain);
+    return items.map(function (t) { return t.replace(/^(câu hỏi|hỏi|q)\s*\d*\s*[:.)-]\s*/i, '').trim(); })
+      .filter(function (t) { return t.length > 8 && /\?/.test(t); });
+  }
+  function renderQA(a) {
+    var card = document.getElementById('art-card');
+    if (!card) return;
+    var old = document.getElementById('ed-sec-qa');
+    if (old) old.remove();
+    if (!(a.qa || []).length) return;
+    var div = document.createElement('div');
+    div.className = 'art-sec';
+    div.id = 'ed-sec-qa';
+    div.innerHTML = '<h2 id="ed-h-qa">❓ Câu Hỏi Thường Gặp</h2><div class="qa-wrap">' + a.qa.map(function (it, qi) {
+      return '<div class="qa-item" id="qa-' + qi + '"><div class="qa-q" onclick="toggleQA(' + qi + ')"><div class="qa-q-icon">Q</div>' +
+        '<div class="qa-q-text">' + it.q + '</div><i class="ti ti-chevron-down qa-arrow"></i></div><div class="qa-a">' + it.a + '</div></div>';
+    }).join('') + '</div>';
+    var conc = card.querySelector('.art-conc');
+    if (conc) card.insertBefore(div, conc); else card.appendChild(div);
+    document.querySelectorAll('#sidebar .stat-box').forEach(function (b) {      // ô "Q&A" trong Thông tin bài
+      var l = b.querySelector('.stat-l'), n = b.querySelector('.stat-n');
+      if (l && n && /Q&A/i.test(l.textContent)) n.textContent = a.qa.length;
+    });
+  }
+  async function ensureQA(a) {
+    var secs = a.sections || [];
+    var fi = -1;
+    secs.forEach(function (s, i) { if (fi < 0 && FAQ_RE.test(s.heading || '')) fi = i; });
+    if ((a.qa || []).length >= 3) {
+      if (fi >= 0) hideSection(a, fi);                  // đã có khung Q&A → bỏ đoạn hỏi đáp trùng
+      return;
+    }
+    var qs = fi >= 0 ? faqQuestions(secs[fi].content) : [];
+    var j = await askJSON('Viết phần HỎI ĐÁP (FAQ) gồm 5 câu cho bài "' + a.title + '" (từ khóa: "' + (a.focusKeyword || '') + '"). ' +
+      (qs.length ? 'Dùng đúng các câu hỏi sau (giữ nguyên ý): ' + qs.slice(0, 6).join(' | ') + '. ' : 'Chọn câu hỏi thực tế mà chủ doanh nghiệp / kế toán hay hỏi. ') +
+      'Mỗi câu trả lời 2-4 câu, rõ ràng, CHỈ dựa vào nội dung bài sau, không bịa số liệu hay số hiệu văn bản:\n' +
+      plain(bodyHtml(a)).slice(0, 6000) + '\n\nChỉ trả về JSON {"qa":[{"q":"…?","a":"…"}]}');
+    var qa = ((j && j.qa) || []).map(function (x) {
+      return { q: esc(plain(x.q || '')).trim(), a: esc(plain(x.a || '')).trim() };
+    }).filter(function (x) { return x.q.length > 8 && x.a.length > 15; }).slice(0, 6);
+    if (qa.length < 3) return;
+    a.qa = qa;
+    if (fi >= 0) hideSection(a, fi);
+    renderQA(a);
+  }
+  function hideSection(a, i) {
+    var s = a.sections[i];
+    s.heading = ''; s.content = ''; s.imageQuery = ''; s.type = 'h2';          // khi đăng web bỏ qua đoạn trống này
+    var el = document.getElementById('ed-sec-' + i);
+    if (el) el.style.display = 'none';
+  }
+
   async function finalize(a, force) {
     if (!a) return;
+    if (!a.focusKeyword || a.focusKeyword === 'undefined') a.focusKeyword = ((document.getElementById('kw') || {}).value || '').trim();
+    try { await ensureQA(a); } catch (e) { console.warn('ensureQA', e); }
     cleanTags(a);
     a.slug = buildSlug(a.focusKeyword, a.title);
     if (!a._qcFinal || force) {
@@ -215,6 +275,7 @@
     }
     refreshPermalink(a);
     renderChecklist(a);
+    try { if (window.qcTitle && window.qcTitle.refresh) window.qcTitle.refresh(a); } catch (e) {}   // chấm lại điểm SEO
   }
 
   // ── Internal Links SEO ────────────────────────────────────────────────────
