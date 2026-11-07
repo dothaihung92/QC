@@ -647,3 +647,37 @@ def test_fit_lines_hard_breaks_and_truncates():
     lines = video.fit_lines(d, "1234567890123456789012345678901234567890 " * 4, f, 200, 3)
     assert len(lines) == 3 and lines[-1].endswith("…")
     assert all(d.textlength(x, font=f) <= 200 for x in lines)
+
+
+def test_each_clip_gets_a_different_theme_and_layouts_stay_in_frame(tmp_path):
+    from app import techlook, themes
+    picks = [themes.pick("auto", v) for v in range(1, 9)]
+    assert all(a["id"] != b["id"] for a, b in zip(picks, picks[1:]))          # 2 clip liền nhau không trùng giao diện
+    assert len({(p["id"], p["pattern"], p["head"]) for p in picks}) == len(picks)
+    assert themes.pick("tim", 3)["id"] == "tim" and themes.pick("xyz", 0)["id"] in themes.THEMES
+    long = "Doanh nghiệp phải kê khai bổ sung hồ sơ khai thuế và nộp đủ số tiền thuế thiếu cùng tiền chậm nộp " * 2
+    scenes = [{"type": "list", "items": ["Kiểm tra kỹ | " + long]},
+              {"type": "list", "items": ["Phạt tiền | " + long, "Truy thu | " + long]},
+              {"type": "list", "items": ["Thuế TNDN | Kê khai sai", "Hóa đơn | Không hợp lệ", "Chậm nộp | Mỗi ngày", "Rà soát | Định kỳ"]},
+              {"type": "list", "items": ["A rất dài " * 6 + "| " + long] * 3}]
+    for vid in (1, 2, 3):
+        t = themes.pick("auto", vid)
+        themes.apply(t)
+        assert techlook.BG == t["bg"] and techlook.PATTERN == t["pattern"]
+        for size in ((1080, 1920), (720, 1280), (1280, 720)):
+            L = video.Layout(size)
+            L.ts = 1.15
+            for k, raw in enumerate(scenes):
+                sc = video.clean_scenes([{"headline": "Tiêu đề rất dài cho cảnh này|Dòng hai cũng dài", "tag": "Nhãn",
+                                          "narration": "Lời đọc. " * 10, **raw}])[0]
+                work = tmp_path / f"{vid}_{size[0]}_{k}"
+                work.mkdir()
+                techlook.background(size, work / "bg.png", seed=vid)
+                layers, caps = techlook.build(L, sc, k, 4, work, "", 8.0, 6.0)
+                assert layers and video.check_layers(L, work, layers, caps) == [], (vid, size, k)
+    themes.apply(themes.pick("dem", 0))
+
+
+def test_theme_setting_is_validated(client):
+    assert video.save_config({"theme": "ngoc"})["theme"] == "ngoc"
+    assert video.save_config({"theme": "khong-co"})["theme"] == "auto"

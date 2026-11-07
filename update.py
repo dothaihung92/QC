@@ -51,6 +51,7 @@ FILES = [
     "app/doodle.py",
     "app/doodle_icons.py",
     "app/techlook.py",
+    "app/themes.py",
     "app/server.py",
     "static/index.html",
     "static/seo-writer.html",

@@ -673,6 +673,11 @@
         <option value="doodle">Vẽ tay trên giấy (hình AI vẽ lộ dần, có bàn tay cầm bút) — cần Gemini key</option>
         <option value="explainer">Giải thích (sơ đồ, thẻ kính, phụ đề vàng) — kiểu clip công nghệ</option>
         <option value="classic">Cổ điển (khung tiêu đề + ảnh nền)</option></select>
+      <label>Giao diện (kiểu Công nghệ / Giải thích)</label>
+      <select id="vdTheme"><option value="auto">Tự đổi mỗi clip — màu, họa tiết nền, kiểu tiêu đề khác nhau (khuyên dùng)</option>
+        <option value="dem">Xanh đêm</option><option value="ngoc">Ngọc lục bảo</option><option value="tim">Tím hoàng hôn</option>
+        <option value="cam">Cam năng lượng</option><option value="bien">Xanh biển</option><option value="do">Đỏ cảnh báo</option>
+        <option value="vang">Than chì – vàng</option></select>
       <label>Cách "vẽ" hình (kiểu Vẽ tay)</label>
       <select id="vdPen"><option value="wipe">Quét lộ dần kèm bàn tay cầm bút (nhanh, mặc định)</option>
         <option value="strokes">Vẽ từng nét như người thật — thư viện whiteboard-animator (cài thêm ~200 MB, dựng lâu hơn)</option></select>
@@ -838,7 +843,7 @@ async function loadVideo() {
     .map(([pre, lbl]) => `<optgroup label="${lbl}">${Object.entries(VCFG.voices).filter(([k]) => k.startsWith(pre))
       .map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</optgroup>`).join('');
   $('vdStyle').innerHTML = Object.entries(VCFG.styles).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
-  $('vdStyle').value = VCFG.tts_style; $('vdLook').value = VCFG.look; $('vdAudience').value = VCFG.audience; $('vdAiImg').checked = VCFG.ai_images; $('vdShowTitle').checked = VCFG.show_title; $('vdPen').value = VCFG.pen;
+  $('vdStyle').value = VCFG.tts_style; $('vdLook').value = VCFG.look; $('vdTheme').value = VCFG.theme || 'auto'; $('vdAudience').value = VCFG.audience; $('vdAiImg').checked = VCFG.ai_images; $('vdShowTitle').checked = VCFG.show_title; $('vdPen').value = VCFG.pen;
   $('vdPenNote').textContent = VCFG.pen === 'strokes' ? (VCFG.wba ? '✅ Đã cài whiteboard-animator.' : '⚠ Chưa cài — bấm Lưu cài đặt rồi "Cập nhật công cụ".') : ''; $('vdVisual').value = VCFG.visual; $('vdVeo').value = VCFG.veo_scenes;
   $('vdVeoCost').textContent = `(≈ ${VCFG.veo_cost} USD / cảnh)`;
   $('vdVoice').value = VCFG.voice; $('vdRate').value = VCFG.rate;
@@ -906,7 +911,7 @@ function vdPick() {
   if (x) { $('vdText').value = x.text; $('vdImg').value = x.img || ''; }
 }
 async function vdSave() {
-  VCFG = await api('/api/video/config', { method: 'PUT', body: { audience: $('vdAudience').value, ai_images: $('vdAiImg').checked, show_title: $('vdShowTitle').checked, look: $('vdLook').value, pen: $('vdPen').value, voice: $('vdVoice').value, tts_style: $('vdStyle').value, visual: $('vdVisual').value, veo_scenes: $('vdVeo').value, rate: $('vdRate').value,
+  VCFG = await api('/api/video/config', { method: 'PUT', body: { audience: $('vdAudience').value, ai_images: $('vdAiImg').checked, show_title: $('vdShowTitle').checked, look: $('vdLook').value, theme: $('vdTheme').value, pen: $('vdPen').value, voice: $('vdVoice').value, tts_style: $('vdStyle').value, visual: $('vdVisual').value, veo_scenes: $('vdVeo').value, rate: $('vdRate').value,
     format: $('vdFormat').value, color: $('vdColor').value, brand: $('vdBrand').value, pexels_key: $('vdPexels').value,
     music: $('vdMusic').checked } });
   $('vdPexels').value = ''; toast('✅ Đã lưu cài đặt clip'); loadVideo();

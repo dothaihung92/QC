@@ -21,6 +21,8 @@ GLASS = (14, 42, 60, 218)
 EDGE = (72, 140, 172, 190)
 LINE = (58, 196, 230, 255)
 BODY = (232, 242, 247, 255)
+BG_BASE = (4, 20, 32)                                  # nền + 2 vầng sáng — themes.apply() đổi theo từng clip
+SPOTS = ((16, 96, 122), (10, 66, 98))
 
 
 # ---------------------------------------------------------------- chữ hẹp, chữ chuyển màu
@@ -81,14 +83,16 @@ def background(size, dest: Path, seed: int = 0):
     import random
     w, h = int(size[0] * V.OVERSIZE), int(size[1] * V.OVERSIZE)
     rng = random.Random(seed)
-    base = Image.new("RGB", (w, h), (4, 20, 32))
+    base = Image.new("RGB", (w, h), BG_BASE)
     blur = int(min(w, h) * 0.2)
-    spots = [((16, 96, 122), rng.uniform(0.12, 0.45) * w, rng.uniform(0.25, 0.5) * h, 0.5, 0.36, 235),
-             ((10, 66, 98), rng.uniform(0.6, 0.9) * w, rng.uniform(0.55, 0.9) * h, 0.4, 0.3, 190)]
+    spots = [(SPOTS[0], rng.uniform(0.12, 0.45) * w, rng.uniform(0.25, 0.5) * h, 0.5, 0.36, 235),
+             (SPOTS[1], rng.uniform(0.6, 0.9) * w, rng.uniform(0.55, 0.9) * h, 0.4, 0.3, 190)]
     for colr, cx, cy, rw, rh, strength in spots:
         m = Image.new("L", (w, h), 0)
         ImageDraw.Draw(m).ellipse((cx - rw * w / 2, cy - rh * h / 2, cx + rw * w / 2, cy + rh * h / 2), fill=strength)
         base = Image.composite(Image.new("RGB", (w, h), colr), base, m.filter(ImageFilter.GaussianBlur(blur)))
+    from . import techlook as _T                          # họa tiết nền theo giao diện của clip
+    base = Image.alpha_composite(base.convert("RGBA"), _T.pattern_layer((w, h), _T.PATTERN, rng)).convert("RGB")
     base.save(dest, "PNG")
 
 
@@ -162,7 +166,9 @@ def caption_layer(L, words, active, dest: Path):
 
 # ---------------------------------------------------------------- thẻ kính mờ
 
-def _glass(layer, box, radius=None, fill=GLASS, edge=EDGE):
+def _glass(layer, box, radius=None, fill=None, edge=None):
+    fill = GLASS if fill is None else fill                # đọc màu lúc vẽ (giao diện đổi theo clip)
+    edge = EDGE if edge is None else edge
     d = ImageDraw.Draw(layer)
     r = radius or 18
     sh = Image.new("RGBA", layer.size, (0, 0, 0, 0))
@@ -556,6 +562,9 @@ def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_l
         _visual(c, sc, top, bottom, illus)
     elif items:
         _list(c, sc, top, bottom)
+    if typ != "visual":
+        from . import techlook as _T
+        c.out = _T.center_content(c.out, top, bottom, work, L)
     layers += c.out
     if brand:                                           # tên thương hiệu mờ ở đáy, không chiếm chỗ
         ov = c.new()

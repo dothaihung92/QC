@@ -20,6 +20,8 @@ WHITE, GRAY, DIM = (245, 247, 252), (150, 162, 186), (96, 106, 130)
 CARD = (16, 22, 44, 230)
 CARD_EDGE = (60, 74, 120, 255)
 KEYBOX = (36, 104, 232)
+GLOW, DOTC = (16, 36, 84), (90, 140, 255)     # vầng sáng nền, màu hạt sáng / họa tiết
+PATTERN, HEAD = "grid", "left"                # họa tiết nền, kiểu tiêu đề — themes.apply() đổi theo từng clip
 
 
 def background(size, dest: Path, seed: int = 0):
@@ -30,28 +32,59 @@ def background(size, dest: Path, seed: int = 0):
     d = ImageDraw.Draw(glow)
     cx, cy = rng.uniform(0.3, 0.7) * w, rng.uniform(0.3, 0.6) * h
     d.ellipse((cx - w * 0.45, cy - h * 0.25, cx + w * 0.45, cy + h * 0.25), fill=200)
-    img = Image.composite(Image.new("RGB", (w, h), (16, 36, 84)), img, glow.filter(ImageFilter.GaussianBlur(min(w, h) * 0.22)))
-    grid = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    g = ImageDraw.Draw(grid)
-    step = max(40, min(w, h) // 12)
-    for x in range(0, w, step):
-        g.line((x, 0, x, h), fill=(110, 140, 220, 14))
-    for y in range(0, h, step):
-        g.line((0, y, w, y), fill=(110, 140, 220, 14))
-    img = Image.alpha_composite(img.convert("RGBA"), grid)
+    img = Image.composite(Image.new("RGB", (w, h), GLOW), img, glow.filter(ImageFilter.GaussianBlur(min(w, h) * 0.22)))
+    img = Image.alpha_composite(img.convert("RGBA"), pattern_layer((w, h), PATTERN, rng))
     dots = Image.new("RGBA", (w, h), (0, 0, 0, 0))
     dd = ImageDraw.Draw(dots)
     for _ in range(26):                                   # hạt sáng mờ
         r = rng.uniform(3, 14)
         x, y = rng.uniform(0, w), rng.uniform(0, h)
-        dd.ellipse((x - r, y - r, x + r, y + r), fill=(90, 140, 255, rng.randint(24, 70)))
+        dd.ellipse((x - r, y - r, x + r, y + r), fill=DOTC + (rng.randint(24, 70),))
     img = Image.alpha_composite(img, dots.filter(ImageFilter.GaussianBlur(3)))
     img.convert("RGB").save(dest, "PNG")
 
 
+def pattern_layer(size, kind: str, rng):
+    """Họa tiết nền mờ: lưới, chấm, sọc chéo, vòng tròn đồng tâm, sóng, dấu cộng."""
+    import math as _m
+    w, h = size
+    lay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    g = ImageDraw.Draw(lay)
+    col = tuple(min(255, int(c * 0.6 + 90)) for c in DOTC)
+    step = max(40, min(w, h) // 12)
+    if kind == "dots":
+        for y in range(step // 2, h, step):
+            for x in range(step // 2, w, step):
+                g.ellipse((x - 3, y - 3, x + 3, y + 3), fill=col + (34,))
+    elif kind == "diagonal":
+        for x in range(-h, w, step):
+            g.line((x, 0, x + h, h), fill=col + (16,), width=2)
+    elif kind == "rings":
+        cx, cy = rng.choice((0, w)), rng.uniform(0.15, 0.45) * h
+        for r in range(step, int(max(w, h) * 1.3), step):
+            g.ellipse((cx - r, cy - r, cx + r, cy + r), outline=col + (18,), width=2)
+    elif kind == "waves":
+        for y0 in range(step, h, int(step * 1.4)):
+            pts = [(x, y0 + _m.sin(x / (w / 3.2) * _m.pi + y0 / 97) * step * 0.35) for x in range(0, w + 20, 20)]
+            g.line(pts, fill=col + (20,), width=2)
+    elif kind == "plus":
+        a = max(5, step // 8)
+        for y in range(step // 2, h, step):
+            for x in range(step // 2, w, step):
+                g.line((x - a, y, x + a, y), fill=col + (30,), width=2)
+                g.line((x, y - a, x, y + a), fill=col + (30,), width=2)
+    else:                                                  # grid
+        for x in range(0, w, step):
+            g.line((x, 0, x, h), fill=col + (14,))
+        for y in range(0, h, step):
+            g.line((0, y, w, y), fill=col + (14,))
+    return lay
+
+
 # ---------------------------------------------------------------- biểu tượng nhỏ
 
-def icon(d, name: str, cx, cy, r, color=WHITE):
+def icon(d, name: str, cx, cy, r, color=WHITE, line=None):
+    ln = (line or BLUE2) + (255,)                         # nét kính lúp / quả địa cầu (trắng khi nằm trên nền màu nhấn)
     w = max(2, int(r * 0.16))
     if name == "lock":
         d.rounded_rectangle((cx - r * 0.7, cy - r * 0.1, cx + r * 0.7, cy + r * 0.85), radius=r * 0.18, fill=ORANGE + (255,))
@@ -71,12 +104,12 @@ def icon(d, name: str, cx, cy, r, color=WHITE):
             pts.append((cx + rr * math.cos(a), cy + rr * math.sin(a)))
         d.polygon(pts, fill=GOLD2 + (255,))
     elif name == "search":
-        d.ellipse((cx - r * 0.8, cy - r * 0.8, cx + r * 0.3, cy + r * 0.3), outline=BLUE2 + (255,), width=w + 2, fill=(180, 230, 255, 90))
-        d.line((cx + r * 0.2, cy + r * 0.2, cx + r * 0.85, cy + r * 0.85), fill=BLUE2 + (255,), width=w + 3)
+        d.ellipse((cx - r * 0.8, cy - r * 0.8, cx + r * 0.3, cy + r * 0.3), outline=ln, width=w + 2, fill=(180, 230, 255, 90))
+        d.line((cx + r * 0.2, cy + r * 0.2, cx + r * 0.85, cy + r * 0.85), fill=ln, width=w + 3)
     elif name == "globe":
-        d.ellipse((cx - r * 0.85, cy - r * 0.85, cx + r * 0.85, cy + r * 0.85), outline=BLUE2 + (255,), width=w + 1)
-        d.ellipse((cx - r * 0.4, cy - r * 0.85, cx + r * 0.4, cy + r * 0.85), outline=BLUE2 + (255,), width=w)
-        d.line((cx - r * 0.85, cy, cx + r * 0.85, cy), fill=BLUE2 + (255,), width=w)
+        d.ellipse((cx - r * 0.85, cy - r * 0.85, cx + r * 0.85, cy + r * 0.85), outline=ln, width=w + 1)
+        d.ellipse((cx - r * 0.4, cy - r * 0.85, cx + r * 0.4, cy + r * 0.85), outline=ln, width=w)
+        d.line((cx - r * 0.85, cy, cx + r * 0.85, cy), fill=ln, width=w)
     elif name == "play":
         d.rounded_rectangle((cx - r * 0.85, cy - r * 0.6, cx + r * 0.85, cy + r * 0.6), radius=r * 0.2, fill=(150, 90, 200, 255))
         d.polygon([(cx - r * 0.25, cy - r * 0.3), (cx - r * 0.25, cy + r * 0.3), (cx + r * 0.35, cy)], fill=WHITE + (255,))
@@ -136,17 +169,35 @@ def header(L, sc, i: int, work: Path):
             img = X.cond_text(sc["tag"], int(L.base * 0.052), grad=(BLUE, BLUE2), scale=1.0)
             ov.alpha_composite(img, (pad + 2 * r + int(r * 0.4), y - img.height // 2))
         y += int(r * 1.9)
-    elif sc["tag"]:
+    style = "left" if hero else HEAD
+    center = style == "center"
+    if not hero and sc["tag"]:
         f = V._font(int(L.base * 0.034), bold=True)
-        d.text((pad, y), sc["tag"].upper(), font=f, fill=BLUE + (255,), anchor="lm")
-        y += int(L.base * 0.06)
+        tag = sc["tag"].upper()
+        if style == "band":                                   # nhãn dạng viên thuốc màu nhấn
+            tw = d.textlength(tag, font=f)
+            hpx = int(L.base * 0.058)
+            d.rounded_rectangle((pad, y - hpx // 2, pad + tw + hpx, y + hpx // 2), radius=hpx // 2, fill=BLUE + (255,))
+            d.text((pad + hpx / 2, y), tag, font=f, fill=(255, 255, 255, 255), anchor="lm")
+            y += int(L.base * 0.075)
+        else:
+            d.text((L.W / 2 if center else pad, y), tag, font=f, fill=BLUE + (255,), anchor="mm" if center else "lm")
+            y += int(L.base * 0.06)
     lines = X.split_heading(sc["headline"])[:2]
     size = int(L.base * (0.108 if hero else 0.085))
+    y_top = int(y)
     for k, line in enumerate(lines):
         kw = {"grad": (BLUE, BLUE2)} if k == 1 or (len(lines) == 1 and not hero) else {"fill": WHITE}
-        img = X._fit(line, size, L.W - 2 * pad, scale=1.0, **kw)
-        ov.alpha_composite(img, (pad, int(y)))
+        img = X._fit(line, size, L.W - 2 * pad - (int(L.base * 0.04) if style == "band" else 0), scale=1.0, **kw)
+        x = (L.W - img.width) // 2 if center else pad + (int(L.base * 0.04) if style == "band" else 0)
+        ov.alpha_composite(img, (x, int(y)))
         y += int(img.height * 1.08)
+    if style == "band" and lines:                             # vạch dọc màu nhấn bên trái tiêu đề
+        d.rounded_rectangle((pad, y_top, pad + int(L.base * 0.012), int(y)), radius=4, fill=BLUE + (255,))
+    elif center and lines:                                    # gạch ngang ngắn dưới tiêu đề
+        bw = int(L.base * 0.16)
+        d.rounded_rectangle(((L.W - bw) // 2, int(y) + 6, (L.W + bw) // 2, int(y) + 6 + int(L.base * 0.01)), radius=4, fill=BLUE2 + (255,))
+        y += int(L.base * 0.03)
     return V._save_layer(ov, work / f"th{i}.png"), int(y)
 
 
@@ -347,8 +398,135 @@ def caption_layer(L, words: list, active: int, dest: Path):
     return V._save_layer(ov, dest)
 
 
+_ICON_WORDS = [("warn", r"phạt|rủi ro|sai|cảnh báo|vi phạm|truy thu|nợ|lỗ|chậm"), ("search", r"kiểm tra|rà soát|soát|tra cứu|đối chiếu"),
+               ("doc", r"hóa đơn|chứng từ|hồ sơ|tờ khai|hợp đồng|văn bản|sổ|báo cáo"), ("lock", r"bảo vệ|an toàn|bảo mật|tránh"),
+               ("star", r"lợi ích|ưu đãi|giảm|miễn|tiết kiệm|lợi nhuận"), ("check", r"đúng|hoàn thành|đủ|hợp lệ|đã"),
+               ("bell", r"lưu ý|nhớ|hạn|thời hạn|nhắc"), ("chat", r"tư vấn|hỏi|liên hệ"), ("bolt", r".")]
+
+
+def icon_for(text: str) -> str:
+    t = (text or "").lower()
+    return next(n for n, pat in _ICON_WORDS if re.search(pat, t))
+
+
+def focus_block(c: X.Cards, L, sc, top: int, bottom: int):
+    """Cảnh ít ý (1-2 mục): thẻ lớn có biểu tượng tròn to, đặt giữa khoảng trống thay vì thẻ nhỏ sát trên."""
+    items = sc["items"][:2]
+    n = len(items)
+    gap = int(L.pad * 0.6)
+    ft = V._font(int(L.base * (0.062 if n == 1 else 0.052) * getattr(L, "ts", 1.0)), bold=True)
+    fd = V._font(int(L.base * (0.042 if n == 1 else 0.036) * getattr(L, "ts", 1.0)))
+    meas = ImageDraw.Draw(c.new())
+    tw = L.W - 4 * L.pad
+    blocks = []
+    for t in items:
+        title, detail = X._split_item(t)
+        tl = V.fit_lines(meas, title or detail, ft, tw, 2)
+        dl = V.fit_lines(meas, detail if title else "", fd, tw, 4)
+        r = int(L.base * (0.13 if n == 1 else 0.075))
+        h = 2 * r + int(L.pad * 0.6) + len(tl) * int(ft.size * 1.25) + len(dl) * int(fd.size * 1.35) + int(L.pad * 1.2)
+        blocks.append((t, tl, dl, r, h))
+    total = sum(b[4] for b in blocks) + gap * (n - 1)
+    y = top + max(0, (bottom - top - total) // 2)
+    for k, (t, tl, dl, r, h) in enumerate(blocks):
+        ov = c.new()
+        X._glass(ov, (L.pad, y, L.W - L.pad, y + h), radius=28)
+        d = ImageDraw.Draw(ov)
+        cx, cy = L.W // 2, y + int(L.pad * 0.6) + r
+        halo = Image.new("RGBA", ov.size, (0, 0, 0, 0))
+        ImageDraw.Draw(halo).ellipse((cx - r * 1.35, cy - r * 1.35, cx + r * 1.35, cy + r * 1.35), fill=BLUE + (70,))
+        ov.alpha_composite(halo.filter(ImageFilter.GaussianBlur(r * 0.35)))
+        d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=BLUE + (255,))
+        icon(d, icon_for(t), cx, cy, r * 0.55, line=WHITE)
+        ty = cy + r + int(L.pad * 0.6)
+        for line in tl:
+            d.text((L.W / 2, ty), line, font=ft, fill=WHITE + (255,), anchor="mt")
+            ty += int(ft.size * 1.25)
+        for line in dl:
+            d.text((L.W / 2, ty), line, font=fd, fill=(222, 230, 242, 255), anchor="mt")
+            ty += int(fd.size * 1.35)
+        c.add(ov, c.when(k, n, 0.4), "pop")
+        y += h + gap
+
+
+def tiles_block(c: X.Cards, L, sc, top: int, bottom: int):
+    """3-4 ý ngắn: lưới 2 cột, mỗi ô có biểu tượng tròn + tiêu đề + 1-2 dòng giải thích (khác kiểu danh sách đánh số)."""
+    items = sc["items"][:4]
+    gap = int(L.pad * 0.35)
+    cw = (L.W - 2 * L.pad - gap) // 2
+    ts = getattr(L, "ts", 1.0)
+    ft, fd = V._font(int(L.base * 0.044 * ts), bold=True), V._font(int(L.base * 0.032 * ts))
+    meas = ImageDraw.Draw(c.new())
+    r = int(L.base * 0.05)
+    rows = []
+    for t in items:
+        title, detail = X._split_item(t)
+        tl = V.fit_lines(meas, title or detail, ft, cw - L.pad, 2)
+        dl = V.fit_lines(meas, detail if title else "", fd, cw - L.pad, 3)
+        rows.append((t, tl, dl))
+    ch = max(2 * r + int(L.pad * 0.9) + len(tl) * int(ft.size * 1.22) + len(dl) * int(fd.size * 1.3) for _, tl, dl in rows) + int(L.pad * 0.5)
+    nrow = (len(rows) + 1) // 2
+    ch = min(ch, (bottom - top - gap * (nrow - 1)) // nrow)
+    for k, (t, tl, dl) in enumerate(rows):
+        rr, cc = divmod(k, 2)
+        x0 = L.pad + cc * (cw + gap) if not (len(rows) == 3 and k == 2) else (L.W - cw) // 2
+        y0 = top + rr * (ch + gap)
+        ov = c.new()
+        X._glass(ov, (x0, y0, x0 + cw, y0 + ch), radius=22)
+        d = ImageDraw.Draw(ov)
+        cx, cy = x0 + cw // 2, y0 + int(L.pad * 0.45) + r
+        d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(BLUE if k % 2 == 0 else BLUE2) + (255,))
+        icon(d, icon_for(t), cx, cy, r * 0.55, line=WHITE)
+        ty = cy + r + int(L.pad * 0.35)
+        for line in tl:
+            d.text((cx, ty), line, font=ft, fill=WHITE + (255,), anchor="mt")
+            ty += int(ft.size * 1.22)
+        for line in dl:
+            d.text((cx, ty), line, font=fd, fill=(222, 230, 242, 255), anchor="mt")
+            ty += int(fd.size * 1.3)
+        c.add(ov, c.when(k, len(rows), 0.4), "pop")
+
+
+def _short_items(items) -> bool:
+    return 3 <= len(items) <= 4 and all(len(X._split_item(t)[0] or t) <= 26 and len(X._split_item(t)[1]) <= 70 for t in items)
+
+
+def watermark(L, i: int, work: Path):
+    """Số thứ tự cảnh rất lớn, mờ, màu nhấn — lấp khoảng trống và mỗi cảnh trông khác nhau."""
+    ov = Image.new("RGBA", (L.W, L.H), (0, 0, 0, 0))
+    f = V._font(int(L.base * 0.5), bold=True)
+    x = L.W - L.pad // 2 if HEAD != "center" else L.pad // 2
+    ImageDraw.Draw(ov).text((x, int(L.H * (0.30 + 0.12 * (i % 3)))), f"{i + 1:02d}", font=f,
+                            fill=BLUE + (20,), anchor="rm" if HEAD != "center" else "lm")
+    return V._save_layer(ov, work / f"tw{i}.png")
+
+
+def center_content(out: list, top: int, bottom: int, work: Path, L):
+    """Nội dung ngắn hơn nhiều so với khoảng trống → dời cả khối xuống giữa (không còn nửa dưới trống trơn)."""
+    if not out:
+        return out
+    ys, ye = [], []
+    for name, (x, y), *_ in out:
+        try:
+            with Image.open(work / name) as im:
+                ys.append(y)
+                ye.append(y + im.height)
+        except OSError:
+            return out
+    used = max(ye) - min(ys)
+    free = (bottom - top) - used
+    if free < L.base * 0.12:
+        return out
+    dy = min(free // 2, int(L.H * 0.16))
+    return [(name, (x, y + dy)) + tuple(rest) for name, (x, y), *rest in out]
+
+
 def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_len: float, illus=None):
     layers = []
+    if sc["type"] != "hero":
+        wpos = watermark(L, i, work)
+        if wpos:
+            layers.append((f"tw{i}.png", wpos, 0.0, "none"))
     pos, hb = header(L, sc, i, work)
     if pos:
         layers.append((f"th{i}.png", pos, 0.0, "head"))
@@ -377,10 +555,16 @@ def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_l
         X._bars(c, sc, top, bottom)
     elif typ == "visual" and sc["panels"]:
         X._visual(c, sc, top, bottom, illus)
+    elif sc["items"] and len(sc["items"]) <= 2 and not sc["chips"] and typ in ("list", "text", "steps", "doodle"):
+        focus_block(c, L, sc, top, bottom)                  # ít ý → thẻ lớn có biểu tượng, giữa khung
+    elif sc["items"] and typ in ("list", "text", "doodle") and not sc["chips"] and _short_items(sc["items"]) and i % 2 == 1:
+        tiles_block(c, L, sc, top, bottom)                  # xen kẽ: cảnh lẻ dùng lưới ô, cảnh chẵn dùng danh sách đánh số
     elif sc["items"]:
         X._list(c, sc, top, bottom)
     elif sc["chips"]:
         chips_layers(c, L, sc["chips"], top, 1, 0.5, border=BLUE)
+    if typ not in ("hero", "cta", "visual"):
+        c.out = center_content(c.out, top, bottom, work, L)
     layers += c.out
     note = sc.get("note") or ("* Ví dụ minh hoạ" if typ == "browser" else "")
     if note:

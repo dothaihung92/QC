@@ -74,6 +74,7 @@ DEFAULTS = {
     "audience": "expert",             # expert = luật sư / kế toán giải trình văn bản; general = phổ thông
     "show_title": True,               # hiện tiêu đề lớn đầu mỗi cảnh (tắt: màn hình chỉ còn nội dung + phụ đề)
     "ai_images": False,               # cho phép Gemini vẽ hình minh họa (mặc định TẮT: chỉ dùng ghi chú chữ)
+    "theme": "auto",                  # giao diện màu/họa tiết (kiểu Công nghệ / Giải thích): auto = mỗi clip một kiểu khác
     "look": "doodle",                 # doodle = vẽ tay trên giấy (hình AI vẽ lộ dần); explainer = sơ đồ thẻ kính; classic = cũ
     "pen": "wipe",                    # wipe = quét lộ dần kèm bàn tay; strokes = vẽ từng nét (whiteboard-animator, cài thêm)
     "visual": "stock",                # stock = video/ảnh Pexels hoặc nền màu; ai = ảnh AI riêng cho từng cảnh
@@ -136,6 +137,9 @@ def save_config(body: dict) -> dict:
         cur["audience"] = DEFAULTS["audience"]
     if cur["look"] not in ("doodle", "tech", "explainer", "classic"):
         cur["look"] = DEFAULTS["look"]
+    from . import themes
+    if cur["theme"] != "auto" and cur["theme"] not in themes.THEMES:
+        cur["theme"] = "auto"
     if cur["pen"] not in ("wipe", "strokes"):
         cur["pen"] = DEFAULTS["pen"]
     if cur["visual"] not in ("stock", "ai"):
@@ -1520,6 +1524,11 @@ def render(video_id: int):
     tech = cfg["look"] == "tech"
     expl = cfg["look"] == "explainer" or tech
     paper = cfg["look"] == "doodle"
+    if expl:                                     # mỗi clip một giao diện (màu, họa tiết nền, kiểu tiêu đề) — không lặp khung mẫu
+        from . import themes
+        theme = themes.pick(cfg.get("theme", "auto"), video_id)
+        themes.apply(theme)
+        _log(f"Giao diện clip: {theme['name']} · nền {theme['pattern']} · tiêu đề {theme['head']}")
     # explainer / công nghệ: nền liền mạch xuyên suốt + nội dung mờ dần cuối cảnh → nối thẳng (mượt, không chồng hình)
     trans, tnames = (0.0, ["fade"]) if expl else (0.3, ["fade"]) if paper else (TRANSITION, TRANSITIONS)
     ai_state = doodle.AIState()
