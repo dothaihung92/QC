@@ -42,6 +42,7 @@ FILES = [
     "app/replies.py",
     "app/autoreply.py",
     "app/groupbot.py",
+    "app/groupwriter.py",
     "app/newsagent.py",
     "app/legallinks.py",
     "app/wordpress.py",

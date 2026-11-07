@@ -18,7 +18,7 @@ from fastapi.responses import (FileResponse, HTMLResponse, PlainTextResponse, Re
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
-from . import (autoreply, bot, config, content, db, facebook, legallinks, newsagent, replies, video,
+from . import (autoreply, bot, config, content, db, facebook, groupwriter, legallinks, newsagent, replies, video,
                wordpress)
 from .facebook import FacebookError
 
@@ -1194,6 +1194,22 @@ def add_group(body: GroupIn):
     return {"id": gid, "name": name, "url": url}
 
 
+class GroupEdit(BaseModel):
+    name: Optional[str] = None
+    members: Optional[int] = None
+
+
+@admin.put("/api/groups/{gid}")
+def edit_group(gid: int, body: GroupEdit):
+    fields = {}
+    if body.name is not None and body.name.strip():
+        fields["name"] = body.name.strip()
+    if body.members is not None:
+        fields.update(members=max(0, int(body.members)), members_at=db.now())
+    db.update_group(gid, **fields)
+    return {"ok": True}
+
+
 @admin.delete("/api/groups/{gid}")
 def delete_group(gid: int):
     db.delete_group(gid)
@@ -1226,6 +1242,61 @@ def add_group_job(body: GroupJobIn):
         raise HTTPException(400, RISK_MSG)
     jid = db.add_group_job(body.message.strip(), body.link.strip(), body.scheduled_at or db.now(), ids, auto=body.auto)
     return {"id": jid}
+
+
+class FromArticleIn(BaseModel):
+    title: str
+    url: str = ""
+    keyword: str = ""
+    description: str = ""
+    content: str = ""
+    group_ids: list[int] = []            # trống = mọi nhóm (trừ nhóm đã biết là không cho đăng)
+    scheduled_at: Optional[int] = None
+    gemini_key: str = ""
+
+
+@admin.post("/api/group-jobs/from-article")
+def group_job_from_article(body: FromArticleIn):
+    """Bài SEO vừa đăng web → AI viết lại thành bài đăng nhóm, mỗi nhóm một nội dung khác nhau."""
+    groups = [g for g in db.list_groups() if (g["id"] in body.group_ids if body.group_ids else g.get("policy") != "blocked")]
+    if not groups:
+        raise HTTPException(400, "Chưa có nhóm nào trong tab Đăng nhóm — thêm nhóm trước")
+    if not body.title.strip():
+        raise HTTPException(400, "Thiếu tiêu đề bài viết")
+    variants = groupwriter.make_variants(body.model_dump(), groups, body.gemini_key.strip())
+    first = variants.get(groups[0]["id"]) or body.title
+    jid = db.add_group_job(first, body.url.strip(), body.scheduled_at or db.now(), [g["id"] for g in groups],
+                           variants=variants, title=body.title.strip(), source="seo")
+    db.log("group_job", f"Tạo lịch đăng nhóm từ bài SEO '{body.title[:60]}' → {len(groups)} nhóm")
+    return {"id": jid, "groups": len(groups), "variants": len(variants)}
+
+
+class StateIn(BaseModel):
+    group_id: int
+    state: str
+
+
+@admin.post("/api/group-jobs/{jid}/state")
+def group_job_state(jid: int, body: StateIn):
+    try:
+        ok = db.set_group_state(jid, body.group_id, body.state)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not ok:
+        raise HTTPException(404, "Không có lịch này")
+    return {"ok": True}
+
+
+class VariantIn(BaseModel):
+    group_id: int
+    text: str
+
+
+@admin.put("/api/group-jobs/{jid}/variant")
+def group_job_variant(jid: int, body: VariantIn):
+    if not db.set_group_variant(jid, body.group_id, body.text.strip()):
+        raise HTTPException(404, "Không có lịch này")
+    return {"ok": True}
 
 
 class ToggleIn(BaseModel):
@@ -1300,6 +1371,20 @@ def groupbot_run(body: RunIn):
     if not body.accept_risk:
         raise HTTPException(400, RISK_MSG)
     return _bot_call("start_run", body.job_id)
+
+
+class CheckIn(BaseModel):
+    job_id: int
+
+
+@admin.post("/api/groupbot/check")
+def groupbot_check(body: CheckIn):
+    return _bot_call("start_check", body.job_id)
+
+
+@admin.post("/api/groupbot/members")
+def groupbot_members():
+    return _bot_call("start_members")
 
 
 @admin.post("/api/groupbot/stop")

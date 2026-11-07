@@ -122,12 +122,20 @@ def test_run_job_posts_all_groups_and_counts_today(site, headless):
 
 
 def test_run_job_stops_at_first_failure_and_keeps_progress(site, headless):
-    jid, gids = _setup_job(site, ["/ok", "/nocomposer", "/ok"])
+    jid, gids = _setup_job(site, ["/ok", "/login", "/ok"])
     groupbot._run_job(jid)
     done = [g["done"] for g in db.list_group_jobs()[0]["groups"]]
-    assert done == [True, False, False]                      # dừng ở nhóm lỗi, không đăng tiếp
+    assert done == [True, False, False]                      # Facebook đòi đăng nhập → dừng, không đăng tiếp
     assert any("Dừng ở «G1»" in l for l in groupbot.state["log"])
     assert list(groupbot.SHOTS.glob("*.png"))                # có ảnh chụp lỗi
+
+
+def test_group_without_composer_is_marked_blocked_and_skipped(site, headless):
+    jid, gids = _setup_job(site, ["/ok", "/nocomposer", "/ok"])
+    groupbot._run_job(jid)
+    st = [(g["done"], g["state"]) for g in db.list_group_jobs()[0]["groups"]]
+    assert st == [(True, "ok"), (False, "blocked"), (True, "ok")]           # nhóm cấm đăng → ghi nhận, sang nhóm khác
+    assert {g["name"]: g["policy"] for g in db.list_groups()}["G1"] == "blocked"
 
 
 def test_run_job_respects_daily_limit(site, headless, monkeypatch):
@@ -159,7 +167,7 @@ def test_auto_jobs_run_once_when_due(site, monkeypatch):
 
 def test_runs_hidden_by_default_and_does_not_wait_on_failure(site, headless):
     assert groupbot.is_visible() is False
-    jid, _ = _setup_job(site, ["/nocomposer"])
+    jid, _ = _setup_job(site, ["/login"])
     groupbot._run_job(jid)                                   # mặc định visible=False
     assert headless.visible_args == [False] and groupbot._wait_calls == []
     log = "\n".join(groupbot.state["log"])
@@ -167,7 +175,7 @@ def test_runs_hidden_by_default_and_does_not_wait_on_failure(site, headless):
 
 
 def test_visible_run_keeps_window_open_on_failure(site, headless):
-    jid, _ = _setup_job(site, ["/nocomposer"])
+    jid, _ = _setup_job(site, ["/login"])
     groupbot._run_job(jid, True)
     assert headless.visible_args == [True] and groupbot._wait_calls == [900]
 

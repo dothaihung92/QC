@@ -146,6 +146,13 @@ def init():
         cols = {r["name"] for r in c.execute("PRAGMA table_info(group_jobs)")}
         if "auto" not in cols:                       # CSDL cũ chưa có cột auto
             c.execute("ALTER TABLE group_jobs ADD COLUMN auto INTEGER NOT NULL DEFAULT 0")
+        for col, ddl in GROUP_JOB_EXTRA.items():       # nội dung riêng từng nhóm + trạng thái duyệt bài
+            if col not in cols:
+                c.execute(f"ALTER TABLE group_jobs ADD COLUMN {col} {ddl}")
+        gcols = {r["name"] for r in c.execute("PRAGMA table_info(group_targets)")}
+        for col, ddl in GROUP_EXTRA.items():           # số thành viên, nhóm có cho đăng thẳng không
+            if col not in gcols:
+                c.execute(f"ALTER TABLE group_targets ADD COLUMN {col} {ddl}")
         ccols = {r["name"] for r in c.execute("PRAGMA table_info(comments)")}
         if "seen" not in ccols:                      # bình luận cũ coi như đã xem, chỉ bình luận mới mới có chấm "Mới"
             c.execute("ALTER TABLE comments ADD COLUMN seen INTEGER NOT NULL DEFAULT 0")
@@ -160,6 +167,19 @@ def init():
         c.execute("UPDATE videos SET status='failed', progress='', "
                   "error='Phần mềm bị tắt khi đang dựng — bấm Dựng clip lại' WHERE status='rendering'")
 
+
+GROUP_JOB_EXTRA = {
+    "variants": "TEXT NOT NULL DEFAULT '{}'",    # {group_id: nội dung riêng cho nhóm đó} — AI viết lại, mỗi nhóm 1 kiểu
+    "states":   "TEXT NOT NULL DEFAULT '{}'",    # {group_id: ok|pending|approved|declined|blocked|failed}
+    "title":    "TEXT NOT NULL DEFAULT ''",      # tiêu đề bài gốc (vd bài SEO) để nhận ra lịch
+    "source":   "TEXT NOT NULL DEFAULT ''",      # seo / manual
+}
+GROUP_EXTRA = {
+    "members":    "INTEGER NOT NULL DEFAULT 0",  # số thành viên → nhóm đông được đăng trước
+    "members_at": "INTEGER NOT NULL DEFAULT 0",
+    "policy":     "TEXT NOT NULL DEFAULT ''",    # open = đăng là lên; review = phải chờ duyệt; blocked = không cho đăng
+}
+GROUP_STATES = ("ok", "pending", "approved", "declined", "blocked", "failed", "")
 
 POST_EXTRA_COLS = {
     "first_comment": "TEXT NOT NULL DEFAULT ''",   # Fanpage tự bình luận ngay dưới bài vừa đăng
@@ -463,8 +483,17 @@ def add_group(name, url):
 
 
 def list_groups():
+    """Nhóm đông thành viên đứng trước (được đăng trước)."""
     with conn() as c:
-        return [dict(r) for r in c.execute("SELECT * FROM group_targets ORDER BY id").fetchall()]
+        return [dict(r) for r in c.execute("SELECT * FROM group_targets ORDER BY members DESC, id").fetchall()]
+
+
+def update_group(gid, **fields):
+    fields = {k: v for k, v in fields.items() if k in ("name", "members", "members_at", "policy")}
+    if not fields:
+        return
+    with conn() as c:
+        c.execute(f"UPDATE group_targets SET {', '.join(k + '=?' for k in fields)} WHERE id=?", list(fields.values()) + [gid])
 
 
 def delete_group(gid):
@@ -472,12 +501,55 @@ def delete_group(gid):
         c.execute("DELETE FROM group_targets WHERE id=?", (gid,))
 
 
-def add_group_job(message, link, scheduled_at, group_ids, auto=False):
+def add_group_job(message, link, scheduled_at, group_ids, auto=False, variants=None, title="", source=""):
     with conn() as c:
         return c.execute(
-            "INSERT INTO group_jobs(message, link, scheduled_at, group_ids, created_at, auto) VALUES(?, ?, ?, ?, ?, ?)",
-            (message, link, scheduled_at, json.dumps(group_ids), now(), int(bool(auto))),
+            "INSERT INTO group_jobs(message, link, scheduled_at, group_ids, created_at, auto, variants, title, source) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (message, link, scheduled_at, json.dumps(group_ids), now(), int(bool(auto)),
+             json.dumps({str(k): v for k, v in (variants or {}).items()}, ensure_ascii=False), title, source),
         ).lastrowid
+
+
+def set_group_variant(job_id, group_id, text: str):
+    """Sửa tay nội dung riêng cho 1 nhóm."""
+    with conn() as c:
+        row = c.execute("SELECT variants FROM group_jobs WHERE id=?", (job_id,)).fetchone()
+        if not row:
+            return False
+        v = json.loads(row["variants"] or "{}")
+        if text:
+            v[str(group_id)] = text
+        else:
+            v.pop(str(group_id), None)
+        c.execute("UPDATE group_jobs SET variants=? WHERE id=?", (json.dumps(v, ensure_ascii=False), job_id))
+    return True
+
+
+def set_group_state(job_id, group_id, state: str):
+    """Trạng thái bài ở 1 nhóm: ok (lên bài ngay) / pending (chờ duyệt) / approved / declined / blocked / failed / '' (chưa đăng).
+    Đồng thời ghi nhận nhóm đó có cho đăng thẳng không (policy) để lần sau biết trước."""
+    if state not in GROUP_STATES:
+        raise ValueError("Trạng thái không hợp lệ")
+    with conn() as c:
+        row = c.execute("SELECT states, done_ids FROM group_jobs WHERE id=?", (job_id,)).fetchone()
+        if not row:
+            return False
+        states = json.loads(row["states"] or "{}")
+        done = set(json.loads(row["done_ids"]))
+        if state:
+            states[str(group_id)] = state
+        else:
+            states.pop(str(group_id), None)
+        if state in ("ok", "pending", "approved", "declined"):
+            done.add(group_id)                       # đã đăng (dù được duyệt hay không)
+        else:
+            done.discard(group_id)
+        c.execute("UPDATE group_jobs SET states=?, done_ids=? WHERE id=?", (json.dumps(states), json.dumps(sorted(done)), job_id))
+        policy = {"ok": "open", "approved": "review", "pending": "review", "declined": "review", "blocked": "blocked"}.get(state)
+        if policy:
+            c.execute("UPDATE group_targets SET policy=? WHERE id=?", (policy, group_id))
+    return True
 
 
 def set_group_job_auto(job_id, auto: bool):
@@ -505,7 +577,13 @@ def _job_dict(row, groups_by_id):
     d = dict(row)
     ids = [g for g in json.loads(d.pop("group_ids")) if g in groups_by_id]   # bỏ group đã xóa
     done = set(json.loads(d.pop("done_ids")))
+    variants = json.loads(d.pop("variants", "{}") or "{}")
+    states = json.loads(d.pop("states", "{}") or "{}")
+    ids.sort(key=lambda g: (-(groups_by_id[g].get("members") or 0), g))          # nhóm đông thành viên trước
     d["groups"] = [{"id": g, "name": groups_by_id[g]["name"], "url": groups_by_id[g]["url"],
+                    "members": groups_by_id[g].get("members") or 0, "policy": groups_by_id[g].get("policy") or "",
+                    "text": variants.get(str(g)) or d["message"], "custom": str(g) in variants,
+                    "state": states.get(str(g), "ok" if g in done else ""),
                     "done": g in done} for g in ids]
     if ids and all(g in done for g in ids):
         d["status"] = "done"
@@ -532,6 +610,11 @@ def toggle_group_done(job_id, group_id):
         done = set(json.loads(row["done_ids"]))
         done.symmetric_difference_update({group_id})
         c.execute("UPDATE group_jobs SET done_ids=? WHERE id=?", (json.dumps(sorted(done)), job_id))
+        if group_id not in done:                       # bỏ đánh dấu → xóa luôn trạng thái duyệt
+            st = c.execute("SELECT states FROM group_jobs WHERE id=?", (job_id,)).fetchone()
+            states = json.loads(st["states"] or "{}")
+            states.pop(str(group_id), None)
+            c.execute("UPDATE group_jobs SET states=? WHERE id=?", (json.dumps(states), job_id))
     return True
 
 

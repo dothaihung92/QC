@@ -35,6 +35,10 @@ class GroupBotError(Exception):
     pass
 
 
+class NoComposer(GroupBotError):
+    """Trang nhóm không có ô viết bài: chưa tham gia / nhóm tắt quyền đăng của thành viên."""
+
+
 def _log(msg: str):
     state["log"] = (state["log"] + [f"{time.strftime('%H:%M:%S')}  {msg}"])[-200:]
 
@@ -185,7 +189,7 @@ def post_to_open_group(page, text: str, timeout: int = 0) -> str:
         except Exception:  # noqa: BLE001
             continue
     if opener is None:
-        raise GroupBotError("Không thấy ô viết bài (chưa tham gia nhóm / nhóm cấm đăng / Facebook đổi giao diện)")
+        raise NoComposer("Không thấy ô viết bài (chưa tham gia nhóm / nhóm không cho thành viên đăng / Facebook đổi giao diện)")
     opener.click()
 
     dialog = page.get_by_role("dialog").last
@@ -233,7 +237,7 @@ def _run_job(job_id: int, visible: bool = False):
     job = next((j for j in db.list_group_jobs() if j["id"] == job_id), None)
     if not job:
         raise GroupBotError("Không có lịch này")
-    todo = [g for g in job["groups"] if not g["done"]]
+    todo = [g for g in job["groups"] if not g["done"] and g["state"] != "blocked"]     # đã xếp nhóm đông thành viên trước
     if not todo:
         _log("Lịch này đã đăng hết các nhóm.")
         return
@@ -245,7 +249,7 @@ def _run_job(job_id: int, visible: bool = False):
     if len(todo) > room:
         _log(f"Chỉ còn {room} lượt hôm nay, sẽ đăng {room}/{len(todo)} nhóm.")
         todo = todo[:room]
-    text = job["message"] + (("\n\n" + job["link"]) if job["link"] else "")
+    link = ("\n\n" + job["link"]) if job["link"] else ""
 
     _log("Chạy " + ("có hiện cửa sổ trình duyệt." if visible else "ẩn (không hiện cửa sổ)."))
     with sync_playwright() as p:
@@ -261,13 +265,17 @@ def _run_job(job_id: int, visible: bool = False):
                 try:
                     page.goto(g["url"], wait_until="domcontentloaded", timeout=60000)
                     page.wait_for_timeout(random.randint(*PAUSE_AFTER_LOAD))
-                    result = post_to_open_group(page, text)
+                    result = post_to_open_group(page, (g.get("text") or job["message"]) + link)   # mỗi nhóm 1 nội dung riêng
+                except NoComposer as e:                    # nhóm không cho mình đăng → ghi nhận rồi sang nhóm khác
+                    db.set_group_state(job_id, g["id"], "blocked")
+                    _log(f"⛔ «{g['name']}»: {e} — bỏ qua nhóm này")
+                    continue
                 except Exception as e:  # noqa: BLE001
                     failure = e if isinstance(e, GroupBotError) else GroupBotError(f"{type(e).__name__}: {str(e)[:200]}")
                     failure.group = g["name"]
                     _screenshot(page)
                     break
-                db.mark_group_done(job_id, g["id"])
+                db.set_group_state(job_id, g["id"], result)          # ok = lên bài ngay; pending = chờ quản trị viên duyệt
                 db.log("group_post", f"lịch {job_id} → {g['name']} ({result})")
                 _log(f"✅ «{g['name']}»" + (" — đang chờ quản trị viên duyệt" if result == "pending" else ""))
                 if i < len(todo) - 1 and not state["stop"]:
@@ -306,6 +314,132 @@ def _wait_until_closed(ctx, seconds):
         except Exception:  # noqa: BLE001
             return
         time.sleep(2)
+
+
+# ---------------------------------------------------------------- kiểm tra bài đã được duyệt chưa
+
+def _norm(t: str) -> str:
+    return re.sub(r"\s+", " ", re.sub(r"[^\w\s]", " ", (t or "").lower())).strip()
+
+
+def snippet(text: str) -> str:
+    """Đoạn chữ đặc trưng (khoảng 8 từ đầu của dòng dài nhất) để tìm lại bài trên trang nhóm."""
+    lines = [l for l in (text or "").split("\n") if len(_norm(l)) > 15]
+    best = max(lines, key=lambda l: len(l)) if lines else (text or "")
+    return " ".join(_norm(best).split()[:8])
+
+
+def start_check(job_id: int):
+    _need_playwright()
+    _start("check", _check_job, job_id)
+
+
+def _page_text(page, url):
+    page.goto(url, wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(random.randint(*PAUSE_AFTER_LOAD))
+    _check_session(page)
+    for _ in range(3):                                          # cuộn để tải thêm bài
+        page.mouse.wheel(0, 2500)
+        page.wait_for_timeout(1200)
+    return _norm(page.inner_text("body"))
+
+
+def _check_job(job_id: int):
+    """Bài đang 'chờ duyệt' ở nhóm nào → xem trang 'Nội dung của bạn' của nhóm: đã lên / còn chờ / bị từ chối."""
+    from playwright.sync_api import sync_playwright
+    job = next((j for j in db.list_group_jobs() if j["id"] == job_id), None)
+    if not job:
+        raise GroupBotError("Không có lịch này")
+    todo = [g for g in job["groups"] if g["state"] == "pending"]
+    if not todo:
+        _log("Không có nhóm nào đang chờ duyệt.")
+        return
+    if not MARKER.exists():
+        raise GroupBotError("Chưa đăng nhập Facebook trong phần mềm — bấm 'Đăng nhập Facebook' trước")
+    with sync_playwright() as p:
+        ctx = _launch(p, is_visible())
+        try:
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            for g in todo:
+                if state["stop"]:
+                    break
+                key = snippet(g["text"])
+                base = g["url"].rstrip("/")
+                try:
+                    if key and key in _page_text(page, base + "/my_posted_content"):
+                        db.set_group_state(job_id, g["id"], "approved")
+                        _log(f"✔ «{g['name']}»: bài ĐÃ ĐƯỢC DUYỆT và đang hiển thị")
+                    elif key and key in _page_text(page, base + "/my_pending_content"):
+                        _log(f"⏳ «{g['name']}»: vẫn đang chờ quản trị viên duyệt")
+                    else:
+                        db.set_group_state(job_id, g["id"], "declined")
+                        _log(f"⛔ «{g['name']}»: không thấy bài ở mục đã đăng lẫn chờ duyệt — có thể đã bị từ chối / xóa")
+                except GroupBotError:
+                    raise
+                except Exception as e:  # noqa: BLE001
+                    _log(f"⚠ «{g['name']}»: không kiểm tra được ({type(e).__name__})")
+                _sleep(random.randint(4, 9))
+            _log("Xong kiểm tra duyệt bài.")
+        finally:
+            _close(ctx)
+
+
+# ---------------------------------------------------------------- số thành viên của nhóm
+
+_MULT = {"k": 1e3, "n": 1e3, "nghìn": 1e3, "ngàn": 1e3, "tr": 1e6, "triệu": 1e6, "m": 1e6}
+
+
+def parse_members(text: str) -> int:
+    """'12,3K thành viên' / '45.678 thành viên' / '1,2 triệu thành viên' / '3.4K members' → số nguyên."""
+    m = re.search(r"(\d[\d.,]*)\s*(k|n|nghìn|ngàn|triệu|tr|m)?\s*(?:thành viên|members?)\b", text or "", re.I)
+    if not m:
+        return 0
+    num, unit = m.group(1), (m.group(2) or "").lower()
+    if unit:
+        val = float(num.replace(",", ".")) if num.count(",") + num.count(".") <= 1 else float(num.replace(".", "").replace(",", "."))
+        return int(round(val * _MULT[unit]))
+    return int(re.sub(r"[.,\s]", "", num) or 0)
+
+
+def start_members():
+    _need_playwright()
+    _start("members", _update_members)
+
+
+def _update_members():
+    from playwright.sync_api import sync_playwright
+    groups = db.list_groups()
+    if not groups:
+        _log("Chưa có nhóm nào.")
+        return
+    if not MARKER.exists():
+        raise GroupBotError("Chưa đăng nhập Facebook trong phần mềm — bấm 'Đăng nhập Facebook' trước")
+    with sync_playwright() as p:
+        ctx = _launch(p, is_visible())
+        try:
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            for g in groups:
+                if state["stop"]:
+                    break
+                try:
+                    page.goto(g["url"], wait_until="domcontentloaded", timeout=60000)
+                    page.wait_for_timeout(random.randint(*PAUSE_AFTER_LOAD))
+                    _check_session(page)
+                    n = parse_members(page.inner_text("body"))
+                except GroupBotError:
+                    raise
+                except Exception as e:  # noqa: BLE001
+                    _log(f"⚠ «{g['name']}»: không đọc được ({type(e).__name__})")
+                    continue
+                if n:
+                    db.update_group(g["id"], members=n, members_at=db.now())
+                    _log(f"👥 «{g['name']}»: {n:,} thành viên".replace(",", "."))
+                else:
+                    _log(f"⚠ «{g['name']}»: không thấy số thành viên — nhập tay trong danh sách nhóm")
+                _sleep(random.randint(3, 7))
+            _log("Xong cập nhật số thành viên — danh sách đã xếp nhóm đông nhất lên đầu.")
+        finally:
+            _close(ctx)
 
 
 # ---------------------------------------------------------------- lịch hẹn tự đăng

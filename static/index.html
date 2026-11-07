@@ -56,6 +56,9 @@
   .job.done { opacity: .6; }
   .job .grp { display: flex; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
   .job .grp b { flex: 1; min-width: 120px; }
+  .job .grp details { flex-basis: 100%; }
+  .job .grp details pre { white-space: pre-wrap; margin: 6px 0 0; background: #f6f8fb; border-radius: 6px; padding: 8px; font: inherit; font-size: 13px; }
+  .gsum { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0; }
   .kpi b { font-size: 24px; }
   th.sort { cursor: pointer; user-select: none; } th.sort:hover { color: var(--pri); }
   td.num { text-align: right; font-variant-numeric: tabular-nums; }
@@ -462,8 +465,10 @@
           <input id="gUrl" placeholder="Link hoặc ID nhóm" style="flex:1 1 140px">
         </div>
         <div class="btns"><button class="btn" onclick="addGroup()">+ Thêm nhóm</button></div>
+        <div class="btns"><button class="btn" onclick="gbDo('members')" title="Mở từng nhóm bằng trình duyệt của phần mềm để đọc số thành viên">👥 Cập nhật số thành viên</button></div>
         <div id="gList" style="margin-top:10px"></div>
-        <p class="muted small">Link nhóm dạng <code>facebook.com/groups/123456789</code>.</p>
+        <p class="muted small">Link nhóm dạng <code>facebook.com/groups/123456789</code>. Nhóm <b>đông thành viên nhất được đăng trước</b>;
+          số thành viên tự cập nhật bằng nút trên (cần đăng nhập Facebook ở khung 🤖) hoặc nhập tay.</p>
       </div>
     </div>
   </div>
@@ -484,6 +489,9 @@
   </div>
   <div class="card">
     <h2>Lịch đăng nhóm</h2>
+    <p class="muted small" style="margin-top:-4px">Bài đăng web ở tab <b>✍️ Viết bài SEO</b> tự tạo lịch ở đây: AI viết lại <b>mỗi nhóm một nội dung khác nhau</b>
+      (cùng trọng tâm bài SEO, có link bài). Trạng thái từng nhóm: ✅ lên bài ngay · ⏳ chờ quản trị viên duyệt · ✔ đã được duyệt ·
+      ⛔ bị từ chối · 🚫 nhóm không cho đăng.</p>
     <div id="gjList"></div>
   </div>
 </section>
@@ -749,6 +757,8 @@ window.addEventListener('hashchange', () => openTab(location.hash.slice(1)));
 // Tab Viết bài SEO báo vừa gửi bài sang → làm mới danh sách bài.
 window.addEventListener('message', e => {
   if (e.origin === location.origin && e.data?.qc === 'post-saved') { loadPosts(); }
+  if (e.origin === location.origin && e.data?.qc === 'group-job') { if (location.hash === '#groups') loadGroups(); pollBadges(); }
+  if (e.origin === location.origin && e.data?.qc === 'open-tab') openTab(e.data.tab);
 });
 
 // ---------------- Tin tức AI
@@ -1386,18 +1396,25 @@ async function loadActivity() {
 let GROUPS = [];
 async function loadGroups() {
   GROUPS = await api('/api/groups');
-  $('gList').innerHTML = GROUPS.map(g => `<div class="row" style="align-items:center;gap:8px;padding:4px 0">
-      <a href="${esc(g.url)}" target="_blank" rel="noopener" style="flex:1"><b>${esc(g.name)}</b></a>
+  $('gList').innerHTML = GROUPS.map(g => `<div class="row" style="align-items:center;gap:8px;padding:5px 0;border-top:1px solid var(--line)">
+      <div style="flex:1;min-width:0"><a href="${esc(g.url)}" target="_blank" rel="noopener"><b>${esc(g.name)}</b></a>
+        <div class="small">${GPOLICY[g.policy] || '<span class="muted">chưa biết nhóm có duyệt bài không</span>'}</div></div>
+      <input type="number" min="0" value="${g.members || ''}" placeholder="thành viên" title="Số thành viên — nhóm đông được đăng trước"
+        style="width:110px" onchange="setMembers(${g.id}, this.value)">
       <button class="btn danger" onclick="delGroup(${g.id})">Xóa</button></div>`).join('')
     || '<p class="muted small">Chưa có nhóm nào — thêm ở trên.</p>';
   const keep = new Set([...document.querySelectorAll('#gjGroups input:checked')].map(i => +i.value));
   $('gjGroups').innerHTML = GROUPS.map(g => `<label style="font-weight:400;margin:4px 0"><input type="checkbox" value="${g.id}"
-      style="width:auto" ${keep.has(g.id) ? 'checked' : ''}> ${esc(g.name)}</label>`).join('')
+      style="width:auto" ${keep.has(g.id) ? 'checked' : ''}> ${esc(g.name)} ${g.members ? `<span class="muted small">· ${fmtNum(g.members)} thành viên</span>` : ''}</label>`).join('')
     || '<span class="muted">Thêm nhóm ở cột bên phải trước.</span>';
   renderNotifBtn();
   loadGroupJobs();
   loadGroupBot();
 }
+const GPOLICY = { open: '<span class="pill p-ok">✅ cho đăng thẳng</span>', review: '<span class="pill p-warn">⏳ bài phải chờ duyệt</span>',
+                  blocked: '<span class="pill p-err">🚫 không cho đăng</span>' };
+const fmtNum = n => Number(n || 0).toLocaleString('vi-VN');
+async function setMembers(id, v) { await api('/api/groups/' + id, { method: 'PUT', body: { members: +v || 0 } }); loadGroups(); }
 async function addGroup() {
   await api('/api/groups', { method: 'POST', body: { name: $('gName').value, url: $('gUrl').value } });
   $('gName').value = ''; $('gUrl').value = ''; loadGroups();
@@ -1428,7 +1445,7 @@ async function loadGroupBot() {
   const was = GBS, logLen = was ? was.log.length : 0;
   try { GBS = await api('/api/groupbot/status'); } catch { return; }
   renderGroupBot();
-  if (was && (was.busy !== GBS.busy || GBS.log.length !== logLen)) loadGroupJobs();   // có nhóm vừa đăng xong
+  if (was && (was.busy !== GBS.busy || GBS.log.length !== logLen)) loadGroups();   // có nhóm vừa đăng xong / cập nhật thành viên
   clearTimeout(gbTimer);
   if (location.hash === '#groups') gbTimer = setTimeout(loadGroupBot, GBS.busy ? 2000 : 8000);
 }
@@ -1463,24 +1480,49 @@ async function runJob(id) {
 }
 let JOBS = [];
 const JOB_TXT = { scheduled: ['Chờ đến giờ', 'p-info'], due: ['Đến giờ đăng!', 'p-warn'], done: ['Đã xong', 'p-ok'] };
+const GSTATE = { ok: ['✅ Đã lên bài (nhóm cho phép)', 'p-ok'], approved: ['✔ Đã được duyệt', 'p-ok'], pending: ['⏳ Chờ quản trị viên duyệt', 'p-warn'],
+                 declined: ['⛔ Bị từ chối / bị xóa', 'p-err'], blocked: ['🚫 Nhóm không cho đăng', 'p-err'], failed: ['⚠ Lỗi khi đăng', 'p-err'],
+                 '': ['⭕ Chưa đăng', 'p-info'] };
 async function loadGroupJobs() {
   JOBS = await api('/api/group-jobs');
   $('gjList').innerHTML = JOBS.map(j => { const [label, cls] = JOB_TXT[j.status];
+    const cnt = k => j.groups.filter(g => k.includes(g.state)).length;
+    const pend = cnt(['pending']);
     return `<div class="job ${j.status}">
-      <div class="row" style="align-items:center;gap:8px"><b style="flex:1">${fmt(j.scheduled_at)}</b>
+      <div class="row" style="align-items:center;gap:8px"><b style="flex:1">${j.title ? '📰 ' + esc(j.title) + ' · ' : ''}${fmt(j.scheduled_at)}</b>
         <span class="pill ${cls}">${label}</span>
         ${j.auto && j.status !== 'done' ? '<span class="pill p-info">tự đăng khi đến giờ</span>' : ''}
         ${j.status !== 'done' ? `<button class="btn pri" onclick="runJob(${j.id})">🤖 Tự đăng các nhóm còn lại</button>` : ''}
-        <button class="btn" onclick="copyJob(${j.id})">📋 Copy nội dung</button>
+        ${pend ? `<button class="btn" onclick="checkJob(${j.id})" title="Mở mục 'Nội dung của bạn' ở từng nhóm để xem bài đã được duyệt chưa">🔍 Kiểm tra duyệt bài (${pend})</button>` : ''}
         <button class="btn danger" onclick="delJob(${j.id})">Xóa</button></div>
-      <div class="pre small" style="margin:8px 0;max-height:90px;overflow:auto">${esc(j.message)}${j.link ? '\n' + esc(j.link) : ''}</div>
-      ${j.groups.map(g => `<div class="grp"><b>${g.done ? '✅' : '⭕'} ${esc(g.name)}</b>
-        <a class="btn" href="${esc(g.url)}" target="_blank" rel="noopener" onclick="copyJob(${j.id}, true)">Mở nhóm ↗</a>
-        <button class="btn ${g.done ? '' : 'pri'}" onclick="toggleJob(${j.id}, ${g.id})">${g.done ? 'Bỏ đánh dấu' : '✓ Đã đăng'}</button></div>`).join('')}
+      <div class="gsum small"><span class="pill p-ok">Được phép / đã duyệt: ${cnt(['ok', 'approved'])}</span>
+        <span class="pill p-warn">Chờ duyệt: ${pend}</span><span class="pill p-err">Từ chối / không cho đăng: ${cnt(['declined', 'blocked', 'failed'])}</span>
+        <span class="pill p-info">Chưa đăng: ${cnt([''])}</span></div>
+      ${j.link ? `<div class="small muted">🔗 ${esc(j.link)}</div>` : ''}
+      ${j.groups.map((g, k) => { const [sl, sc] = GSTATE[g.state] || GSTATE['']; return `<div class="grp">
+        <b>${k + 1}. ${esc(g.name)} ${g.members ? `<span class="muted small" style="font-weight:400">· ${fmtNum(g.members)} thành viên</span>` : ''}</b>
+        <span class="pill ${sc}">${sl}</span>
+        <a class="btn" href="${esc(g.url)}" target="_blank" rel="noopener" onclick="copyJob(${j.id}, true, ${g.id})">Mở nhóm ↗</a>
+        <button class="btn" onclick="copyJob(${j.id}, false, ${g.id})">📋 Copy</button>
+        <select onchange="setGState(${j.id}, ${g.id}, this.value)" style="width:auto" title="Đánh dấu tay trạng thái bài ở nhóm này">
+          ${Object.entries(GSTATE).map(([v, [t]]) => `<option value="${v}" ${v === g.state ? 'selected' : ''}>${t}</option>`).join('')}</select>
+        <details><summary class="small">Nội dung riêng cho nhóm này${g.custom ? ' (AI viết lại)' : ''}</summary>
+          <pre contenteditable="true" onblur="saveVariant(${j.id}, ${g.id}, this.innerText)">${esc(g.text)}</pre></details></div>`; }).join('')}
     </div>`; }).join('') || '<p class="muted">Chưa có lịch nào.</p>';
 }
-async function copyJob(id, quiet) { const j = JOBS.find(x => x.id === id); if (!j) return;
-  const text = j.message + (j.link ? '\n\n' + j.link : '');
+async function setGState(jid, gid, state) { await api(`/api/group-jobs/${jid}/state`, { method: 'POST', body: { group_id: gid, state } });
+  loadGroupJobs(); loadGroups(); pollBadges(); }
+async function saveVariant(jid, gid, text) { const j = JOBS.find(x => x.id === jid), g = j && j.groups.find(x => x.id === gid);
+  if (!g || text.trim() === g.text.trim()) return;
+  await api(`/api/group-jobs/${jid}/variant`, { method: 'PUT', body: { group_id: gid, text } }); toast('💾 Đã lưu nội dung cho nhóm'); loadGroupJobs(); }
+async function checkJob(id) {
+  if (!GBS?.logged_in) return toast('Bấm "Đăng nhập Facebook" ở khung 🤖 trước');
+  try { GBS = await api('/api/groupbot/check', { method: 'POST', body: { job_id: id } }); } catch { return; }
+  renderGroupBot(); loadGroupBot(); toast('🔍 Đang kiểm tra — xem tiến trình ở khung 🤖');
+}
+async function copyJob(id, quiet, gid) { const j = JOBS.find(x => x.id === id); if (!j) return;
+  const g = gid ? j.groups.find(x => x.id === gid) : null;
+  const text = (g ? g.text : j.message) + (j.link ? '\n\n' + j.link : '');
   try { await navigator.clipboard.writeText(text); if (!quiet) toast('📋 Đã copy — dán vào ô viết bài của nhóm'); else toast('📋 Đã copy nội dung, nhóm đang mở ở tab mới'); }
   catch { toast('Không copy được — bôi đen nội dung rồi Ctrl+C'); } }
 async function toggleJob(jid, gid) { await api(`/api/group-jobs/${jid}/toggle`, { method: 'POST', body: { group_id: gid } });

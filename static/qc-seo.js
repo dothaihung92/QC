@@ -559,6 +559,33 @@
       : 'Rank Math: chưa lưu được tự động (' + (rm.data.message || rm.status) + ') — hãy nhập tay từ khóa / tiêu đề / mô tả trong Rank Math' + (alt.ok ? '' : '');
   }
 
+  // ── Sau khi đăng web: tạo lịch đăng nhóm (AI viết lại mỗi nhóm một kiểu) ──────────
+  async function createGroupJob(a, url) {
+    try {
+      var r = await fetch('/api/group-jobs/from-article', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: a.title || '', url: url || '', keyword: a.focusKeyword || '', description: a.metaDescription || '',
+          content: (a.sections || []).map(function (s) { return (s.heading ? s.heading + '. ' : '') + plain(s.content); }).join('\n').slice(0, 6000),
+          gemini_key: ((document.getElementById('gkey') || {}).value || '').trim() })
+      });
+      var d = await r.json().catch(function () { return {}; });
+      if (!r.ok) return '• Đăng nhóm: ' + (d.detail || 'chưa tạo được lịch');
+      if (window.parent !== window) window.parent.postMessage({ qc: 'group-job', id: d.id }, location.origin);
+      return '• Đăng nhóm: đã tạo lịch cho ' + d.groups + ' nhóm, mỗi nhóm một nội dung riêng — ' +
+        '<a href="#" onclick="window.parent.postMessage({qc:\'open-tab\',tab:\'groups\'},location.origin);return false" ' +
+        'style="color:var(--info);font-weight:600">mở tab Đăng nhóm ↗</a>';
+    } catch (e) { return '• Đăng nhóm: lỗi ' + e.message; }
+  }
+  window.qcMakeGroupJob = async function () {
+    var a = typeof curArticle !== 'undefined' ? curArticle : null;
+    if (!a || !a._publishedUrl) { notify('Đăng bài lên website trước'); return; }
+    var ok = await alive(a._publishedUrl);
+    if (!ok && !confirm('Link bài web chưa mở được (bài còn là Nháp?). Bài đăng nhóm sẽ trỏ tới link này — vẫn tạo?')) return;
+    notify('📣 Đang để AI viết bài cho từng nhóm...');
+    var msg = await createGroupJob(a, a._publishedUrl);
+    notify(msg.replace(/<[^>]+>/g, ''));
+  };
+
   async function qcPublish() {
     var a = typeof curArticle !== 'undefined' ? curArticle : null;
     if (!a) { notify('Chưa có bài viết'); return; }
@@ -598,11 +625,16 @@
       });
       if (typeof updateFBComment === 'function') updateFBComment();
       if (typeof saveFBSettings === 'function') saveFBSettings();
+      var groupMsg = live
+        ? await createGroupJob(a, a._publishedUrl)                        // bài đã công khai → đăng nhóm luôn có link mở được
+        : '• Đăng nhóm: bài đang là NHÁP nên chưa tạo (link chưa mở được). Khi đã xuất bản, bấm ' +
+          '<a href="#" onclick="qcMakeGroupJob();return false" style="color:var(--info);font-weight:600">📣 Tạo bài đăng nhóm</a>';
       showSucc('✅ ' + (live ? 'Đã ĐĂNG CÔNG KHAI lên website' : 'Đã lưu NHÁP trên website — chưa công khai (chọn Live để đăng công khai)') +
         '. <a href="' + url + '" target="_blank" style="color:var(--info);font-weight:600">' + (live ? 'Xem bài ↗' : 'Mở bản nháp trong WordPress ↗') + '</a><br>' +
         '• Đường dẫn: /' + real + (real !== a.slug ? ' (WordPress đã đổi từ /' + a.slug + ')' : '') + '<br>' +
         '• Ảnh: ' + up.done + '/' + up.total + ' đã tải lên (tên file, alt, chú thích chuẩn SEO)' + (up.fail.length ? ' — lỗi ' + up.fail.join('; ') : '') + '<br>' +
-        '• Thẻ (tags): ' + tagIds.length + '/' + (a.tags || []).length + ' đã gắn' + (cats.length ? ' · Chuyên mục: ' + cats.join(', ') : '') + '<br>• ' + rmMsg);
+        '• Thẻ (tags): ' + tagIds.length + '/' + (a.tags || []).length + ' đã gắn' + (cats.length ? ' · Chuyên mục: ' + cats.join(', ') : '') + '<br>• ' + rmMsg +
+        '<br>' + groupMsg);
     } catch (e) {
       showErr('Lỗi đăng bài: ' + (e.message || ''));
     } finally {
