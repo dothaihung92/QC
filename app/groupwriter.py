@@ -17,6 +17,9 @@ STYLES = [
     "viết dạng HỎI – ĐÁP: nêu 1 câu hỏi hay gặp rồi trả lời ngắn",
 ]
 SIMILAR = 0.72
+MAX_CHARS = 520                      # bài đăng nhóm ngắn gọn: đọc lướt là nắm ý chính
+LINK_NOTE = ["Link bài viết đầy đủ em để ở bình luận nhé.", "Chi tiết mình để link ở bình luận ạ.", "Link bài đầy đủ ở phần bình luận.",
+             "Anh chị xem chi tiết ở link bình luận nhé.", "Bài viết chi tiết em gắn ở bình luận."]
 
 
 def _plain(html_text: str) -> str:
@@ -31,22 +34,34 @@ def _clean(text: str, link: str) -> str:
     t = str(text or "").strip()
     if link:
         t = t.replace(link, "").strip()
-    t = re.sub(r"https?://\S+", "", t)                     # link do phần mềm gắn cuối bài, AI không tự chèn
+    t = re.sub(r"https?://\S+", "", t)                     # link do phần mềm bình luận dưới bài, AI không tự chèn
     t = re.sub(r"\n{3,}", "\n\n", t)
     return t.strip()
+
+
+def _shorten(t: str, limit: int = MAX_CHARS) -> str:
+    """Quá dài thì bỏ bớt dòng giữa (giữ mở bài, câu kết và hashtag) cho gọn."""
+    if len(t) <= limit:
+        return t
+    lines = [l for l in t.split("\n") if l.strip()]
+    tags = [l for l in lines if l.strip().startswith("#")]
+    body = [l for l in lines if l not in tags]
+    while len(body) > 3 and len("\n".join(body + tags)) > limit:
+        body.pop(len(body) // 2)
+    out = "\n".join(body + tags)
+    return out if len(out) <= limit * 1.25 else out[:limit].rsplit(" ", 1)[0].rstrip(",;:") + "…"
 
 
 def _fallback(article: dict, groups: list) -> dict:
     """Không có AI: ghép mở bài khác nhau + ý chính của bài."""
     title = article.get("title", "")
-    desc = _plain(article.get("description") or article.get("content", ""))[:320]
+    desc = _plain(article.get("description") or article.get("content", ""))
+    desc = (desc[:200].rsplit(" ", 1)[0] + "…") if len(desc) > 200 else desc
     hooks = ["❓ Doanh nghiệp của bạn đã nắm rõ điều này chưa?", "⚠️ Lưu ý quan trọng cho kế toán và chủ doanh nghiệp:",
              "📌 Chia sẻ để anh chị em trong nhóm cùng tham khảo:", "💡 Một kinh nghiệm thực tế đáng để lưu lại:",
              "📢 Cập nhật mới cho anh chị làm kế toán – thuế:", "🔎 Nhiều doanh nghiệp vẫn đang làm sai điểm này:",
              "✅ Ghi nhớ nhanh trước khi kê khai:"]
-    ends = ["Ai cần trao đổi thêm cứ bình luận bên dưới nhé.", "Anh chị thấy hữu ích thì lưu lại để dùng khi cần.",
-            "Mọi người có kinh nghiệm gì thêm thì chia sẻ cùng nhóm nhé.", "Chi tiết đầy đủ trong bài viết bên dưới."]
-    return {g["id"]: f"{hooks[k % len(hooks)]}\n\n{title}\n\n{desc}\n\n{ends[k % len(ends)]}" for k, g in enumerate(groups)}
+    return {g["id"]: f"{hooks[k % len(hooks)]}\n{title}\n{desc}\n{LINK_NOTE[k % len(LINK_NOTE)]}" for k, g in enumerate(groups)}
 
 
 def make_variants(article: dict, groups: list, gemini_key: str = "", model: str = "gemini-2.5-flash") -> dict:
@@ -69,11 +84,12 @@ def make_variants(article: dict, groups: list, gemini_key: str = "", model: str 
                   f'Tóm tắt: {article.get("description", "")}\nNội dung: {body}\n\n'
                   f'Viết {len(targets)} bài đăng nhóm, MỖI NHÓM MỘT BÀI theo cách viết được giao:\n{lines}\n\n'
                   'Yêu cầu cho từng bài:\n'
-                  '- Cùng trọng tâm là nội dung bài gốc (giữ đúng số liệu, số hiệu văn bản, mức phạt có trong bài; không bịa).\n'
-                  '- 5-9 dòng, câu chữ, câu mở đầu và bố cục KHÁC HẲN các bài còn lại (không lặp câu, không chỉ đổi vài từ).\n'
-                  '- Giọng chia sẻ tự nhiên trong cộng đồng, không quảng cáo lộ liễu, không "inbox", tối đa 2 biểu tượng cảm xúc.\n'
-                  '- Có thể có 1-3 hashtag cuối bài. KHÔNG chèn đường link (phần mềm tự gắn link bài viết ở cuối).\n'
-                  '- Câu cuối mời đọc chi tiết / bình luận trao đổi.\n'
+                  '- NGẮN GỌN: tối đa 4 dòng ngắn, tổng dưới 380 ký tự — chỉ nêu Ý CHÍNH (điều gì thay đổi / kết luận / con số quan trọng nhất), '
+                  'không giải thích dài dòng, không liệt kê hết chi tiết (chi tiết nằm ở bài viết).\n'
+                  '- Giữ đúng số liệu, số hiệu văn bản, mức phạt có trong bài gốc; không bịa.\n'
+                  '- Câu chữ, câu mở đầu và bố cục KHÁC HẲN các bài còn lại (không lặp câu, không chỉ đổi vài từ).\n'
+                  '- Giọng chia sẻ tự nhiên trong cộng đồng, không quảng cáo lộ liễu, không "inbox", tối đa 1-2 biểu tượng cảm xúc, tối đa 2 hashtag cuối bài.\n'
+                  '- KHÔNG chèn đường link. Dòng cuối là câu mời xem chi tiết ở BÌNH LUẬN (vd "Link bài viết đầy đủ em để ở bình luận nhé"), mỗi bài nói một cách khác nhau.\n'
                   + (f'- TRÁNH viết giống các bài đã có: {" || ".join(_plain(a)[:200] for a in avoid)}\n' if avoid else '')
                   + 'Chỉ trả về JSON {"posts":[{"n":0,"text":"..."}]}')
         out = newsagent.gemini_json(prompt, cfg)
@@ -83,7 +99,7 @@ def make_variants(article: dict, groups: list, gemini_key: str = "", model: str 
                 n = int(p.get("n"))
             except (TypeError, ValueError):
                 continue
-            t = _clean(p.get("text", ""), article.get("url", ""))
+            t = _shorten(_clean(p.get("text", ""), article.get("url", "")))
             if 0 <= n < len(targets) and len(t) > 60:
                 res[targets[n]["id"]] = t
         return res

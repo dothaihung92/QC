@@ -171,6 +171,7 @@ def init():
 GROUP_JOB_EXTRA = {
     "variants": "TEXT NOT NULL DEFAULT '{}'",    # {group_id: nội dung riêng cho nhóm đó} — AI viết lại, mỗi nhóm 1 kiểu
     "states":   "TEXT NOT NULL DEFAULT '{}'",    # {group_id: ok|pending|approved|declined|blocked|failed}
+    "comments": "TEXT NOT NULL DEFAULT '{}'",    # {group_id: 1} — đã bình luận link bài viết dưới bài đăng ở nhóm đó
     "title":    "TEXT NOT NULL DEFAULT ''",      # tiêu đề bài gốc (vd bài SEO) để nhận ra lịch
     "source":   "TEXT NOT NULL DEFAULT ''",      # seo / manual
 }
@@ -526,6 +527,20 @@ def set_group_variant(job_id, group_id, text: str):
     return True
 
 
+def mark_group_commented(job_id, group_id, on: bool = True):
+    with conn() as c:
+        row = c.execute("SELECT comments FROM group_jobs WHERE id=?", (job_id,)).fetchone()
+        if not row:
+            return False
+        cm = json.loads(row["comments"] or "{}")
+        if on:
+            cm[str(group_id)] = 1
+        else:
+            cm.pop(str(group_id), None)
+        c.execute("UPDATE group_jobs SET comments=? WHERE id=?", (json.dumps(cm), job_id))
+    return True
+
+
 def set_group_state(job_id, group_id, state: str):
     """Trạng thái bài ở 1 nhóm: ok (lên bài ngay) / pending (chờ duyệt) / approved / declined / blocked / failed / '' (chưa đăng).
     Đồng thời ghi nhận nhóm đó có cho đăng thẳng không (policy) để lần sau biết trước."""
@@ -579,11 +594,13 @@ def _job_dict(row, groups_by_id):
     done = set(json.loads(d.pop("done_ids")))
     variants = json.loads(d.pop("variants", "{}") or "{}")
     states = json.loads(d.pop("states", "{}") or "{}")
+    commented = json.loads(d.pop("comments", "{}") or "{}")
     ids.sort(key=lambda g: (-(groups_by_id[g].get("members") or 0), g))          # nhóm đông thành viên trước
     d["groups"] = [{"id": g, "name": groups_by_id[g]["name"], "url": groups_by_id[g]["url"],
                     "members": groups_by_id[g].get("members") or 0, "policy": groups_by_id[g].get("policy") or "",
                     "text": variants.get(str(g)) or d["message"], "custom": str(g) in variants,
                     "state": states.get(str(g), "ok" if g in done else ""),
+                    "commented": str(g) in commented,
                     "done": g in done} for g in ids]
     if ids and all(g in done for g in ids):
         d["status"] = "done"

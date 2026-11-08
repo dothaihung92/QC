@@ -381,7 +381,7 @@ def _run_job(job_id: int, visible: bool = False):
     if len(todo) > room:
         _log(f"Chỉ còn {room} lượt hôm nay, sẽ đăng {room}/{len(todo)} nhóm.")
         todo = todo[:room]
-    link = ("\n\n" + job["link"]) if job["link"] else ""
+    link = job["link"]                                   # link KHÔNG để trong bài đăng — bình luận ngay dưới bài sau khi đăng
 
     _log("Chạy " + ("có hiện cửa sổ trình duyệt." if visible else "ẩn (không hiện cửa sổ)."))
     with sync_playwright() as p:
@@ -397,7 +397,7 @@ def _run_job(job_id: int, visible: bool = False):
                 try:
                     page.goto(g["url"], wait_until="domcontentloaded", timeout=60000)
                     page.wait_for_timeout(random.randint(*PAUSE_AFTER_LOAD))
-                    result = post_to_open_group(page, (g.get("text") or job["message"]) + link)   # mỗi nhóm 1 nội dung riêng
+                    result = post_to_open_group(page, g.get("text") or job["message"])   # mỗi nhóm 1 nội dung riêng, gọn, không kèm link
                 except NoComposer as e:                    # nhóm không cho mình đăng → ghi nhận rồi sang nhóm khác
                     db.set_group_state(job_id, g["id"], "blocked")
                     _log(f"⛔ «{g['name']}»: {e} — bỏ qua nhóm này")
@@ -410,6 +410,10 @@ def _run_job(job_id: int, visible: bool = False):
                 db.set_group_state(job_id, g["id"], result)          # ok = lên bài ngay; pending = chờ quản trị viên duyệt
                 db.log("group_post", f"lịch {job_id} → {g['name']} ({result})")
                 _log(f"✅ «{g['name']}»" + (" — đang chờ quản trị viên duyệt" if result == "pending" else ""))
+                if link and result == "ok":
+                    _comment_link(page, job_id, g, link)
+                elif link and result == "pending":
+                    _log(f"💬 «{g['name']}»: link bài viết sẽ được bình luận sau khi bài được duyệt (bấm '🔍 Kiểm tra duyệt bài')")
                 if i < len(todo) - 1 and not state["stop"]:
                     wait = random.randint(config.GROUPBOT_DELAY_MIN, max(config.GROUPBOT_DELAY_MIN, config.GROUPBOT_DELAY_MAX))
                     _log(f"Nghỉ {wait} giây trước nhóm kế tiếp...")
@@ -446,6 +450,93 @@ def _wait_until_closed(ctx, seconds):
         except Exception:  # noqa: BLE001
             return
         time.sleep(2)
+
+
+# ---------------------------------------------------------------- bình luận link bài viết dưới bài đăng
+
+COMMENT_BOX = re.compile(r"Viết bình luận|Write a comment|Comment as|Bình luận dưới tên|Viết câu trả lời", re.I)
+
+
+def _first_line(text: str) -> str:
+    """Đoạn chữ đặc trưng (nguyên văn) của bài để tìm lại đúng bài trên trang nhóm."""
+    lines = [l.strip() for l in (text or "").split("\n") if len(l.strip()) >= 20]
+    return (lines[0] if lines else (text or "").strip())[:50]
+
+
+def comment_under_post(page, group_url: str, post_text: str, link: str, timeout: int = 0) -> None:
+    """Mở 'Nội dung của bạn' ở nhóm, tìm đúng bài vừa đăng (theo nội dung) và bình luận link dưới bài đó."""
+    timeout = timeout or STEP_TIMEOUT
+    key = _first_line(post_text)
+    page.goto(group_url.rstrip("/") + "/my_posted_content", wait_until="domcontentloaded", timeout=60000)
+    page.wait_for_timeout(random.randint(*PAUSE_AFTER_LOAD))
+    _check_session(page)
+    art = page.locator("[role='article']").filter(has_text=key).first
+    try:
+        art.wait_for(state="visible", timeout=timeout)
+    except Exception:  # noqa: BLE001
+        raise GroupBotError("Không thấy bài vừa đăng trong mục 'Nội dung của bạn' (có thể chưa kịp hiện)")
+    box = art.get_by_role("textbox", name=COMMENT_BOX).first
+    try:
+        box.wait_for(state="visible", timeout=timeout)
+    except Exception:  # noqa: BLE001
+        raise GroupBotError("Không thấy ô bình luận dưới bài (nhóm tắt bình luận / Facebook đổi giao diện)")
+    box.click()
+    page.keyboard.insert_text(link)
+    page.wait_for_timeout(1500)                      # để Facebook dựng khung xem trước của link
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(PAUSE_AFTER_POST)
+    left = ""
+    try:
+        left = (box.inner_text() or "").strip()
+    except Exception:  # noqa: BLE001
+        pass
+    if link in left:
+        raise GroupBotError("Đã gõ link nhưng bình luận chưa được gửi")
+
+
+def _comment_link(page, job_id: int, g: dict, link: str) -> bool:
+    try:
+        comment_under_post(page, g["url"], g.get("text") or "", link)
+    except Exception as e:  # noqa: BLE001
+        _log(f"⚠ «{g['name']}»: đã đăng bài nhưng CHƯA bình luận được link ({str(e)[:150]}) — bấm '💬 Copy link' rồi dán vào bình luận")
+        return False
+    db.mark_group_commented(job_id, g["id"])
+    _log(f"💬 «{g['name']}»: đã bình luận link bài viết dưới bài")
+    return True
+
+
+def start_comments(job_id: int):
+    _need_playwright()
+    _start("comment", _comment_job, job_id)
+
+
+def _comment_job(job_id: int):
+    """Bình luận link cho các nhóm đã lên bài (ok / đã duyệt) mà chưa có bình luận link."""
+    from playwright.sync_api import sync_playwright
+    job = next((j for j in db.list_group_jobs() if j["id"] == job_id), None)
+    if not job:
+        raise GroupBotError("Không có lịch này")
+    if not job["link"]:
+        raise GroupBotError("Lịch này không có link bài viết để bình luận")
+    todo = [g for g in job["groups"] if g["state"] in ("ok", "approved") and not g["commented"]]
+    if not todo:
+        _log("Không có nhóm nào cần bình luận link.")
+        return
+    if not MARKER.exists():
+        raise GroupBotError("Chưa đăng nhập Facebook trong phần mềm — bấm 'Đăng nhập Facebook' trước")
+    with sync_playwright() as p:
+        ctx = _launch(p, is_visible())
+        try:
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            for g in todo:
+                if state["stop"]:
+                    break
+                _log(f"Đang bình luận link ở «{g['name']}»...")
+                _comment_link(page, job_id, g, job["link"])
+                _sleep(random.randint(4, 9))
+            _log("Xong bình luận link.")
+        finally:
+            _close(ctx)
 
 
 # ---------------------------------------------------------------- kiểm tra bài đã được duyệt chưa
@@ -501,6 +592,8 @@ def _check_job(job_id: int):
                     if key and key in _page_text(page, base + "/my_posted_content"):
                         db.set_group_state(job_id, g["id"], "approved")
                         _log(f"✔ «{g['name']}»: bài ĐÃ ĐƯỢC DUYỆT và đang hiển thị")
+                        if job["link"] and not g.get("commented"):
+                            _comment_link(page, job_id, g, job["link"])
                     elif key and key in _page_text(page, base + "/my_pending_content"):
                         _log(f"⏳ «{g['name']}»: vẫn đang chờ quản trị viên duyệt")
                     else:

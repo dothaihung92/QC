@@ -106,12 +106,15 @@ def test_bot_posts_each_group_its_own_text_biggest_first_and_skips_blocked(clien
     mod.sync_playwright = lambda: contextlib.nullcontext(object())
     monkeypatch.setitem(sys.modules, "playwright.sync_api", mod)
     monkeypatch.setattr(groupbot, "_launch", lambda p, visible: Ctx())
+    cm = []
     monkeypatch.setattr(groupbot, "post_to_open_group", fake_post)
+    monkeypatch.setattr(groupbot, "comment_under_post", lambda page, url, text, link, timeout=0: cm.append((url.rsplit("/", 1)[-1], text, link)))
     monkeypatch.setattr(groupbot, "MARKER", tmp_path / "logged")
     (tmp_path / "logged").write_text("1")
     monkeypatch.setattr(groupbot, "_sleep", lambda s: None)
     groupbot._run_job(jid)
-    assert posted == [("222", "bài cho Lớn\n\nhttps://x.vn/bai/"), ("111", "bài cho Nhỏ\n\nhttps://x.vn/bai/")]
+    assert posted == [("222", "bài cho Lớn"), ("111", "bài cho Nhỏ")]                 # bài gọn, KHÔNG kèm link
+    assert cm == [("222", "bài cho Lớn", "https://x.vn/bai/")]                          # link bình luận dưới bài (nhóm chờ duyệt để sau)
     st = {g["name"]: g["state"] for g in client.get("/api/group-jobs").json()[0]["groups"]}
     assert st == {"Lớn": "ok", "Cấm": "blocked", "Nhỏ": "pending"}
 
@@ -175,3 +178,24 @@ def test_uses_google_chrome_and_imports_facebook_login(client, monkeypatch, tmp_
     assert (tmp_path / "profile" / "Local State").exists()
     assert (tmp_path / "profile" / "Default" / "Network" / "Cookies").exists()
     assert groupbot.MARKER.exists() and groupbot.browser() == "chrome"
+
+
+def test_group_posts_are_short_and_link_is_left_for_comments(client, monkeypatch):
+    _groups(client, ("A", "111", 100), ("B", "222", 50))
+    newsagent.save_config({"gemini_key": "k"})
+    long = "Dòng nội dung dài dòng về thuế để thử rút gọn bài đăng nhóm cho gọn lại. " * 3
+    seen = []
+
+    def fake(prompt, cfg):
+        seen.append(prompt)
+        return {"posts": [{"n": k, "text": f"Mở bài số {k * 3} rất riêng biệt\n" + "\n".join(f"{long} ý {k}{i}" for i in range(6)) +
+                                           "\nLink bài viết em để ở bình luận nhé.\n#thue https://x.vn/bai/"} for k in range(2)]}
+    monkeypatch.setattr(newsagent, "gemini_json", fake)
+    client.post("/api/group-jobs/from-article", json={"title": "T", "url": "https://x.vn/bai/", "content": "c"})
+    job = client.get("/api/group-jobs").json()[0]
+    assert "tối đa 4 dòng ngắn" in seen[0] and "BÌNH LUẬN" in seen[0]
+    for g in job["groups"]:
+        assert len(g["text"]) <= groupwriter.MAX_CHARS * 1.25 and "https://" not in g["text"]
+        assert g["commented"] is False
+    client.post(f"/api/group-jobs/{job['id']}/commented", json={"group_id": job["groups"][0]["id"], "state": "1"})
+    assert client.get("/api/group-jobs").json()[0]["groups"][0]["commented"] is True

@@ -25,8 +25,16 @@ box.oninput = () => post.setAttribute('aria-disabled', box.innerText.trim() ? 'f
 post.onclick = () => { if (post.getAttribute('aria-disabled') === 'true') return;
   posted.innerText = box.innerText; dlg.style.display = 'none'; %s };
 </script>"""
+MY_POSTS = """<!doctype html><meta charset=utf-8>
+<div role="article" id="other">Bài khác của người khác ở nhóm này<div role="textbox" aria-label="Viết bình luận..." contenteditable="true" class="cb"></div></div>
+<div role="article" id="mine">Chính phủ giảm 30% thuế TNDN cho doanh nghiệp nhỏ giai đoạn 2026-2027 nhé!
+  <div role="textbox" aria-label="Viết bình luận..." contenteditable="true" id="cbox" class="cb"></div><div id="comments"></div></div>
+<script>cbox.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault();
+  comments.append(cbox.innerText.trim()); cbox.innerText = ''; } });</script>"""
 PAGES = {
     "/ok": COMPOSER_PAGE % "",
+    "/ok/my_posted_content": MY_POSTS,
+    "/nocmt/my_posted_content": "<!doctype html><meta charset=utf-8><div role='article'>Chính phủ giảm 30% thuế TNDN cho doanh nghiệp nhỏ</div>",
     "/pending": COMPOSER_PAGE % "document.body.append('Bài viết đang chờ phê duyệt');",
     "/nocomposer": "<!doctype html><meta charset=utf-8><p>Bạn chưa tham gia nhóm</p>",
     "/login": "<!doctype html><input name='email'><input name='pass' type='password'>",
@@ -189,3 +197,38 @@ def test_visible_setting_and_start_run_default(site, monkeypatch):
     groupbot.start_run(8)
     groupbot.start_run(9, True)
     assert seen == [(7, True), (8, False), (9, True)]
+
+
+POST_TEXT = "Chính phủ giảm 30% thuế TNDN cho doanh nghiệp nhỏ giai đoạn 2026-2027 nhé!\nLink bài viết đầy đủ em để ở bình luận nhé."
+
+
+def test_comment_link_goes_under_the_right_post(page, site):
+    groupbot.comment_under_post(page, site + "/ok", POST_TEXT, "https://dailythuehungphuc.com/giam-30-thue/", timeout=4000)
+    assert page.locator("#comments").inner_text() == "https://dailythuehungphuc.com/giam-30-thue/"       # dưới đúng bài của mình
+    assert page.locator("#other .cb").inner_text() == ""                                                # không bình luận nhầm bài khác
+
+
+def test_comment_fails_clearly_without_comment_box_or_post(page, site):
+    with pytest.raises(groupbot.GroupBotError, match="ô bình luận"):
+        groupbot.comment_under_post(page, site + "/nocmt", POST_TEXT, "https://x.vn", timeout=1500)
+    with pytest.raises(groupbot.GroupBotError, match="Không thấy bài"):
+        groupbot.comment_under_post(page, site + "/ok", "Một bài hoàn toàn khác không có trên trang", "https://x.vn", timeout=1500)
+
+
+def test_run_job_posts_without_link_then_comments_it(site, headless, monkeypatch):
+    jid, gids = _setup_job(site, ["/ok", "/pending"])
+    posts, comments = [], []
+    real = groupbot.post_to_open_group
+    monkeypatch.setattr(groupbot, "post_to_open_group", lambda page, text, timeout=0: posts.append(text) or real(page, text, timeout))
+    monkeypatch.setattr(groupbot, "comment_under_post", lambda page, url, text, link, timeout=0: comments.append((url.rsplit("/", 1)[-1], link)))
+    groupbot._run_job(jid)
+    assert all("https://x.vn/bai" not in t for t in posts)                         # link không nằm trong bài đăng
+    assert comments == [("ok", "https://x.vn/bai")]                                 # bình luận ngay với nhóm lên bài; nhóm chờ duyệt thì để sau
+    job = db.list_group_jobs()[0]
+    assert [(g["state"], g["commented"]) for g in job["groups"]] == [("ok", True), ("pending", False)]
+    assert any("sau khi bài được duyệt" in l for l in groupbot.state["log"])
+    # nhóm chờ duyệt đã duyệt → khi kiểm tra sẽ bình luận link; nút bình luận hàng loạt chỉ chạy với nhóm đã lên bài mà chưa bình luận
+    db.set_group_state(jid, gids[1], "approved")
+    comments.clear()
+    groupbot._comment_job(jid)
+    assert comments == [("pending", "https://x.vn/bai")]

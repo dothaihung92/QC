@@ -1515,17 +1515,21 @@ async function loadGroupJobs() {
         <span class="pill ${cls}">${label}</span>
         ${j.auto && j.status !== 'done' ? '<span class="pill p-info">tự đăng khi đến giờ</span>' : ''}
         ${j.status !== 'done' ? `<button class="btn pri" onclick="runJob(${j.id})">🤖 Tự đăng các nhóm còn lại</button>` : ''}
+        ${j.link && j.groups.some(g => ['ok', 'approved'].includes(g.state) && !g.commented) ? `<button class="btn" onclick="commentJob(${j.id})" title="Tự bình luận link bài viết dưới bài đã đăng ở các nhóm">💬 Bình luận link các nhóm đã đăng</button>` : ''}
         ${pend ? `<button class="btn" onclick="checkJob(${j.id})" title="Mở mục 'Nội dung của bạn' ở từng nhóm để xem bài đã được duyệt chưa">🔍 Kiểm tra duyệt bài (${pend})</button>` : ''}
         <button class="btn danger" onclick="delJob(${j.id})">Xóa</button></div>
       <div class="gsum small"><span class="pill p-ok">Được phép / đã duyệt: ${cnt(['ok', 'approved'])}</span>
         <span class="pill p-warn">Chờ duyệt: ${pend}</span><span class="pill p-err">Từ chối / không cho đăng: ${cnt(['declined', 'blocked', 'failed'])}</span>
         <span class="pill p-info">Chưa đăng: ${cnt([''])}</span></div>
-      ${j.link ? `<div class="small muted">🔗 ${esc(j.link)}</div>` : ''}
+      ${j.link ? `<div class="small muted">🔗 Link bài viết (đăng ở <b>bình luận</b> dưới bài, không nằm trong bài): ${esc(j.link)}</div>` : ''}
       ${j.groups.map((g, k) => { const [sl, sc] = GSTATE[g.state] || GSTATE['']; return `<div class="grp">
         <b>${k + 1}. ${esc(g.name)} ${g.members ? `<span class="muted small" style="font-weight:400">· ${fmtNum(g.members)} thành viên</span>` : ''}</b>
         <span class="pill ${sc}">${sl}</span>
         <a class="btn" href="${esc(g.url)}" target="_blank" rel="noopener" onclick="copyJob(${j.id}, true, ${g.id})">Mở nhóm ↗</a>
-        <button class="btn" onclick="copyJob(${j.id}, false, ${g.id})">📋 Copy</button>
+        <button class="btn" onclick="copyJob(${j.id}, false, ${g.id})" title="Copy nội dung bài đăng (không kèm link)">📋 Copy bài</button>
+        ${j.link ? `<button class="btn" onclick="copyLink(${j.id})" title="Copy link để dán vào bình luận dưới bài">💬 Copy link</button>
+          <label class="small" style="font-weight:400;white-space:nowrap" title="Tick khi đã bình luận link dưới bài ở nhóm này">
+            <input type="checkbox" style="width:auto" ${g.commented ? 'checked' : ''} onchange="setCommented(${j.id}, ${g.id}, this.checked)"> ${g.commented ? '💬 đã bình luận link' : 'chưa bình luận link'}</label>` : ''}
         <select onchange="setGState(${j.id}, ${g.id}, this.value)" style="width:auto" title="Đánh dấu tay trạng thái bài ở nhóm này">
           ${Object.entries(GSTATE).map(([v, [t]]) => `<option value="${v}" ${v === g.state ? 'selected' : ''}>${t}</option>`).join('')}</select>
         <details><summary class="small">Nội dung riêng cho nhóm này${g.custom ? ' (AI viết lại)' : ''}</summary>
@@ -1537,6 +1541,15 @@ async function setGState(jid, gid, state) { await api(`/api/group-jobs/${jid}/st
 async function saveVariant(jid, gid, text) { const j = JOBS.find(x => x.id === jid), g = j && j.groups.find(x => x.id === gid);
   if (!g || text.trim() === g.text.trim()) return;
   await api(`/api/group-jobs/${jid}/variant`, { method: 'PUT', body: { group_id: gid, text } }); toast('💾 Đã lưu nội dung cho nhóm'); loadGroupJobs(); }
+async function commentJob(id) {
+  if (!GB_RISK()) return toast('Tick "Tôi hiểu và chấp nhận rủi ro" ở khung 🤖 trước');
+  if (!GBS?.logged_in) return toast('Bấm "Đăng nhập Facebook" ở khung 🤖 trước');
+  try { GBS = await api('/api/groupbot/comments', { method: 'POST', body: { job_id: id } }); } catch { return; }
+  renderGroupBot(); loadGroupBot(); toast('💬 Đang bình luận link — xem tiến trình ở khung 🤖');
+}
+async function copyLink(id) { const j = JOBS.find(x => x.id === id); if (!j || !j.link) return;
+  try { await navigator.clipboard.writeText(j.link); toast('📋 Đã copy link — dán vào ô bình luận dưới bài'); } catch { toast('Không copy được — bôi đen link rồi Ctrl+C'); } }
+async function setCommented(jid, gid, on) { await api(`/api/group-jobs/${jid}/commented`, { method: 'POST', body: { group_id: gid, state: on ? '1' : '' } }); loadGroupJobs(); }
 async function checkJob(id) {
   if (!GBS?.logged_in) return toast('Bấm "Đăng nhập Facebook" ở khung 🤖 trước');
   try { GBS = await api('/api/groupbot/check', { method: 'POST', body: { job_id: id } }); } catch { return; }
@@ -1544,8 +1557,8 @@ async function checkJob(id) {
 }
 async function copyJob(id, quiet, gid) { const j = JOBS.find(x => x.id === id); if (!j) return;
   const g = gid ? j.groups.find(x => x.id === gid) : null;
-  const text = (g ? g.text : j.message) + (j.link ? '\n\n' + j.link : '');
-  try { await navigator.clipboard.writeText(text); if (!quiet) toast('📋 Đã copy — dán vào ô viết bài của nhóm'); else toast('📋 Đã copy nội dung, nhóm đang mở ở tab mới'); }
+  const text = g ? g.text : j.message;                       // link không nằm trong bài — dùng nút "💬 Copy link" để bình luận
+  try { await navigator.clipboard.writeText(text); if (!quiet) toast('📋 Đã copy bài — dán vào ô viết bài của nhóm, rồi bình luận link (nút 💬 Copy link)'); else toast('📋 Đã copy nội dung, nhóm đang mở ở tab mới'); }
   catch { toast('Không copy được — bôi đen nội dung rồi Ctrl+C'); } }
 async function toggleJob(jid, gid) { await api(`/api/group-jobs/${jid}/toggle`, { method: 'POST', body: { group_id: gid } });
   loadGroupJobs(); pollBadges(); }

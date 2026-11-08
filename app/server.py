@@ -1394,6 +1394,19 @@ def groupbot_check(body: CheckIn):
     return _bot_call("start_check", body.job_id)
 
 
+@admin.post("/api/groupbot/comments")
+def groupbot_comments(body: CheckIn):
+    return _bot_call("start_comments", body.job_id)
+
+
+@admin.post("/api/group-jobs/{jid}/commented")
+def group_job_commented(jid: int, body: StateIn):
+    """Đánh dấu tay: đã bình luận link ở nhóm này (state = "1") hoặc bỏ đánh dấu ("")."""
+    if not db.mark_group_commented(jid, body.group_id, bool(body.state)):
+        raise HTTPException(404, "Không có lịch này")
+    return {"ok": True}
+
+
 @admin.post("/api/groupbot/members")
 def groupbot_members():
     return _bot_call("start_members")
