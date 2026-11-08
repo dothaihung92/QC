@@ -173,6 +173,8 @@ def _launch(p, visible=True):
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     kw = dict(user_data_dir=str(PROFILE_DIR), headless=(not visible) or config.GROUPBOT_FORCE_HEADLESS,
               viewport={"width": 1280, "height": 900}, locale="vi-VN")
+    if os.name == "nt":
+        kw["chromium_sandbox"] = True              # không bật cờ --no-sandbox (Chrome hiện thanh cảnh báo "unsupported command-line flag")
     first = browser()
     other = "msedge" if first == "chrome" else "chrome"
     attempts = ([{"executable_path": config.GROUPBOT_BROWSER_PATH}] if config.GROUPBOT_BROWSER_PATH
@@ -308,6 +310,83 @@ def _check_session(page):
         raise GroupBotError("Facebook đang đòi đăng nhập/xác minh — bấm 'Đăng nhập Facebook' làm lại")
 
 
+EDITABLE = "div[role='textbox'][contenteditable='true'], div[contenteditable='true'][role='textbox']"
+NOT_POST_BOX = re.compile(r"bình luận|comment|trả lời|reply|tìm kiếm|search", re.I)
+
+
+def _find_editor(page, timeout: int):
+    """Ô soạn bài NẰM TRONG hộp thoại đang mở (không lấy nhầm ô bình luận của bài khác ở bên dưới)."""
+    end = time.time() + timeout / 1000
+    while time.time() < end:
+        dlgs = page.locator("[role='dialog']")
+        for d in range(dlgs.count() - 1, -1, -1):                 # hộp thoại mở sau cùng trước
+            eds = dlgs.nth(d).locator(EDITABLE)
+            for k in range(eds.count()):
+                el = eds.nth(k)
+                try:
+                    label = (el.get_attribute("aria-label") or "") + " " + (el.get_attribute("aria-placeholder") or "")
+                    if el.is_visible() and not NOT_POST_BOX.search(label):
+                        return el
+                except Exception:  # noqa: BLE001
+                    continue
+        page.wait_for_timeout(400)
+    return None
+
+
+def _norm_ws(t: str) -> str:
+    return re.sub(r"\s+", " ", t or "").strip()
+
+
+def _has_text(box, text: str) -> bool:
+    key = _norm_ws(text)[:14]
+    try:
+        return bool(key) and key in _norm_ws(box.inner_text())
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _clear(page, box):
+    try:
+        box.click()
+        page.keyboard.press("Control+A")
+        page.keyboard.press("Backspace")
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _type_text(page, box, text: str) -> str:
+    """Nhập nội dung vào ô soạn bài. Facebook đổi trình soạn thảo nhiều lần nên thử lần lượt 3 cách và KIỂM TRA chữ đã vào ô chưa."""
+    box.click()
+    lines = text.split("\n")
+    for i, line in enumerate(lines):                                  # 1) chèn chữ trực tiếp (nhanh, giữ nguyên dấu tiếng Việt, emoji)
+        if line:
+            page.keyboard.insert_text(line)
+        if i < len(lines) - 1:
+            page.keyboard.press("Enter")
+    page.wait_for_timeout(600)
+    if _has_text(box, text):
+        return "chèn chữ"
+    _log("… cách 1 (chèn chữ) chưa vào ô, thử cách dán...")
+    _clear(page, box)
+    try:                                                              # 2) giả lập thao tác dán (trình soạn thảo của Facebook nhận tốt)
+        box.evaluate("""(el, t) => { el.focus(); const dt = new DataTransfer(); dt.setData('text/plain', t);
+            el.dispatchEvent(new ClipboardEvent('paste', {clipboardData: dt, bubbles: true, cancelable: true})); }""", text)
+    except Exception:  # noqa: BLE001
+        pass
+    page.wait_for_timeout(700)
+    if _has_text(box, text):
+        return "dán"
+    _log("… cách 2 (dán) chưa vào ô, thử gõ từng phím...")
+    _clear(page, box)
+    box.click()
+    page.keyboard.type(text, delay=12)                                # 3) gõ từng phím như người thật (chậm nhất)
+    page.wait_for_timeout(600)
+    if _has_text(box, text):
+        return "gõ phím"
+    raise GroupBotError("Facebook không nhận chữ vào ô soạn bài (cả 3 cách chèn / dán / gõ đều không vào) — "
+                        "bật 'Hiện cửa sổ khi đăng' để xem, hoặc dùng nút Copy bài rồi đăng tay")
+
+
 def post_to_open_group(page, text: str, timeout: int = 0) -> str:
     """Trang group đang mở → đăng `text`. Trả 'ok' hoặc 'pending' (chờ quản trị viên duyệt)."""
     timeout = timeout or STEP_TIMEOUT
@@ -322,26 +401,29 @@ def post_to_open_group(page, text: str, timeout: int = 0) -> str:
             continue
     if opener is None:
         raise NoComposer("Không thấy ô viết bài (chưa tham gia nhóm / nhóm không cho thành viên đăng / Facebook đổi giao diện)")
+    _log("… mở hộp soạn bài")
     opener.click()
 
-    dialog = page.get_by_role("dialog").last
-    box = dialog.get_by_role("textbox").first
-    box.wait_for(state="visible", timeout=timeout)
-    box.click()
-    lines = text.split("\n")
-    for i, line in enumerate(lines):
-        if line:
-            page.keyboard.insert_text(line)
-        if i < len(lines) - 1:
-            page.keyboard.press("Enter")
-    page.wait_for_timeout(800)
+    box = _find_editor(page, timeout)
+    if box is None:
+        raise GroupBotError("Hộp soạn bài đã mở nhưng không tìm thấy ô nhập chữ (Facebook đổi giao diện)")
+    how = _type_text(page, box, text)
+    _log(f"… đã nhập nội dung ({how})")
+    dialog = box.locator("xpath=ancestor::*[@role='dialog'][1]")
 
     btn = dialog.get_by_role("button", name=POST_BTN).last
     btn.wait_for(state="visible", timeout=timeout)
+    try:
+        btn.scroll_into_view_if_needed(timeout=3000)
+    except Exception:  # noqa: BLE001
+        pass
     for _ in range(20):                       # nút Đăng sáng lên sau vài giây
         if btn.get_attribute("aria-disabled") != "true":
             break
         page.wait_for_timeout(500)
+    else:
+        raise GroupBotError("Đã nhập chữ nhưng nút Đăng vẫn bị khóa (nhóm có thể yêu cầu chọn thêm mục / gắn thẻ, hoặc bị chặn đăng)")
+    _log("… bấm Đăng")
     btn.click()
     try:
         dialog.wait_for(state="hidden", timeout=60000)

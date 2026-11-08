@@ -25,6 +25,22 @@ box.oninput = () => post.setAttribute('aria-disabled', box.innerText.trim() ? 'f
 post.onclick = () => { if (post.getAttribute('aria-disabled') === 'true') return;
   posted.innerText = box.innerText; dlg.style.display = 'none'; %s };
 </script>"""
+# Trình soạn thảo kiểu Lexical của Facebook: chặn chèn chữ trực tiếp / gõ phím, chỉ nhận thao tác "dán"
+LEXICAL_PAGE = """<!doctype html><meta charset=utf-8>
+<div role="article">Bài trong bảng tin<div role="textbox" contenteditable="true" aria-label="Viết bình luận..." id="cmt"></div></div>
+<div role="button" id="openbtn">Bạn viết gì đi...</div><div id="posted" style="white-space:pre-wrap"></div>
+<div role="dialog" id="dlg" style="display:none"><input type="text" aria-label="Thêm nhóm" id="aud">
+  <div role="textbox" contenteditable="true" id="box" aria-label="Tạo bài viết công khai..."></div>
+  <div role="button" aria-label="Đăng" aria-disabled="true" id="post">Đăng</div></div>
+<script>
+openbtn.onclick = () => dlg.style.display = 'block';
+box.addEventListener('beforeinput', e => e.preventDefault());                 // chèn chữ / gõ phím đều bị chặn
+box.addEventListener('paste', e => { e.preventDefault(); box.innerText += e.clipboardData.getData('text/plain');
+  post.setAttribute('aria-disabled', box.innerText.trim() ? 'false' : 'true'); });
+post.onclick = () => { if (post.getAttribute('aria-disabled') === 'true') return;
+  posted.innerText = box.innerText; dlg.style.display = 'none'; };
+</script>"""
+DEAF_PAGE = LEXICAL_PAGE.replace("box.addEventListener('paste'", "box.addEventListener('paste-off'")      # ô không nhận chữ bằng cách nào
 MY_POSTS = """<!doctype html><meta charset=utf-8>
 <div role="article" id="other">Bài khác của người khác ở nhóm này<div role="textbox" aria-label="Viết bình luận..." contenteditable="true" class="cb"></div></div>
 <div role="article" id="mine">Chính phủ giảm 30% thuế TNDN cho doanh nghiệp nhỏ giai đoạn 2026-2027 nhé!
@@ -33,6 +49,8 @@ MY_POSTS = """<!doctype html><meta charset=utf-8>
   comments.append(cbox.innerText.trim()); cbox.innerText = ''; } });</script>"""
 PAGES = {
     "/ok": COMPOSER_PAGE % "",
+    "/lexical": LEXICAL_PAGE,
+    "/deaf": DEAF_PAGE,
     "/ok/my_posted_content": MY_POSTS,
     "/nocmt/my_posted_content": "<!doctype html><meta charset=utf-8><div role='article'>Chính phủ giảm 30% thuế TNDN cho doanh nghiệp nhỏ</div>",
     "/pending": COMPOSER_PAGE % "document.body.append('Bài viết đang chờ phê duyệt');",
@@ -232,3 +250,18 @@ def test_run_job_posts_without_link_then_comments_it(site, headless, monkeypatch
     comments.clear()
     groupbot._comment_job(jid)
     assert comments == [("pending", "https://x.vn/bai")]
+
+
+def test_text_is_entered_even_when_editor_ignores_direct_insert(page, site):
+    page.goto(site + "/lexical")
+    assert groupbot.post_to_open_group(page, "Dòng 1 tiếng Việt có dấu ✓\nDòng 2", timeout=4000) == "ok"
+    assert page.locator("#posted").inner_text() == "Dòng 1 tiếng Việt có dấu ✓\nDòng 2"       # vào được nhờ cách "dán"
+    assert page.locator("#cmt").inner_text() == ""                                            # không nhập nhầm vào ô bình luận ở bảng tin
+    assert any("dán" in l for l in groupbot.state["log"]) and any("bấm Đăng" in l for l in groupbot.state["log"])
+
+
+def test_stops_with_clear_message_when_editor_accepts_nothing(page, site):
+    page.goto(site + "/deaf")
+    with pytest.raises(groupbot.GroupBotError, match="không nhận chữ"):
+        groupbot.post_to_open_group(page, "Nội dung thử", timeout=3000)
+    assert page.locator("#posted").inner_text() == ""
