@@ -681,3 +681,72 @@ def test_each_clip_gets_a_different_theme_and_layouts_stay_in_frame(tmp_path):
 def test_theme_setting_is_validated(client):
     assert video.save_config({"theme": "ngoc"})["theme"] == "ngoc"
     assert video.save_config({"theme": "khong-co"})["theme"] == "auto"
+
+
+def test_story_formats_rotate_and_shape_the_prompt(client, monkeypatch):
+    from app import formats
+    keys = [formats.pick("auto")["key"] for _ in range(len(formats.ORDER))]
+    assert sorted(keys) == sorted(formats.ORDER)                                  # mỗi clip một kiểu, đủ vòng mới lặp
+    assert formats.pick("hoi-dap")["key"] == "hoi-dap"
+    seen = []
+
+    def fake(prompt, cfg):
+        seen.append(prompt)
+        return {"title": "T", "description": "d", "scenes": [
+            {"type": "qa", "headline": "A|B", "narration": "Lời đọc " * 40, "items": ["Hỏi gì?", "Trả lời ngắn."]}] * 6}
+    monkeypatch.setattr(video.newsagent, "gemini_json", fake)
+    video.save_config({"look": "tech", "audience": "expert", "story": "hoi-dap"})
+    out = video.make_script("Nội dung bài viết về thuế. " * 20, 30)
+    p = seen[0]
+    assert out["format"] == "hoi-dap" and out["format_name"] == "Hỏi – Đáp"
+    assert 'KIỂU NỘI DUNG CỦA CLIP NÀY: "Hỏi – Đáp"' in p and '"qa": hỏi – đáp' in p
+    assert "Trình tự như một buổi tư vấn" not in p and "KỂ CHUYỆN THU HÚT" not in p     # không ép trình tự / nhân vật cố định
+    assert out["scenes"][0]["type"] == "qa"
+    seen.clear()
+    video.save_config({"story": "chuyen-gia"})
+    video.make_script("Nội dung bài viết về thuế. " * 20, 30)
+    assert "Trình tự như một buổi tư vấn" in seen[0]
+    assert video.save_config({"story": "khong-co"})["story"] == "auto"
+
+
+def test_new_scene_layouts_stay_in_frame(tmp_path):
+    from app import explainer, techlook, themes
+    long = "Doanh nghiệp phải kê khai bổ sung hồ sơ khai thuế và nộp đủ tiền thuế thiếu cùng tiền chậm nộp " * 2
+    raw = [{"type": "compare", "items": ["Trước 2026 rất dài dài | Từ 2026 rất dài dài", f"{long} | {long}", "a | b", f"x | {long}"]},
+           {"type": "quote", "url_title": "Điều 8, Thông tư 18/2026/TT-BTC", "items": [long * 2, f"Hiểu đơn giản | {long}"]},
+           {"type": "timeline", "items": [f"01/01/2026 | {long}"] * 5},
+           {"type": "checklist", "items": [f"Việc cần làm rất dài dài dài | {long}"] * 5},
+           {"type": "qa", "items": [long + "?", long * 2, f"Điều kiện | {long}"]},
+           {"type": "rank", "big": "#12", "items": [f"{long} | {long}", f"Cách tránh | {long}"]}]
+    themes.apply(themes.pick("auto", 5))
+    for size in ((1080, 1920), (720, 1280), (1280, 720)):
+        L = video.Layout(size)
+        L.ts = 1.15
+        for k, r in enumerate(raw):
+            sc = video.clean_scenes([{"headline": "Tiêu đề|Dòng hai", "tag": "Nhãn", "narration": "Lời đọc. " * 10, **r}])[0]
+            assert sc["type"] == r["type"]
+            for mod in (techlook, explainer):
+                work = tmp_path / f"{mod.__name__}_{size[0]}_{k}"
+                work.mkdir()
+                layers, caps = mod.build(L, sc, k, 6, work, "", 8.0, 6.0)
+                assert len(layers) >= 2 and video.check_layers(L, work, layers, caps) == [], (mod.__name__, size, r["type"])
+
+
+def test_render_clip_with_new_scene_types(client, monkeypatch, tmp_path):
+    if not HAS_TOOLS:
+        pytest.skip("thiếu ffmpeg")
+    video.save_config({"look": "tech", "format": "vertical"})
+    scenes = video.clean_scenes([
+        {"type": "compare", "headline": "Cũ|mới", "narration": "So sánh cũ và mới.", "items": ["Trước | Sau", "20% | Giảm 30%"]},
+        {"type": "qa", "headline": "Hỏi|đáp", "narration": "Hỏi đáp.", "items": ["Có được giảm không?", "Có, nếu doanh thu dưới 10 tỷ."]},
+        {"type": "rank", "big": "#1", "headline": "Sai lầm|số một", "narration": "Sai lầm số một.", "items": ["Hóa đơn sai | bị phạt", "Cách tránh | tra cứu"]},
+        {"type": "checklist", "headline": "Việc|cần làm", "narration": "Việc cần làm.", "items": ["Kiểm tra | doanh thu", "Lưu | hồ sơ"]}])
+    vid = db.video_add("T", "d", scenes)
+
+    def fake_tts(text, voice, rate, dest, style=""):
+        video._ffmpeg(["-f", "lavfi", "-i", "sine=duration=1", "-c:a", "libmp3lame", str(dest)], dest.parent)
+    monkeypatch.setattr(video, "tts", fake_tts)
+    monkeypatch.setattr(video, "missing_tools", lambda: [])
+    monkeypatch.setattr(video, "_run_bg", lambda fn, *a: fn(*a))
+    r = client.post(f"/api/videos/{vid}/render").json()
+    assert r["status"] == "done" and r["has_file"] and r["duration"] > 4

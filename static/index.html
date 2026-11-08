@@ -681,6 +681,12 @@
         <option value="doodle">Vẽ tay trên giấy (hình AI vẽ lộ dần, có bàn tay cầm bút) — cần Gemini key</option>
         <option value="explainer">Giải thích (sơ đồ, thẻ kính, phụ đề vàng) — kiểu clip công nghệ</option>
         <option value="classic">Cổ điển (khung tiêu đề + ảnh nền)</option></select>
+      <label>Kiểu nội dung (mạch kể)</label>
+      <select id="vdStory"><option value="auto">Tự đổi mỗi clip — bản tin, hỏi đáp, top sai lầm, câu chuyện, so sánh, hướng dẫn, hiểu lầm… (khuyên dùng)</option>
+        <option value="tin-nong">Bản tin nóng</option><option value="hoi-dap">Hỏi – Đáp</option><option value="top-sai-lam">Top sai lầm</option>
+        <option value="cau-chuyen">Câu chuyện tình huống</option><option value="truoc-sau">So sánh cũ – mới</option>
+        <option value="checklist">Hướng dẫn từng bước</option><option value="hieu-lam">Hiểu lầm – Sự thật</option>
+        <option value="chuyen-gia">Luật sư – kế toán giải trình</option></select>
       <label>Giao diện (kiểu Công nghệ / Giải thích)</label>
       <select id="vdTheme"><option value="auto">Tự đổi mỗi clip — màu, họa tiết nền, kiểu tiêu đề khác nhau (khuyên dùng)</option>
         <option value="dem">Xanh đêm</option><option value="ngoc">Ngọc lục bảo</option><option value="tim">Tím hoàng hôn</option>
@@ -853,7 +859,7 @@ async function loadVideo() {
     .map(([pre, lbl]) => `<optgroup label="${lbl}">${Object.entries(VCFG.voices).filter(([k]) => k.startsWith(pre))
       .map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</optgroup>`).join('');
   $('vdStyle').innerHTML = Object.entries(VCFG.styles).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('');
-  $('vdStyle').value = VCFG.tts_style; $('vdLook').value = VCFG.look; $('vdTheme').value = VCFG.theme || 'auto'; $('vdAudience').value = VCFG.audience; $('vdAiImg').checked = VCFG.ai_images; $('vdShowTitle').checked = VCFG.show_title; $('vdPen').value = VCFG.pen;
+  $('vdStyle').value = VCFG.tts_style; $('vdLook').value = VCFG.look; $('vdTheme').value = VCFG.theme || 'auto'; $('vdStory').value = VCFG.story || 'auto'; $('vdAudience').value = VCFG.audience; $('vdAiImg').checked = VCFG.ai_images; $('vdShowTitle').checked = VCFG.show_title; $('vdPen').value = VCFG.pen;
   $('vdPenNote').textContent = VCFG.pen === 'strokes' ? (VCFG.wba ? '✅ Đã cài whiteboard-animator.' : '⚠ Chưa cài — bấm Lưu cài đặt rồi "Cập nhật công cụ".') : ''; $('vdVisual').value = VCFG.visual; $('vdVeo').value = VCFG.veo_scenes;
   $('vdVeoCost').textContent = `(≈ ${VCFG.veo_cost} USD / cảnh)`;
   $('vdVoice').value = VCFG.voice; $('vdRate').value = VCFG.rate;
@@ -921,7 +927,7 @@ function vdPick() {
   if (x) { $('vdText').value = x.text; $('vdImg').value = x.img || ''; }
 }
 async function vdSave() {
-  VCFG = await api('/api/video/config', { method: 'PUT', body: { audience: $('vdAudience').value, ai_images: $('vdAiImg').checked, show_title: $('vdShowTitle').checked, look: $('vdLook').value, theme: $('vdTheme').value, pen: $('vdPen').value, voice: $('vdVoice').value, tts_style: $('vdStyle').value, visual: $('vdVisual').value, veo_scenes: $('vdVeo').value, rate: $('vdRate').value,
+  VCFG = await api('/api/video/config', { method: 'PUT', body: { audience: $('vdAudience').value, ai_images: $('vdAiImg').checked, show_title: $('vdShowTitle').checked, look: $('vdLook').value, theme: $('vdTheme').value, story: $('vdStory').value, pen: $('vdPen').value, voice: $('vdVoice').value, tts_style: $('vdStyle').value, visual: $('vdVisual').value, veo_scenes: $('vdVeo').value, rate: $('vdRate').value,
     format: $('vdFormat').value, color: $('vdColor').value, brand: $('vdBrand').value, pexels_key: $('vdPexels').value,
     music: $('vdMusic').checked } });
   $('vdPexels').value = ''; toast('✅ Đã lưu cài đặt clip'); loadVideo();
@@ -929,8 +935,8 @@ async function vdSave() {
 async function vdCreate() {
   $('vdMake').disabled = true; $('vdMake').textContent = '⏳ AI đang viết kịch bản...';
   try {
-    await api('/api/videos', { method: 'POST', body: { text: $('vdText').value, seconds: +$('vdLen').value, image_url: $('vdImg').value } });
-    toast('✅ Đã có kịch bản — xem lại bên dưới rồi bấm Dựng clip');
+    const r = await api('/api/videos', { method: 'POST', body: { text: $('vdText').value, seconds: +$('vdLen').value, image_url: $('vdImg').value } });
+    toast(`✅ Đã có kịch bản${r.format_name ? ' — kiểu "' + r.format_name + '"' : ''} — xem lại bên dưới rồi bấm Dựng clip`);
     await vdLoadList();
   } finally { $('vdMake').disabled = false; $('vdMake').textContent = '✨ AI viết kịch bản'; }
 }
@@ -941,7 +947,8 @@ async function vdLoadList() {
   if (VIDEOS.some(v => v.status === 'rendering') && document.getElementById('video').classList.contains('active'))
     vdTimer = setTimeout(vdLoadList, 3000);
 }
-const VD_TYPES = { visual: 'Cảnh hình minh họa', bars: 'Biểu đồ cột (lãi / lỗ)', calc: 'Bảng tính từng bước', hero: 'Mở đầu (logo + chip)', browser: 'Cửa sổ trình duyệt', doodle: 'Trang vẽ tay', hook: 'Mở đầu', stat: 'Con số nổi bật', list: 'Danh sách ý', flow: 'Sơ đồ cây (gốc + nhánh)', steps: 'Các bước nối nhau', text: 'Chỉ tiêu đề', cta: 'Kêu gọi liên hệ' };
+const VD_TYPES = { visual: 'Cảnh hình minh họa', bars: 'Biểu đồ cột (lãi / lỗ)', calc: 'Bảng tính từng bước', hero: 'Mở đầu (logo + chip)', browser: 'Cửa sổ trình duyệt', doodle: 'Trang vẽ tay', hook: 'Mở đầu', stat: 'Con số nổi bật', list: 'Danh sách ý', flow: 'Sơ đồ cây (gốc + nhánh)', steps: 'Các bước nối nhau', text: 'Chỉ tiêu đề', cta: 'Kêu gọi liên hệ',
+  compare: 'So sánh 2 cột (Trước | Sau)', quote: 'Trích dẫn lớn (văn bản)', timeline: 'Dòng thời gian (mốc | sự kiện)', checklist: 'Checklist tích dần', qa: 'Hỏi – đáp (câu hỏi, trả lời)', rank: 'Xếp hạng Top (#số)' };
 const vdWords = (t) => (t.match(/[\p{L}\p{N}]+/gu) || []).length;
 const vdEst = (scenes) => Math.round(scenes.reduce((n, s) => n + vdWords(s.narration) / 3 + 0.3, 0));
 const vdFmtSec = (n) => n >= 60 ? `${Math.floor(n / 60)} phút ${n % 60} giây` : `${n} giây`;

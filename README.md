@@ -178,6 +178,7 @@ Gemini viết kịch bản theo cảnh → giọng đọc tiếng Việt miễn 
 ảnh nền (ảnh của bài, ảnh miễn phí Pexels nếu có key, hoặc nền màu thương hiệu) →
 chữ lớn + phụ đề → FFmpeg ghép thành video dọc 9:16 (hoặc ngang 16:9).
 
+- **🧩 Kiểu nội dung đổi theo từng clip** (ô "Kiểu nội dung", mặc định tự đổi): Bản tin nóng · Hỏi – Đáp · Top sai lầm · Câu chuyện tình huống · So sánh cũ – mới · Hướng dẫn từng bước · Hiểu lầm – Sự thật · Luật sư – kế toán giải trình. Mỗi kiểu có mạch kể, câu mở đầu, câu kết và trình tự cảnh riêng, dùng thêm 6 bố cục mới: so sánh 2 cột, trích dẫn lớn, dòng thời gian, checklist tích dần, hỏi – đáp, xếp hạng Top.
 - **🎨 Giao diện clip đổi theo từng clip** (kiểu Công nghệ / Giải thích): 7 bộ màu (Xanh đêm, Ngọc lục bảo, Tím hoàng hôn, Cam năng lượng, Xanh biển, Đỏ cảnh báo, Than chì – vàng) × 6 họa tiết nền × 3 kiểu tiêu đề; mặc định "Tự đổi mỗi clip". Trong một clip: cảnh 1-2 ý dùng thẻ lớn có biểu tượng đặt giữa khung, danh sách ngắn xen kẽ dạng lưới ô / danh sách đánh số, số cảnh lớn mờ làm nền, nội dung tự căn giữa khoảng trống.
 - **Kiểu clip "Vẽ tay" (mặc định)**: nền giấy kem, nhãn + tiêu đề góc trái, 2-4 hình minh họa phác thảo do Gemini vẽ
   được "vẽ" lộ dần bởi một bàn tay cầm bút, phụ đề có tô vàng từ khóa. Kịch bản chi tiết, giải thích thuật ngữ và có

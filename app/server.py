@@ -1086,7 +1086,7 @@ def video_create(body: ScriptIn):
     except video.VideoError as e:
         raise HTTPException(400, str(e))
     vid = db.video_add(sc["title"], sc["description"], sc["scenes"], body.image_url.strip())
-    return video.to_json(db.video_get(vid))
+    return dict(video.to_json(db.video_get(vid)), format_name=sc.get("format_name", ""))
 
 
 @admin.get("/api/videos")

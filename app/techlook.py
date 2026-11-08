@@ -521,6 +521,11 @@ def center_content(out: list, top: int, bottom: int, work: Path, L):
     return [(name, (x, y + dy)) + tuple(rest) for name, (x, y), *rest in out]
 
 
+def _layouts():
+    from . import layouts
+    return layouts
+
+
 def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_len: float, illus=None):
     layers = []
     if sc["type"] != "hero":
@@ -555,6 +560,8 @@ def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_l
         X._bars(c, sc, top, bottom)
     elif typ == "visual" and sc["panels"]:
         X._visual(c, sc, top, bottom, illus)
+    elif typ in _layouts().RENDERERS and (sc["items"] or typ == "rank"):
+        _layouts().RENDERERS[typ](c, L, sc, top, bottom)     # so sánh / trích dẫn / dòng thời gian / checklist / hỏi đáp / xếp hạng
     elif sc["items"] and len(sc["items"]) <= 2 and not sc["chips"] and typ in ("list", "text", "steps", "doodle"):
         focus_block(c, L, sc, top, bottom)                  # ít ý → thẻ lớn có biểu tượng, giữa khung
     elif sc["items"] and typ in ("list", "text", "doodle") and not sc["chips"] and _short_items(sc["items"]) and i % 2 == 1:

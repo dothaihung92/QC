@@ -560,6 +560,9 @@ def build(L, sc, i: int, total: int, work: Path, brand: str, dur: float, voice_l
         _bars(c, sc, top, bottom)
     elif typ == "visual" and sc["panels"]:
         _visual(c, sc, top, bottom, illus)
+    elif typ in ("compare", "quote", "timeline", "checklist", "qa", "rank") and (items or typ == "rank"):
+        from . import layouts
+        layouts.RENDERERS[typ](c, L, sc, top, bottom)
     elif items:
         _list(c, sc, top, bottom)
     if typ != "visual":

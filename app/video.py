@@ -74,7 +74,8 @@ DEFAULTS = {
     "audience": "expert",             # expert = luật sư / kế toán giải trình văn bản; general = phổ thông
     "show_title": True,               # hiện tiêu đề lớn đầu mỗi cảnh (tắt: màn hình chỉ còn nội dung + phụ đề)
     "ai_images": False,               # cho phép Gemini vẽ hình minh họa (mặc định TẮT: chỉ dùng ghi chú chữ)
-    "theme": "auto",                  # giao diện màu/họa tiết (kiểu Công nghệ / Giải thích): auto = mỗi clip một kiểu khác
+    "theme": "auto",
+    "story": "auto",                  # kiểu nội dung (mạch kể): auto = mỗi clip một kiểu (tin nóng, hỏi đáp, top sai lầm...)                  # giao diện màu/họa tiết (kiểu Công nghệ / Giải thích): auto = mỗi clip một kiểu khác
     "look": "doodle",                 # doodle = vẽ tay trên giấy (hình AI vẽ lộ dần); explainer = sơ đồ thẻ kính; classic = cũ
     "pen": "wipe",                    # wipe = quét lộ dần kèm bàn tay; strokes = vẽ từng nét (whiteboard-animator, cài thêm)
     "visual": "stock",                # stock = video/ảnh Pexels hoặc nền màu; ai = ảnh AI riêng cho từng cảnh
@@ -137,9 +138,11 @@ def save_config(body: dict) -> dict:
         cur["audience"] = DEFAULTS["audience"]
     if cur["look"] not in ("doodle", "tech", "explainer", "classic"):
         cur["look"] = DEFAULTS["look"]
-    from . import themes
+    from . import formats, themes
     if cur["theme"] != "auto" and cur["theme"] not in themes.THEMES:
         cur["theme"] = "auto"
+    if cur["story"] != "auto" and cur["story"] not in formats.FORMATS:
+        cur["story"] = "auto"
     if cur["pen"] not in ("wipe", "strokes"):
         cur["pen"] = DEFAULTS["pen"]
     if cur["visual"] not in ("stock", "ai"):
@@ -327,7 +330,8 @@ EXPERT_BLOCK = (
 )
 EXPERT_WPS = 2.6                 # giải trình: đọc rõ, vừa phải (từ / giây)
 WORDS_PER_SEC = 3.0                  # tốc độ đọc tiếng Việt trung bình của giọng máy (đo từ clip thật)
-SCENE_TYPES = ("hook", "stat", "list", "flow", "steps", "text", "cta", "doodle", "hero", "browser", "calc", "visual", "bars")
+SCENE_TYPES = ("hook", "stat", "list", "flow", "steps", "text", "cta", "doodle", "hero", "browser", "calc", "visual", "bars",
+               "compare", "quote", "timeline", "checklist", "qa", "rank")
 DOODLE_PAGES = {30: 3, 45: 4, 60: 5, 120: 8, 180: 12}   # giây → số trang của clip vẽ tay (~15 giây / trang)
 
 SCRIPT_PROMPT = """Bạn là biên tập viên video (Facebook Reels / TikTok / YouTube) cho một công ty dịch vụ kế toán - thuế ở Việt Nam.
@@ -565,8 +569,18 @@ def make_script(text: str, seconds: int = 45) -> dict:
     else:
         prompt = SCRIPT_PROMPT.format(seconds=seconds, n=n, total=total, lo=int(per * 0.8), hi=int(per * 1.25),
                                       expand=EXPAND if seconds >= 90 else "", brand=brand, text=text[:12000])
+    from . import formats
+    fmt = formats.pick(cfg.get("story", "auto"))
     if expert:
-        prompt += EXPERT_BLOCK
+        block = EXPERT_BLOCK
+        if not fmt.get("expert_order"):          # trình tự 7 bước cố định chỉ dùng cho kiểu "giải trình"
+            block = re.sub(r"- Trình tự như một buổi tư vấn:.*?\n", "", block, flags=re.S)
+        if not fmt.get("story"):                 # nhân vật xuyên suốt chỉ dùng cho kiểu kể chuyện / giải trình
+            block = re.sub(r"- KỂ CHUYỆN THU HÚT, KHÔNG KHÔ KHAN:.*?\n",
+                           "- Văn nói tự nhiên, hấp dẫn, có câu hỏi và câu dẫn sang cảnh sau; nói rõ quyền lợi / rủi ro bằng tiền cụ thể.\n",
+                           block, flags=re.S)
+        prompt += block
+    prompt += formats.prompt_block(fmt, n, rich_types=not doodle and cfg["look"] != "classic")
     best = None
     for attempt in range(2):          # AI hay viết quá ngắn: thiếu thì yêu cầu viết lại 1 lần
         try:
@@ -577,7 +591,7 @@ def make_script(text: str, seconds: int = 45) -> dict:
             raise VideoError(str(e)) from e
         scenes = clean_scenes(out.get("scenes"))
         words = sum(word_count(s["narration"]) for s in scenes)
-        rich = [x for x in scenes if x["type"] in ("list", "steps", "flow", "browser", "calc")]
+        rich = [x for x in scenes if x["type"] in ("list", "steps", "flow", "browser", "calc")]   # (compare/qa/rank... có dạng riêng)
         def detailed(x):
             return sum(1 for t in x["items"] if "|" in t and len(t.split("|", 1)[1].strip()) >= 12)
         thin = [x for x in rich if len(x["items"]) < 3 or (x["type"] not in ("browser", "calc") and detailed(x) < min(3, len(x["items"])))]
@@ -595,7 +609,7 @@ def make_script(text: str, seconds: int = 45) -> dict:
     if not best:
         raise VideoError("AI không trả về kịch bản hợp lệ, thử lại")
     out, words, scenes, _ = best
-    return {"title": str(out.get("title", "")).strip()[:200],
+    return {"title": str(out.get("title", "")).strip()[:200], "format": fmt["key"], "format_name": fmt["name"],
             "description": str(out.get("description", "")).strip()[:2000], "scenes": scenes}
 
 
