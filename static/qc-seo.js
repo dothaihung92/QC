@@ -530,7 +530,9 @@
       heads.push({ id: id, text: plain(inner) });
       return '<h2 id="' + id + '">' + inner + '</h2>';
     });
-    if (heads.length >= 3) {
+    var tocOn = false;
+    try { tocOn = localStorage.getItem('qc_toc') === '1'; } catch (e) {}
+    if (heads.length >= 3 && tocOn) {                 // mặc định TẮT: nhiều web đã có plugin mục lục riêng (tránh 2 mục lục)
       var toc = '<div class="qc-toc" style="background:#f6f8fb;border:1px solid #dfe5ee;border-radius:8px;padding:12px 18px;margin:16px 0"><p style="font-weight:700;margin:0 0 6px">Nội dung chính</p><ol style="margin:0;padding-left:20px">' +
         heads.filter(function (h) { return !/Câu Hỏi Thường Gặp/i.test(h.text); }).map(function (h) { return '<li><a href="#' + h.id + '">' + esc(h.text) + '</a></li>'; }).join('') + '</ol></div>';
       var i = html.indexOf('<h2 id=');
@@ -650,7 +652,21 @@
       window.charBadge._qc = true;
     }
   }
+  function addTocOption() {
+    var btn = document.getElementById('testbtn');
+    if (!btn || document.getElementById('qc-toc-chk')) return;
+    var lab = document.createElement('label');
+    lab.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:12px;font-weight:400;margin:8px 0';
+    lab.innerHTML = '<input type="checkbox" id="qc-toc-chk" style="width:auto"> Chèn mục lục "Nội dung chính" vào bài ' +
+      '<span style="color:var(--text3)">(tắt nếu web đã có plugin mục lục — tránh 2 mục lục)</span>';
+    btn.parentNode.insertBefore(lab, btn);
+    var chk = lab.querySelector('input');
+    try { chk.checked = localStorage.getItem('qc_toc') === '1'; } catch (e) {}
+    chk.onchange = function () { try { localStorage.setItem('qc_toc', chk.checked ? '1' : '0'); } catch (e) {} };
+  }
+
   function installLinks() {
+    addTocOption();
     // Tắt cách gắn link cũ lúc hiển thị bài (gắn theo nguyên văn từ khóa, không kiểm tra link, có thể trỏ về chính bài).
     // Việc gắn link nội bộ do internalLinks() làm sau khi bài viết xong.
     if (typeof autoInjectILinks === 'function' && !autoInjectILinks._qc) {

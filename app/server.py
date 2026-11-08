@@ -204,7 +204,7 @@ def seo_writer(request: Request):
 @admin.get("/qc-bridge.js")
 def qc_bridge():
     js = ""
-    for name in ("qc-bridge.js", "qc-seo.js"):                    # qc-seo.js: tối ưu SEO khi đăng WordPress
+    for name in ("qc-bridge.js", "qc-seo.js", "qc-faithful.js"):                    # qc-seo.js: tối ưu SEO khi đăng WordPress
         path = STATIC / name
         if path.exists():
             js += path.read_text(encoding="utf-8") + "\n"

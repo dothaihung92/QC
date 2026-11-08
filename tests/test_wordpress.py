@@ -195,3 +195,12 @@ def test_internal_links_never_point_to_the_article_itself():
     assert "function isSelf(it, a)" in js and "!isSelf(it, a)" in js and "function stripSelfLinks" in js
     assert "window.autoInjectILinks = function (sections) { return { sections: sections, injected: [] }; }" in js
     assert "e.focusKeyword = article.focusKeyword" in js
+
+
+def test_seo_from_news_stays_faithful_to_source():
+    js = TestClient(server.app).get("/qc-bridge.js").text
+    assert "CHẾ ĐỘ BÁM SÁT BÀI GỐC" in js and "delete body.tools" in js            # không Google Search khi viết lại bài tin
+    assert "window.qcFaithful.begin" in js and "window.qcFaithful.end" in js
+    assert "Đối chiếu với bài gốc" in js and "function derived" in js
+    assert "localStorage.getItem('qc_toc') === '1'" in js                             # mục lục mặc định tắt (web đã có plugin)
+    assert "(s.content || '') !== parts[i]" in js                                     # gắn link không ghi đè đoạn vừa sửa

@@ -99,6 +99,7 @@
     var info = '✍️ Đang tự tạo bài SEO từ bài tin: "' + (job.title || '') + '" — AI đặt từ khóa, nghiên cứu nguồn rồi viết bài (khoảng 1–3 phút)...';
     if (typeof showInfo === 'function') showInfo(info); else notify(info);
     window._qcJobInfo = true;
+    if (window.qcFaithful) window.qcFaithful.begin({ title: job.title || '', body: body, url: job.url || '' });   // bám sát bài gốc
     setBusy(true, 'Đang đặt từ khóa...');
     shortKeyword(job.title || '', body).then(function (k) { if (k) set('kw', k); generate(); });
   }
@@ -176,7 +177,7 @@
       if (curArticle !== a) return;          // đã tạo bài khác trong lúc chờ
       var out = d.parts || parts;
       secs.forEach(function (s, i) {
-        if (out[i] === parts[i]) return;
+        if (out[i] === parts[i] || (s.content || '') !== parts[i]) return;   // đoạn đã bị sửa trong lúc chờ → bỏ qua
         s.content = out[i];
         var el = document.getElementById('ed-content-' + i);
         if (el) el.innerHTML = out[i];
@@ -341,6 +342,11 @@
         try { return await origGen.apply(this, arguments); }
         finally {
           if (verify) { sel.value = VERIFY; window._qcVerifying = false; }
+          if (window.qcFaithful && window.qcFaithful.active()) {       // bài từ Tin tức AI: đối chiếu + sửa cho đúng bài gốc
+            var made = typeof curArticle !== 'undefined' && curArticle && curArticle !== before ? curArticle : null;
+            setBusy(true, 'Đang đối chiếu với bài gốc...');
+            try { await window.qcFaithful.end(made); } catch (e) { console.warn('qcFaithful', e); }
+          }
           if (typeof curArticle !== 'undefined' && curArticle && curArticle !== before) {
             setBusy(true, 'Đang chỉnh tiêu đề...');
             try { await fixTitleKeyword(curArticle); } catch (e) { console.warn('fixTitleKeyword', e); }
