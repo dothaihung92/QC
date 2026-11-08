@@ -1352,13 +1352,25 @@ def groupbot_login():
 
 
 class BotSettingsIn(BaseModel):
-    visible: bool
+    visible: Optional[bool] = None
+    browser: Optional[str] = None             # chrome | msedge
 
 
 @admin.post("/api/groupbot/settings")
 def groupbot_settings(body: BotSettingsIn):
-    db.set_setting("groupbot_visible", body.visible)
+    if body.visible is not None:
+        db.set_setting("groupbot_visible", body.visible)
+    if body.browser:
+        try:
+            _bot().set_browser(body.browser)
+        except _bot().GroupBotError as e:
+            raise HTTPException(400, str(e))
     return _bot().status()
+
+
+@admin.post("/api/groupbot/import-chrome")
+def groupbot_import_chrome():
+    return _bot_call("start_import_chrome")
 
 
 class RunIn(BaseModel):

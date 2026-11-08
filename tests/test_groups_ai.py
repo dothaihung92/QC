@@ -114,3 +114,64 @@ def test_bot_posts_each_group_its_own_text_biggest_first_and_skips_blocked(clien
     assert posted == [("222", "bài cho Lớn\n\nhttps://x.vn/bai/"), ("111", "bài cho Nhỏ\n\nhttps://x.vn/bai/")]
     st = {g["name"]: g["state"] for g in client.get("/api/group-jobs").json()[0]["groups"]}
     assert st == {"Lớn": "ok", "Cấm": "blocked", "Nhỏ": "pending"}
+
+
+def test_uses_google_chrome_and_imports_facebook_login(client, monkeypatch, tmp_path):
+    import sqlite3
+    ud = tmp_path / "Chrome" / "User Data"
+    (ud / "Default" / "Network").mkdir(parents=True)
+    (ud / "Profile 2" / "Network").mkdir(parents=True)
+    (ud / "Local State").write_text('{"os_crypt": {}}')
+    for prof, fb in (("Default", False), ("Profile 2", True)):
+        with sqlite3.connect(ud / prof / "Network" / "Cookies") as c:
+            c.execute("CREATE TABLE cookies (host_key TEXT, name TEXT, encrypted_value BLOB)")
+            c.execute("INSERT INTO cookies VALUES ('.google.com', 'SID', x'00')")
+            if fb:
+                c.execute("INSERT INTO cookies VALUES ('.facebook.com', 'c_user', x'01')")
+    monkeypatch.setattr(groupbot, "chrome_user_data", lambda: ud)
+    monkeypatch.setattr(groupbot, "PROFILE_DIR", tmp_path / "profile")
+    monkeypatch.setattr(groupbot, "MARKER", tmp_path / "profile" / ".da_dang_nhap")
+    assert [p.name for p in groupbot.chrome_facebook_profiles()] == ["Profile 2"]
+    st = client.get("/api/groupbot/status").json()
+    assert st["browser"] == "chrome" and st["chrome_found"] is True               # mặc định Google Chrome
+
+    channels = []
+
+    class Chromium:
+        def launch_persistent_context(self, **kw):
+            channels.append(kw.get("channel"))
+            raise RuntimeError("không có")
+    import types
+    with __import__("pytest").raises(groupbot.GroupBotError):
+        groupbot._launch(types.SimpleNamespace(chromium=Chromium()))
+    assert channels[:2] == ["chrome", "msedge"]                                   # Chrome trước, Edge dự phòng
+    groupbot.MARKER.parent.mkdir(parents=True, exist_ok=True)
+    groupbot.MARKER.write_text("1")
+    client.post("/api/groupbot/settings", json={"browser": "msedge"})
+    assert groupbot.browser() == "msedge" and not groupbot.MARKER.exists()          # đổi trình duyệt → đăng nhập lại
+    channels.clear()
+    with __import__("pytest").raises(groupbot.GroupBotError):
+        groupbot._launch(types.SimpleNamespace(chromium=Chromium()))
+    assert channels[:2] == ["msedge", "chrome"]
+
+    # nhập đăng nhập từ Chrome: chép Local State + Cookies của hồ sơ có Facebook rồi mở thử
+    import contextlib
+    import sys
+    mod = types.ModuleType("playwright.sync_api")
+    mod.sync_playwright = lambda: contextlib.nullcontext(object())
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", mod)
+
+    class Page:
+        def goto(self, *a, **k): pass
+        def wait_for_timeout(self, ms): pass
+        def locator(self, sel): return types.SimpleNamespace(count=lambda: 0)
+
+    class Ctx:
+        pages = [Page()]
+        def cookies(self, url): return [{"name": "c_user"}]
+        def close(self): pass
+    monkeypatch.setattr(groupbot, "_launch", lambda p, visible=True: Ctx())
+    groupbot._import_chrome()
+    assert (tmp_path / "profile" / "Local State").exists()
+    assert (tmp_path / "profile" / "Default" / "Network" / "Cookies").exists()
+    assert groupbot.MARKER.exists() and groupbot.browser() == "chrome"

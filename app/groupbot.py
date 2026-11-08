@@ -10,7 +10,12 @@ Facebook không có API đăng vào group, nên phần này điều khiển trì
 Hành vi này trái điều khoản Facebook, có thể bị khóa tài khoản: người dùng tự chịu rủi ro.
 """
 import importlib.util
+import os
 import random
+import shutil
+import sqlite3
+import tempfile
+from pathlib import Path
 import re
 import subprocess
 import sys
@@ -52,8 +57,68 @@ def is_visible() -> bool:
     return bool(db.get_setting("groupbot_visible", False)) and not config.GROUPBOT_FORCE_HEADLESS
 
 
+BROWSERS = {"chrome": "Google Chrome", "msedge": "Microsoft Edge"}
+
+
+def browser() -> str:
+    """Trình duyệt dùng để đăng nhóm (mặc định Google Chrome)."""
+    b = db.get_setting("groupbot_browser", "chrome")
+    return b if b in BROWSERS else "chrome"
+
+
+def set_browser(name: str):
+    if name not in BROWSERS:
+        raise GroupBotError("Trình duyệt không hợp lệ")
+    if name != browser():
+        db.set_setting("groupbot_browser", name)
+        MARKER.unlink(missing_ok=True)          # phiên đăng nhập của trình duyệt cũ không dùng được cho trình duyệt mới
+
+
+def chrome_user_data():
+    """Thư mục dữ liệu Google Chrome của người dùng trên máy (Windows / macOS / Linux)."""
+    home = Path.home()
+    for p in (Path(os.environ.get("LOCALAPPDATA", home / "AppData/Local")) / "Google/Chrome/User Data",
+              home / "Library/Application Support/Google/Chrome", home / ".config/google-chrome"):
+        if (p / "Local State").exists():
+            return p
+    return None
+
+
+def _cookie_db(profile: Path):
+    for p in (profile / "Network" / "Cookies", profile / "Cookies"):
+        if p.exists():
+            return p
+    return None
+
+
+def chrome_facebook_profiles(ud=None) -> list:
+    """Các hồ sơ Chrome đang đăng nhập Facebook (đọc tên cookie — không đọc mật khẩu hay giá trị cookie)."""
+    ud = ud or chrome_user_data()
+    if not ud:
+        return []
+    out = []
+    for prof in sorted([ud / "Default"] + list(ud.glob("Profile *"))):
+        src = _cookie_db(prof)
+        if not src:
+            continue
+        tmp = Path(tempfile.mkdtemp()) / "c.db"
+        try:
+            shutil.copy2(src, tmp)                 # Chrome đang mở thì file bị khóa ghi, chép ra bản tạm để đọc
+            with sqlite3.connect(tmp) as c:
+                n = c.execute("SELECT COUNT(*) FROM cookies WHERE host_key LIKE '%facebook.com' AND name='c_user'").fetchone()[0]
+            if n:
+                out.append(prof)
+        except (OSError, sqlite3.Error):
+            continue
+        finally:
+            shutil.rmtree(tmp.parent, ignore_errors=True)
+    return out
+
+
 def status() -> dict:
+    ud = chrome_user_data()
     return {
+        "browser": browser(), "browsers": BROWSERS, "chrome_found": bool(ud),
         "visible": is_visible(),
         "playwright": playwright_available(),
         "logged_in": MARKER.exists(),
@@ -108,15 +173,20 @@ def _launch(p, visible=True):
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     kw = dict(user_data_dir=str(PROFILE_DIR), headless=(not visible) or config.GROUPBOT_FORCE_HEADLESS,
               viewport={"width": 1280, "height": 900}, locale="vi-VN")
+    first = browser()
+    other = "msedge" if first == "chrome" else "chrome"
     attempts = ([{"executable_path": config.GROUPBOT_BROWSER_PATH}] if config.GROUPBOT_BROWSER_PATH
-                else [{"channel": "msedge"}, {"channel": "chrome"}, {}])
+                else [{"channel": first}, {"channel": other}, {}])
     last = None
     for extra in attempts:
         try:
-            return p.chromium.launch_persistent_context(**kw, **extra)
+            ctx = p.chromium.launch_persistent_context(**kw, **extra)
+            if extra.get("channel") and extra["channel"] != browser():
+                _log(f"⚠ Không mở được {BROWSERS[browser()]} — đang dùng {BROWSERS.get(extra['channel'], extra['channel'])} thay thế")
+            return ctx
         except Exception as e:  # noqa: BLE001
             last = e
-    raise GroupBotError(f"Không mở được trình duyệt (cần Microsoft Edge hoặc Chrome, và không mở sẵn "
+    raise GroupBotError(f"Không mở được trình duyệt (cần Google Chrome hoặc Microsoft Edge, và không mở sẵn "
                         f"cùng hồ sơ này ở cửa sổ khác): {str(last)[:200]}")
 
 
@@ -141,7 +211,15 @@ def _login_flow():
         try:
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
             page.goto("https://www.facebook.com/", wait_until="domcontentloaded")
-            _log("Đã mở Facebook — hãy đăng nhập trong cửa sổ vừa hiện (chờ tối đa 10 phút).")
+            try:
+                page.bring_to_front()                     # đưa cửa sổ lên trên để dễ thấy
+            except Exception:  # noqa: BLE001
+                pass
+            if _logged_in(ctx):
+                MARKER.write_text(str(int(time.time())))
+                _log("✅ Trình duyệt đã đăng nhập Facebook sẵn — dùng luôn phiên này.")
+                return
+            _log(f"Đã mở Facebook trong {BROWSERS[browser()]} — hãy đăng nhập trong cửa sổ vừa hiện (chờ tối đa 10 phút).")
             end = time.time() + 600
             while not _logged_in(ctx):
                 if state["stop"] or time.time() > end:
@@ -150,6 +228,60 @@ def _login_flow():
             time.sleep(3)  # để Facebook ghi nốt cookie
             MARKER.write_text(str(int(time.time())))
             _log("✅ Đã đăng nhập. Các lần sau phần mềm tự dùng lại phiên này.")
+        finally:
+            _close(ctx)
+
+
+def start_import_chrome():
+    _need_playwright()
+    _start("import", _import_chrome)
+
+
+def _import_chrome():
+    """Dùng lại đăng nhập Facebook trong Google Chrome của bạn: chép cookie của hồ sơ Chrome đang đăng nhập Facebook
+    sang hồ sơ riêng của phần mềm (không đụng tới mật khẩu, không sửa Chrome của bạn), rồi mở thử Facebook."""
+    from playwright.sync_api import sync_playwright
+    ud = chrome_user_data()
+    if not ud:
+        raise GroupBotError("Không tìm thấy Google Chrome trên máy — cài Chrome hoặc bấm 'Đăng nhập Facebook' để đăng nhập tay")
+    profs = chrome_facebook_profiles(ud)
+    if not profs:
+        raise GroupBotError("Chrome của bạn chưa đăng nhập Facebook — mở Chrome, đăng nhập facebook.com rồi bấm lại")
+    prof = profs[0]
+    _log(f"Tìm thấy Facebook đã đăng nhập trong hồ sơ Chrome «{prof.name}». Đang chép phiên đăng nhập...")
+    db.set_setting("groupbot_browser", "chrome")
+    try:
+        (PROFILE_DIR / "Default" / "Network").mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ud / "Local State", PROFILE_DIR / "Local State")
+        src = _cookie_db(prof)
+        dst = PROFILE_DIR / "Default" / ("Network/Cookies" if src.parent.name == "Network" else "Cookies")
+        shutil.copy2(src, dst)
+        journal = src.with_name(src.name + "-journal")
+        if journal.exists():
+            shutil.copy2(journal, dst.with_name(dst.name + "-journal"))
+    except OSError as e:
+        raise GroupBotError(f"Không chép được (Chrome đang khóa tệp) — ĐÓNG HẾT cửa sổ Chrome rồi bấm lại. ({type(e).__name__})")
+    MARKER.unlink(missing_ok=True)
+    with sync_playwright() as p:
+        ctx = _launch(p, visible=True)
+        try:
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+            page.goto("https://www.facebook.com/", wait_until="domcontentloaded")
+            page.wait_for_timeout(3000)
+            if _logged_in(ctx) and not page.locator("input[name='pass']").count():
+                MARKER.write_text(str(int(time.time())))
+                _log("✅ Đã dùng được đăng nhập Facebook từ Chrome của bạn — không cần đăng nhập lại.")
+            else:
+                _log("⚠ Chrome không cho dùng lại phiên đăng nhập (cơ chế bảo mật mới của Chrome). "
+                     "Hãy đăng nhập Facebook 1 lần ngay trong cửa sổ Chrome đang mở (chờ tối đa 10 phút).")
+                end = time.time() + 600
+                while not _logged_in(ctx):
+                    if state["stop"] or time.time() > end:
+                        raise GroupBotError("Chưa đăng nhập xong — đã hủy")
+                    time.sleep(2)
+                time.sleep(3)
+                MARKER.write_text(str(int(time.time())))
+                _log("✅ Đã đăng nhập. Các lần sau phần mềm tự dùng lại phiên này.")
         finally:
             _close(ctx)
 
