@@ -90,7 +90,7 @@
     var slug = a.slug || '';
     return [
       { ok: hasKw(a.title, kw), lbl: 'Từ khóa có trong tiêu đề SEO' },
-      { ok: (a.title || '').length <= 60, lbl: 'Tiêu đề SEO ≤ 60 ký tự (' + (a.title || '').length + ')' },
+      { ok: (a.title || '').length <= 65, lbl: 'Tiêu đề SEO ≤ 60–65 ký tự (' + (a.title || '').length + ')' },
       { ok: hasKw(a.metaDescription, kw), lbl: 'Từ khóa có trong mô tả (meta description)' },
       { ok: (a.metaDescription || '').length <= 160, lbl: 'Mô tả ≤ 160 ký tự (' + (a.metaDescription || '').length + ')' },
       { ok: !!kw && slug.indexOf(slugify(kw)) >= 0, lbl: 'Từ khóa có trong URL' },

@@ -204,3 +204,10 @@ def test_seo_from_news_stays_faithful_to_source():
     assert "Đối chiếu với bài gốc" in js and "function derived" in js
     assert "localStorage.getItem('qc_toc') === '1'" in js                             # mục lục mặc định tắt (web đã có plugin)
     assert "(s.content || '') !== parts[i]" in js                                     # gắn link không ghi đè đoạn vừa sửa
+
+
+def test_titles_are_readable_not_keyword_templates():
+    js = TestClient(server.app).get("/qc-bridge.js").text
+    assert "mới nhất năm ' + new Date().getFullYear()" not in js                     # bỏ mẫu ghép "[từ khóa] mới nhất năm 2026"
+    assert "function telegraphic" in js and "function fixAcronyms" in js and "TIÊU ĐỀ BÀI GỐC" in js
+    assert "Ví dụ XẤU" in js and "CỤM TỪ TỰ NHIÊN" in js

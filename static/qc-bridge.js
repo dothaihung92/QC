@@ -99,6 +99,7 @@
     var info = '✍️ Đang tự tạo bài SEO từ bài tin: "' + (job.title || '') + '" — AI đặt từ khóa, nghiên cứu nguồn rồi viết bài (khoảng 1–3 phút)...';
     if (typeof showInfo === 'function') showInfo(info); else notify(info);
     window._qcJobInfo = true;
+    jobTitle = String(job.title || '').trim();
     if (window.qcFaithful) window.qcFaithful.begin({ title: job.title || '', body: body, url: job.url || '' });   // bám sát bài gốc
     setBusy(true, 'Đang đặt từ khóa...');
     shortKeyword(job.title || '', body).then(function (k) { if (k) set('kw', k); generate(); });
@@ -219,7 +220,7 @@
   function isShortKw(k) { k = String(k || '').trim(); return k.length >= 3 && k.length <= 60 && k.split(/\s+/).length <= 9; }
   function titleOk(t, kw) {
     t = String(t || '').trim();
-    return t.length >= 35 && t.length <= 60 && hasKw(t, kw) && !DANGLING.test(t) && !/[,;:–—\-|]$/.test(t) && !/\.\.\.|…$/.test(t);
+    return t.length >= 30 && t.length <= 65 && hasKw(t, kw) && !DANGLING.test(t) && !/[,;:–—\-|]$/.test(t) && !/\.\.\.|…$/.test(t);
   }
   function metaOk(m, kw) {
     m = String(m || '').trim();
@@ -242,19 +243,29 @@
       return typeof extractJSON === 'function' ? extractJSON(raw) : JSON.parse(raw);
     } catch (e) { return null; }
   }
+  // Viết hoa từ viết tắt quen thuộc (tncn → TNCN...) để từ khóa / tiêu đề dễ đọc
+  var ACRO = /(^|[^\p{L}])(tncn|tndn|gtgt|bhxh|bhyt|bhtn|ttđb|hkd|hđlđ|nđ-cp|tt-btc|cccd|mst)(?=$|[^\p{L}])/giu;
+  function fixAcronyms(t) { return String(t || '').replace(ACRO, function (m, pre, w) { return pre + w.toUpperCase(); }); }
+  var jobTitle = '';                             // tiêu đề bài tin gốc (rõ nghĩa) khi viết từ tab Tin tức AI
   async function shortKeyword(title, body) {
-    var j = await askJSON('Đặt 1 TỪ KHÓA SEO chính (2-6 từ, cách người Việt gõ tìm trên Google, viết thường, có dấu) cho bài sau. ' +
+    var j = await askJSON('Đặt 1 TỪ KHÓA SEO chính cho bài viết dưới đây.\nYêu cầu: là CỤM TỪ TỰ NHIÊN, đúng ngữ pháp, đọc lên là hiểu, ' +
+      'đúng như người Việt thật sự gõ tìm trên Google (3-6 từ); giữ viết hoa từ viết tắt (TNCN, BHXH, TNDN, GTGT); ' +
+      'KHÔNG ghép chuỗi danh từ cộc lốc khó hiểu.\n' +
+      'Ví dụ TỐT: "thuế TNCN thời gian thử việc", "khấu trừ thuế TNCN 10%", "hóa đơn điện tử sai sót". ' +
+      'Ví dụ XẤU: "thuế tncn tiền thay bảo hiểm thử việc", "hóa đơn sai phạm phạt thuế tndn".\n' +
       'Chỉ trả về JSON {"keyword":"..."}.\nTiêu đề: ' + title + '\nNội dung: ' + String(body || '').slice(0, 1500));
-    var k = j && String(j.keyword || '').trim();
+    var k = fixAcronyms(j && String(j.keyword || '').trim());
     if (isShortKw(k)) return k;
-    return isShortKw(title) ? title : title.split(/\s+/).slice(0, 6).join(' ').replace(/[,:;.]+$/, '');
+    return fixAcronyms(isShortKw(title) ? title : title.split(/\s+/).slice(0, 6).join(' ').replace(/[,:;.]+$/, ''));
   }
-  function fallbackTitle(kw, oldTitle) {
-    var K = cap(kw);
-    var tails = [' và những điều doanh nghiệp cần biết', ' mới nhất doanh nghiệp cần biết', ' hướng dẫn chi tiết và dễ hiểu',
-                 ' mới nhất năm ' + new Date().getFullYear(), ' cần biết'];
-    for (var i = 0; i < tails.length; i++) if ((K + tails[i]).length <= 60 && (K + tails[i]).length >= 35) return K + tails[i];
-    return K.length <= 60 ? K : oldTitle;
+  var GENERIC_TAIL = /(mới nhất|năm \d{4}|cần biết|hướng dẫn chi tiết|và dễ hiểu|doanh nghiệp cần biết|\s)+$/i;
+  function telegraphic(t, kw) {                  // "[từ khóa] mới nhất năm 2026" — chỉ ghép từ khóa với đuôi chung chung → khó hiểu
+    var n = norm(t), k = norm(kw);
+    return n.indexOf(k) === 0 && norm(t.slice(kw.length)).replace(GENERIC_TAIL, '').trim().length < 6;
+  }
+  function fallbackTitle(kw, oldTitle) {          // không ghép theo mẫu nữa: dùng tiêu đề bài gốc / tiêu đề AI viết ban đầu
+    if (jobTitle && hasKw(jobTitle, kw) && jobTitle.length <= 80) return cleanTitle(jobTitle);
+    return oldTitle;
   }
   function refreshSidebar(a) {
     var te = document.getElementById('seo-title-edit');
@@ -284,26 +295,29 @@
     var kwEl = document.getElementById('kw');
     var userKw = ((kwEl || {}).value || '').trim();
     var kw = isShortKw(userKw) ? userKw : (isShortKw(a.focusKeyword) ? String(a.focusKeyword).trim() : await shortKeyword(userKw || a.title, ''));
+    kw = fixAcronyms(kw);
     a.focusKeyword = kw;
-    var full = cleanTitle(a._qcFullTitle || a.title);
-    if (titleOk(full, kw) && metaOk(a.metaDescription, kw)) {
+    var full = fixAcronyms(cleanTitle(a._qcFullTitle || a.title));
+    if (titleOk(full, kw) && !telegraphic(full, kw) && metaOk(a.metaDescription, kw)) {
       a.title = full;
       refreshSidebar(a);                       // luôn cập nhật ô Từ khóa SEO (AI có lúc không trả focusKeyword → "undefined")
       return;
     }
     notify('✏️ Đang chỉnh tiêu đề cho trọn câu và chứa đúng từ khóa "' + kw + '"...');
     var bodyTxt = (a.sections || []).map(function (s) { return (s.heading || '') + ' ' + plain(s.content); }).join(' ').slice(0, 1500);
-    var j = await askJSON('Từ khóa SEO chính: "' + kw + '".\nTiêu đề hiện tại: "' + full + '".\nNội dung bài: ' + bodyTxt +
-      '\n\nViết 6 TIÊU ĐỀ (H1) khác nhau. Mỗi tiêu đề: là MỘT CÂU HOÀN CHỈNH, trọn nghĩa, không bị bỏ lửng; dài 45-58 ký tự (đếm cả dấu cách, TỐI ĐA 60); ' +
-      'chứa NGUYÊN VĂN cụm từ khóa "' + kw + '" (đúng chính tả, đúng dấu, đúng thứ tự), ưu tiên đặt từ khóa ở đầu; ' +
-      'không dùng dấu ":" "|" " - " để ngăn cách; không kết thúc bằng "..." hay giới từ/liên từ; giữ nguyên số hiệu văn bản, con số trong bài.\n' +
+    var j = await askJSON('Từ khóa SEO chính: "' + kw + '".\nTiêu đề hiện tại: "' + full + '".\n' +
+      (jobTitle ? 'TIÊU ĐỀ BÀI GỐC (rõ nghĩa — tiêu đề mới phải cùng ý này): "' + jobTitle + '".\n' : '') + 'Nội dung bài: ' + bodyTxt +
+      '\n\nViết 6 TIÊU ĐỀ (H1) khác nhau, xếp từ RÕ NGHĨA NHẤT tới kém hơn. Mỗi tiêu đề:\n' +
+      '- ĐỌC LÀ HIỂU NGAY bài nói về chuyện gì (ai – việc gì – được/phải làm gì), là câu tiếng Việt tự nhiên như tiêu đề báo, trọn nghĩa, không bỏ lửng;\n' +
+      '- KHÔNG chỉ ghép từ khóa với đuôi chung chung kiểu "mới nhất năm 2026", "cần biết"; nên dạng câu hỏi hoặc nêu rõ kết luận;\n' +
+      '- dài 45-60 ký tự (đếm cả dấu cách, tối đa 65); chứa NGUYÊN VĂN cụm từ khóa "' + kw + '" ở vị trí tự nhiên (không bắt buộc đứng đầu);\n' +
+      '- giữ viết hoa từ viết tắt (TNCN, BHXH…); không dùng dấu "|" " - " để ngăn cách; không kết thúc bằng "..." hay giới từ/liên từ; giữ đúng số hiệu, con số trong bài.\n' +
       'Viết thêm 2 META DESCRIPTION: 140-155 ký tự (tối đa 158), mở đầu bằng từ khóa "' + kw + '", là câu hoàn chỉnh, kết bằng lời mời hành động và dấu chấm.\n' +
       'Chỉ trả về JSON {"titles":["..."],"metas":["..."]}');
-    var titles = ((j && j.titles) || []).map(function (t) { return cleanTitle(t).replace(/["“”]/g, ''); });
-    var good = titles.filter(function (t) { return titleOk(t, kw); });
-    var lead = function (x) { return norm(x).indexOf(norm(kw)) === 0 ? 1 : 0; };   // từ khóa đứng đầu → ưu tiên
-    good.sort(function (x, y) { return lead(y) - lead(x); });
-    var t = titleOk(full, kw) ? full : (good[0] || fallbackTitle(kw, full));
+    var titles = ((j && j.titles) || []).map(function (t) { return fixAcronyms(cleanTitle(t).replace(/["“”]/g, '')); });
+    var good = titles.filter(function (t) { return titleOk(t, kw) && !telegraphic(t, kw); });   // giữ thứ tự "rõ nghĩa nhất" của AI
+    var short = good.filter(function (t) { return t.length <= 60; });
+    var t = (titleOk(full, kw) && !telegraphic(full, kw)) ? full : (short[0] || good[0] || fallbackTitle(kw, full));
     var metas = ((j && j.metas) || []).map(function (m) { return String(m || '').trim(); }).filter(function (m) { return metaOk(m, kw); });
     a.title = t;
     if (!metaOk(a.metaDescription, kw) && metas[0]) a.metaDescription = metas[0];
@@ -327,7 +341,7 @@
     }
   }
   wrapLimits();
-  window.qcTitle = { refresh: refreshSidebar, titleOk: titleOk, metaOk: metaOk, cleanTitle: cleanTitle, fallbackTitle: fallbackTitle, fix: fixTitleKeyword };
+  window.qcTitle = { fixAcronyms: fixAcronyms, telegraphic: telegraphic, refresh: refreshSidebar, titleOk: titleOk, metaOk: metaOk, cleanTitle: cleanTitle, fallbackTitle: fallbackTitle, fix: fixTitleKeyword };
 
   function wrapGenerator() {
     if (typeof generate === 'function' && !generate._qc) {
@@ -356,6 +370,7 @@
           setBusy(false);
           if (window._qcJobInfo) {                // tắt khung "Đang tự tạo bài..." (vòng xoay) khi đã xong
             window._qcJobInfo = false;
+            jobTitle = '';
             var inf = document.getElementById('ainfo');
             if (inf) inf.style.display = 'none';
             if (typeof curArticle !== 'undefined' && curArticle && curArticle !== before)
