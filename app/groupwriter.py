@@ -16,6 +16,15 @@ STYLES = [
     "viết dạng DANH SÁCH 3-4 gạch đầu dòng 'cần nhớ', mở bằng một câu tóm tắt",
     "viết dạng HỎI – ĐÁP: nêu 1 câu hỏi hay gặp rồi trả lời ngắn",
 ]
+GOALS = {
+    "trial": ("KÊU GỌI NGƯỜI XEM TẢI VÀ DÙNG THỬ PHẦN MỀM",
+              "Mỗi bài nêu 1-2 lợi ích cụ thể (tiết kiệm thời gian, bớt sai sót, làm được việc gì…) lấy từ nội dung gốc, rồi kêu gọi HÀNH ĐỘNG rõ ràng: "
+              "tải về dùng thử (ưu tiên nói dùng thử / miễn phí nếu nội dung gốc có nói). Mỗi bài một lời kêu gọi khác nhau. "
+              "Không phóng đại, không hứa hẹn điều nội dung gốc không có, không viết như quảng cáo spam."),
+    "service": ("GIỚI THIỆU DỊCH VỤ VÀ MỜI LIÊN HỆ TƯ VẤN",
+                "Nêu điểm mạnh của dịch vụ từ nội dung gốc và mời liên hệ tư vấn; mỗi bài một lời mời khác nhau; không phóng đại."),
+    "share": ("CHIA SẺ KIẾN THỨC, THU HÚT TRAO ĐỔI", "Giọng chia sẻ hữu ích, kết bằng câu mời trao đổi."),
+}
 SIMILAR = 0.72
 MAX_CHARS = 520                      # bài đăng nhóm ngắn gọn: đọc lướt là nắm ý chính
 LINK_NOTE = ["Link bài viết đầy đủ em để ở bình luận nhé.", "Chi tiết mình để link ở bình luận ạ.", "Link bài đầy đủ ở phần bình luận.",
@@ -70,7 +79,12 @@ def _fallback(article: dict, groups: list) -> dict:
     lim = 420 if text_mode else 200
     desc = (desc[:lim].rsplit(" ", 1)[0] + "…") if len(desc) > lim else desc
     if text_mode:                                       # nội dung do người dùng viết: giữ nguyên ý, chỉ đổi câu mở đầu / kết
-        note = lambda k: LINK_NOTE[k % len(LINK_NOTE)] if article.get("url") else ""      # noqa: E731
+        if article.get("goal") == "trial" and article.get("link_mode") == "post":
+            ctas = ["Tải về dùng thử ngay tại link bên dưới nhé!", "Bấm link bên dưới để tải và dùng thử miễn phí.",
+                    "Anh chị tải về trải nghiệm thử ở link bên dưới ạ.", "Dùng thử ngay, link tải ở bên dưới."]
+            note = lambda k: ctas[k % len(ctas)]                                          # noqa: E731
+        else:
+            note = lambda k: LINK_NOTE[k % len(LINK_NOTE)] if article.get("url") else ""   # noqa: E731
         return {g["id"]: "\n".join(x for x in (hooks_for(k), desc, note(k)) if x) for k, g in enumerate(groups)}
     hooks = ["❓ Doanh nghiệp của bạn đã nắm rõ điều này chưa?", "⚠️ Lưu ý quan trọng cho kế toán và chủ doanh nghiệp:",
              "📌 Chia sẻ để anh chị em trong nhóm cùng tham khảo:", "💡 Một kinh nghiệm thực tế đáng để lưu lại:",
@@ -92,6 +106,8 @@ def make_variants(article: dict, groups: list, gemini_key: str = "", model: str 
     body = _plain(article.get("content", ""))[:5000]
     text_mode = article.get("mode") == "text"
     has_link = bool(article.get("url"))
+    link_in_post = has_link and article.get("link_mode") == "post"
+    goal = GOALS.get(article.get("goal", ""))
 
     def ask(targets, avoid=None):
         lines = "\n".join(f'{k}. Nhóm "{g["name"]}" — cách viết: {STYLES[(g.get("_k", k)) % len(STYLES)]}'
@@ -102,11 +118,17 @@ def make_variants(article: dict, groups: list, gemini_key: str = "", model: str 
         length = ('- Độ dài vừa phải: 4-8 dòng, dưới 700 ký tự; GIỮ ĐỦ các ý chính, số liệu, thông tin liên hệ / ưu đãi có trong nội dung gốc.\n' if text_mode else
                   '- NGẮN GỌN: tối đa 4 dòng ngắn, tổng dưới 380 ký tự — chỉ nêu Ý CHÍNH (điều gì thay đổi / kết luận / con số quan trọng nhất), '
                   'không giải thích dài dòng, không liệt kê hết chi tiết (chi tiết nằm ở bài viết).\n')
-        ending = ('- KHÔNG chèn đường link. Dòng cuối là câu mời xem chi tiết ở BÌNH LUẬN (vd "Link bài viết đầy đủ em để ở bình luận nhé"), mỗi bài nói một cách khác nhau.\n'
-                  if has_link else '- KHÔNG chèn đường link. Dòng cuối là một câu mời trao đổi / bình luận, mỗi bài nói một cách khác nhau.\n')
+        if link_in_post:
+            ending = ('- KHÔNG tự viết đường link (phần mềm sẽ tự gắn link ngay dưới bài). Dòng cuối là lời mời bấm vào LINK BÊN DƯỚI '
+                      '(vd "Tải về dùng thử tại link bên dưới nhé"), mỗi bài nói một cách khác nhau.\n')
+        elif has_link:
+            ending = ('- KHÔNG chèn đường link. Dòng cuối là câu mời xem chi tiết ở BÌNH LUẬN (vd "Link bài viết đầy đủ em để ở bình luận nhé"), mỗi bài nói một cách khác nhau.\n')
+        else:
+            ending = '- KHÔNG chèn đường link. Dòng cuối là một câu mời trao đổi / bình luận, mỗi bài nói một cách khác nhau.\n'
+        goal_line = (f'- MỤC TIÊU CỦA BÀI: {goal[0]}. {goal[1]}\n' if goal else '')
         prompt = (f'Bạn là kế toán viên đang chia sẻ bài viết trong các nhóm Facebook về kế toán – thuế.\n' + source +
                   f'Viết {len(targets)} bài đăng nhóm, MỖI NHÓM MỘT BÀI theo cách viết được giao:\n{lines}\n\n'
-                  'Yêu cầu cho từng bài:\n' + length +
+                  'Yêu cầu cho từng bài:\n' + goal_line + length +
                   '- Giữ đúng số liệu, số hiệu văn bản, mức phạt có trong nội dung gốc; không bịa.\n'
                   '- Câu chữ, câu mở đầu và bố cục KHÁC HẲN các bài còn lại (không lặp câu, không chỉ đổi vài từ).\n'
                   '- Giọng chia sẻ tự nhiên trong cộng đồng, không quảng cáo lộ liễu, không "inbox", tối đa 1-2 biểu tượng cảm xúc, tối đa 2 hashtag cuối bài.\n'

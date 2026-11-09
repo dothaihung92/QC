@@ -1229,6 +1229,7 @@ def _job_images(refs) -> list:
 class GroupJobIn(BaseModel):
     message: str
     link: str = ""
+    link_mode: str = "post"               # post = gắn link vào cuối bài đăng · comment = bình luận link dưới bài
     images: list[str] = []
     scheduled_at: Optional[int] = None    # None = đăng ngay (nhắc luôn)
     group_ids: list[int]
@@ -1252,13 +1253,15 @@ def add_group_job(body: GroupJobIn):
     if body.auto and not body.accept_risk:
         raise HTTPException(400, RISK_MSG)
     jid = db.add_group_job(body.message.strip(), body.link.strip(), body.scheduled_at or db.now(), ids, auto=body.auto,
-                           images=_job_images(body.images))
+                           images=_job_images(body.images), link_mode=body.link_mode)
     return {"id": jid}
 
 
 class AiJobIn(BaseModel):
     message: str                          # nội dung người dùng soạn — AI viết lại thành mỗi nhóm một bài khác nhau
-    link: str = ""                        # (tùy chọn) link bài viết: bình luận dưới bài sau khi đăng
+    link: str = ""                        # (tùy chọn) link — gắn vào bài hoặc bình luận dưới bài (theo link_mode)
+    link_mode: str = "post"
+    goal: str = "trial"                   # trial = kêu gọi tải & dùng thử phần mềm · service = giới thiệu dịch vụ · share = chia sẻ kiến thức
     group_ids: list[int]
     images: list[str] = []                # ảnh đính kèm (đã tải lên: /media/...)
     scheduled_at: Optional[int] = None
@@ -1285,10 +1288,11 @@ def group_job_ai(body: AiJobIn):
         raise HTTPException(400, RISK_MSG)
     first_line = next((l.strip() for l in text.splitlines() if l.strip()), text)[:90]
     variants = groupwriter.make_variants({"title": first_line, "content": text, "description": text[:400],
-                                          "url": body.link.strip(), "mode": "text"}, groups, key)
+                                          "url": body.link.strip(), "mode": "text", "link_mode": body.link_mode, "goal": body.goal},
+                                         groups, key)
     jid = db.add_group_job(variants.get(groups[0]["id"]) or text, body.link.strip(), body.scheduled_at or db.now(),
                            [g["id"] for g in groups], variants=variants, title=first_line, source="ai",
-                           images=_job_images(body.images))
+                           images=_job_images(body.images), link_mode=body.link_mode)
     db.log("group_job", f"AI viết bài đăng nhóm '{first_line[:50]}' → {len(groups)} nhóm")
     out = {"id": jid, "groups": len(groups), "posting": False, "note": ""}
     if body.post_now:

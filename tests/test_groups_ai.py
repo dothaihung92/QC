@@ -238,8 +238,8 @@ def test_ai_writes_distinct_posts_from_user_text_with_images_and_can_post(client
     monkeypatch.setattr(groupbot, "MARKER", marker)
     monkeypatch.setattr(groupbot, "start_run", lambda jid, visible=None: started.append(jid))
     r = client.post("/api/group-jobs/ai", json={"message": "Nội dung đủ dài để AI viết lại nhé", "group_ids": [a, b], "post_now": True, "accept_risk": True,
-                                                "link": "https://x.vn/bai/"}).json()
-    assert r["posting"] is True and started == [r["id"]] and "BÌNH LUẬN" in seen[-1]       # có link → bình luận dưới bài
+                                                "link": "https://x.vn/bai/", "link_mode": "comment"}).json()
+    assert r["posting"] is True and started == [r["id"]] and "BÌNH LUẬN" in seen[-1]       # chế độ bình luận: AI mời xem link ở bình luận
 
 
 def test_ai_needs_gemini_key(client, monkeypatch):
@@ -255,3 +255,60 @@ def test_group_tab_has_ai_button_and_image_upload():
     html = TestClient(server.app).get("/").text
     assert "gjAi(true)" in html and "✨ AI viết bài &amp; đăng lên nhóm" in html and "gjUpload(this)" in html
     assert "/api/group-jobs/ai" in html
+
+
+def test_link_goes_into_the_post_and_ai_calls_to_download_and_try(client, monkeypatch):
+    a, b = _groups(client, ("A", "111", 5000), ("B", "222", 100))
+    newsagent.save_config({"gemini_key": "k"})
+    seen = []
+
+    def fake(prompt, cfg):
+        seen.append(prompt)
+        return {"posts": [{"n": k, "text": f"Phiên bản {k}: phần mềm giúp kế toán xuất hóa đơn nhanh gấp 5 lần, đỡ sai sót. "
+                                           f"Lời kêu gọi khác số {k * 13}: tải về dùng thử ngay tại link bên dưới nhé!"} for k in range(2)]}
+    monkeypatch.setattr(newsagent, "gemini_json", fake)
+    r = client.post("/api/group-jobs/ai", json={"message": "Phần mềm quản lý hóa đơn điện tử đa công ty, tải hóa đơn hàng loạt, miễn phí dùng thử 30 ngày.",
+                                                "link": "https://dailythuehungphuc.com/phan-mem/", "group_ids": [a, b]})
+    assert r.status_code == 200
+    p = seen[0]
+    assert "MỤC TIÊU CỦA BÀI: KÊU GỌI NGƯỜI XEM TẢI VÀ DÙNG THỬ PHẦN MỀM" in p and "LINK BÊN DƯỚI" in p
+    assert "BÌNH LUẬN" not in p                                                       # mặc định gắn link vào bài, không bình luận
+    job = client.get("/api/group-jobs").json()[0]
+    assert job["link_mode"] == "post" and job["link"] == "https://dailythuehungphuc.com/phan-mem/"
+    seen.clear()
+    client.post("/api/group-jobs/ai", json={"message": "Phần mềm quản lý hóa đơn điện tử đa công ty, miễn phí dùng thử.", "link": "https://x.vn/",
+                                            "link_mode": "comment", "goal": "share", "group_ids": [a]})
+    assert "BÌNH LUẬN" in seen[0] and "CHIA SẺ KIẾN THỨC" in seen[0]
+    assert client.get("/api/group-jobs").json()[0]["link_mode"] == "comment"
+
+
+def test_bot_appends_link_to_the_post_in_post_mode(client, monkeypatch, tmp_path):
+    import contextlib
+    import sys
+    import types
+    a = _groups(client, ("A", "111", 100))[0]
+    jid = db.add_group_job("chung", "https://x.vn/tai/", db.now(), [a], variants={a: "bài riêng cho A"}, link_mode="post")
+    posted, comments = [], []
+
+    class Page:
+        url = ""
+        def goto(self, url, **k): self.url = url
+        def wait_for_timeout(self, ms): pass
+        def screenshot(self, **k): pass
+
+    class Ctx:
+        pages = [Page()]
+        def close(self): pass
+    mod = types.ModuleType("playwright.sync_api")
+    mod.sync_playwright = lambda: contextlib.nullcontext(object())
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", mod)
+    monkeypatch.setattr(groupbot, "_launch", lambda p, visible: Ctx())
+    monkeypatch.setattr(groupbot, "post_to_open_group", lambda page, text, timeout=0, images=None: posted.append(text) or "ok")
+    monkeypatch.setattr(groupbot, "comment_under_post", lambda *a, **k: comments.append(a))
+    monkeypatch.setattr(groupbot, "MARKER", tmp_path / "logged")
+    (tmp_path / "logged").write_text("1")
+    monkeypatch.setattr(groupbot, "_sleep", lambda s: None)
+    groupbot._run_job(jid)
+    assert posted == ["bài riêng cho A\n\nhttps://x.vn/tai/"] and comments == []        # link ở cuối bài, không bình luận
+    with __import__("pytest").raises(groupbot.GroupBotError, match="đã nằm trong bài"):
+        groupbot._comment_job(jid)

@@ -171,6 +171,7 @@ def init():
 GROUP_JOB_EXTRA = {
     "variants": "TEXT NOT NULL DEFAULT '{}'",    # {group_id: nội dung riêng cho nhóm đó} — AI viết lại, mỗi nhóm 1 kiểu
     "states":   "TEXT NOT NULL DEFAULT '{}'",    # {group_id: ok|pending|approved|declined|blocked|failed}
+    "link_mode": "TEXT NOT NULL DEFAULT 'comment'",  # post = gắn link vào cuối bài đăng; comment = bình luận link dưới bài
     "images":   "TEXT NOT NULL DEFAULT '[]'",     # ảnh đính kèm khi đăng nhóm: ["/media/abc.jpg", ...] (tối đa 10)
     "comments": "TEXT NOT NULL DEFAULT '{}'",    # {group_id: 1} — đã bình luận link bài viết dưới bài đăng ở nhóm đó
     "title":    "TEXT NOT NULL DEFAULT ''",      # tiêu đề bài gốc (vd bài SEO) để nhận ra lịch
@@ -503,14 +504,15 @@ def delete_group(gid):
         c.execute("DELETE FROM group_targets WHERE id=?", (gid,))
 
 
-def add_group_job(message, link, scheduled_at, group_ids, auto=False, variants=None, title="", source="", images=None):
+def add_group_job(message, link, scheduled_at, group_ids, auto=False, variants=None, title="", source="", images=None,
+                  link_mode="comment"):
     with conn() as c:
         return c.execute(
-            "INSERT INTO group_jobs(message, link, scheduled_at, group_ids, created_at, auto, variants, title, source, images) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO group_jobs(message, link, scheduled_at, group_ids, created_at, auto, variants, title, source, images, link_mode) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (message, link, scheduled_at, json.dumps(group_ids), now(), int(bool(auto)),
              json.dumps({str(k): v for k, v in (variants or {}).items()}, ensure_ascii=False), title, source,
-             json.dumps(list(images or [])[:10])),
+             json.dumps(list(images or [])[:10]), "post" if link_mode == "post" else "comment"),
         ).lastrowid
 
 

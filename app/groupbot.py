@@ -506,7 +506,8 @@ def _run_job(job_id: int, visible: bool = False):
     if len(todo) > room:
         _log(f"Chỉ còn {room} lượt hôm nay, sẽ đăng {room}/{len(todo)} nhóm.")
         todo = todo[:room]
-    link = job["link"]                                   # link KHÔNG để trong bài đăng — bình luận ngay dưới bài sau khi đăng
+    link = job["link"]
+    in_post = job.get("link_mode") == "post"             # post: link nằm cuối bài đăng · comment: bình luận link ngay dưới bài sau khi đăng
     from . import facebook
     imgs = [p for p in (facebook.local_media(r) for r in job.get("images", [])) if p]    # ảnh đính kèm (đã tải lên phần mềm)
 
@@ -524,7 +525,10 @@ def _run_job(job_id: int, visible: bool = False):
                 try:
                     page.goto(g["url"], wait_until="domcontentloaded", timeout=60000)
                     page.wait_for_timeout(random.randint(*PAUSE_AFTER_LOAD))
-                    result = post_to_open_group(page, g.get("text") or job["message"], images=imgs)   # mỗi nhóm 1 nội dung riêng
+                    body_text = g.get("text") or job["message"]
+                    if in_post and link and link not in body_text:
+                        body_text += "\n\n" + link
+                    result = post_to_open_group(page, body_text, images=imgs)   # mỗi nhóm 1 nội dung riêng
                 except NoComposer as e:                    # nhóm không cho mình đăng → ghi nhận rồi sang nhóm khác
                     db.set_group_state(job_id, g["id"], "blocked")
                     _log(f"⛔ «{g['name']}»: {e} — bỏ qua nhóm này")
@@ -537,9 +541,9 @@ def _run_job(job_id: int, visible: bool = False):
                 db.set_group_state(job_id, g["id"], result)          # ok = lên bài ngay; pending = chờ quản trị viên duyệt
                 db.log("group_post", f"lịch {job_id} → {g['name']} ({result})")
                 _log(f"✅ «{g['name']}»" + (" — đang chờ quản trị viên duyệt" if result == "pending" else ""))
-                if link and result == "ok":
+                if link and not in_post and result == "ok":
                     _comment_link(page, job_id, g, link)
-                elif link and result == "pending":
+                elif link and not in_post and result == "pending":
                     _log(f"💬 «{g['name']}»: link bài viết sẽ được bình luận sau khi bài được duyệt (bấm '🔍 Kiểm tra duyệt bài')")
                 if i < len(todo) - 1 and not state["stop"]:
                     wait = random.randint(config.GROUPBOT_DELAY_MIN, max(config.GROUPBOT_DELAY_MIN, config.GROUPBOT_DELAY_MAX))
@@ -706,8 +710,8 @@ def _comment_job(job_id: int):
     job = next((j for j in db.list_group_jobs() if j["id"] == job_id), None)
     if not job:
         raise GroupBotError("Không có lịch này")
-    if not job["link"]:
-        raise GroupBotError("Lịch này không có link bài viết để bình luận")
+    if not job["link"] or job.get("link_mode") == "post":
+        raise GroupBotError("Lịch này không dùng bình luận link (link đã nằm trong bài đăng)" if job["link"] else "Lịch này không có link để bình luận")
     todo = [g for g in job["groups"] if g["state"] in ("ok", "approved") and not g["commented"]]
     if not todo:
         _log("Không có nhóm nào cần bình luận link.")
@@ -782,7 +786,7 @@ def _check_job(job_id: int):
                     if key and key in _page_text(page, base + "/my_posted_content"):
                         db.set_group_state(job_id, g["id"], "approved")
                         _log(f"✔ «{g['name']}»: bài ĐÃ ĐƯỢC DUYỆT và đang hiển thị")
-                        if job["link"] and not g.get("commented"):
+                        if job["link"] and job.get("link_mode") != "post" and not g.get("commented"):
                             _comment_link(page, job_id, g, job["link"])
                     elif key and key in _page_text(page, base + "/my_pending_content"):
                         _log(f"⏳ «{g['name']}»: vẫn đang chờ quản trị viên duyệt")
