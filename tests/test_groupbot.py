@@ -47,7 +47,23 @@ MY_POSTS = """<!doctype html><meta charset=utf-8>
   <div role="textbox" aria-label="Viết bình luận..." contenteditable="true" id="cbox" class="cb"></div><div id="comments"></div></div>
 <script>cbox.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault();
   comments.append(cbox.innerText.trim()); cbox.innerText = ''; } });</script>"""
+# Giống Facebook thật: trang "Nội dung của bạn" chỉ có nút "Xem trong nhóm"; ô bình luận nằm ở trang riêng của bài
+MY_POSTS_REAL = """<!doctype html><meta charset=utf-8>
+<div role="article">Bài khác của người khác ở nhóm này<a href="/ok/posts/999">Xem trong nhóm</a></div>
+<div role="article">Chính phủ giảm 30% thuế TNDN cho doanh nghiệp nhỏ giai đoạn 2026-2027 nhé!
+  <a role="link" href="/ok/posts/123">Xem trong nhóm</a></div>"""
+MY_POSTS_BTN = MY_POSTS_REAL.replace('<a role="link" href="/ok/posts/123">Xem trong nhóm</a>',
+                                     '<div role="button" onclick="location.href=\'/ok/posts/123\'">Xem trong nhóm</div>')
+POST_PAGE = """<!doctype html><meta charset=utf-8>
+<div role="article">Chính phủ giảm 30% thuế TNDN cho doanh nghiệp nhỏ giai đoạn 2026-2027 nhé!
+  <div role="textbox" aria-label="Viết bình luận công khai..." contenteditable="true" id="cbox"></div><div id="comments"></div></div>
+<script>cbox.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault();
+  comments.append(cbox.innerText.trim()); cbox.innerText = ''; } });</script>"""
 PAGES = {
+    "/real/my_posted_content": MY_POSTS_REAL,
+    "/viabtn/my_posted_content": MY_POSTS_BTN,
+    "/ok/posts/123": POST_PAGE,
+    "/ok/posts/999": "<!doctype html><meta charset=utf-8><div role='article'>Bài khác</div>",
     "/ok": COMPOSER_PAGE % "",
     "/lexical": LEXICAL_PAGE,
     "/deaf": DEAF_PAGE,
@@ -265,3 +281,17 @@ def test_stops_with_clear_message_when_editor_accepts_nothing(page, site):
     with pytest.raises(groupbot.GroupBotError, match="không nhận chữ"):
         groupbot.post_to_open_group(page, "Nội dung thử", timeout=3000)
     assert page.locator("#posted").inner_text() == ""
+
+
+def test_comment_opens_post_via_view_in_group_then_comments(page, site):
+    for base in ("/real", "/viabtn"):                                  # nút "Xem trong nhóm" là liên kết hoặc nút bấm
+        page.goto("about:blank")
+        groupbot.comment_under_post(page, site + base, POST_TEXT, "https://dailythuehungphuc.com/giam-30-thue/", timeout=4000)
+        assert page.url.endswith("/ok/posts/123")                      # đã mở đúng bài (không phải bài 999 của người khác)
+        assert page.locator("#comments").inner_text() == "https://dailythuehungphuc.com/giam-30-thue/"
+    assert any("Xem trong nhóm" in l or "mở bài viết" in l for l in groupbot.state["log"])
+
+
+def test_comment_fails_fast_with_clear_message_when_no_way_to_comment(page, site):
+    with pytest.raises(groupbot.GroupBotError, match="Xem trong nhóm"):
+        groupbot.comment_under_post(page, site + "/nocmt", POST_TEXT, "https://x.vn", timeout=1500)

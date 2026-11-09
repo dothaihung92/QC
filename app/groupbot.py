@@ -16,6 +16,7 @@ import shutil
 import sqlite3
 import tempfile
 from pathlib import Path
+from urllib.parse import urljoin
 import re
 import subprocess
 import sys
@@ -545,10 +546,21 @@ def _first_line(text: str) -> str:
     return (lines[0] if lines else (text or "").strip())[:50]
 
 
+VIEW_IN_GROUP = re.compile(r"Xem trong nhóm|View in group|Xem bài viết|View post", re.I)
+
+
+def _comment_box_in(art, timeout):
+    box = art.get_by_role("textbox", name=COMMENT_BOX).first
+    box.wait_for(state="visible", timeout=timeout)
+    return box
+
+
 def comment_under_post(page, group_url: str, post_text: str, link: str, timeout: int = 0) -> None:
-    """Mở 'Nội dung của bạn' ở nhóm, tìm đúng bài vừa đăng (theo nội dung) và bình luận link dưới bài đó."""
+    """Mở 'Nội dung của bạn' ở nhóm, tìm đúng bài vừa đăng (theo nội dung), mở bài trong nhóm (trang này không có ô bình luận,
+    chỉ có nút 'Xem trong nhóm') rồi bình luận link dưới bài đó."""
     timeout = timeout or STEP_TIMEOUT
     key = _first_line(post_text)
+    _log("… mở 'Nội dung của bạn' để tìm bài vừa đăng")
     page.goto(group_url.rstrip("/") + "/my_posted_content", wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(random.randint(*PAUSE_AFTER_LOAD))
     _check_session(page)
@@ -557,14 +569,53 @@ def comment_under_post(page, group_url: str, post_text: str, link: str, timeout:
         art.wait_for(state="visible", timeout=timeout)
     except Exception:  # noqa: BLE001
         raise GroupBotError("Không thấy bài vừa đăng trong mục 'Nội dung của bạn' (có thể chưa kịp hiện)")
-    box = art.get_by_role("textbox", name=COMMENT_BOX).first
-    try:
-        box.wait_for(state="visible", timeout=timeout)
+    box = None
+    try:                                              # có ô bình luận ngay tại đây thì dùng luôn
+        box = _comment_box_in(art, 2500)
     except Exception:  # noqa: BLE001
-        raise GroupBotError("Không thấy ô bình luận dưới bài (nhóm tắt bình luận / Facebook đổi giao diện)")
+        box = None
+    if box is None:                                   # thường gặp: chỉ có nút "Xem trong nhóm" → mở bài rồi bình luận
+        _log("… mở bài viết trong nhóm")
+        view = art.locator("a, [role='button']").filter(has_text=VIEW_IN_GROUP).first
+        try:
+            view.wait_for(state="visible", timeout=min(timeout, 8000))
+        except Exception:  # noqa: BLE001
+            raise GroupBotError("Không thấy nút 'Xem trong nhóm' và cũng không có ô bình luận (nhóm tắt bình luận / Facebook đổi giao diện)")
+        href = None
+        try:
+            href = view.get_attribute("href", timeout=1500)
+        except Exception:  # noqa: BLE001
+            pass
+        if href:
+            page.goto(urljoin(page.url, href), wait_until="domcontentloaded", timeout=60000)
+        else:
+            view.click()
+        page.wait_for_timeout(random.randint(*PAUSE_AFTER_LOAD))
+        _check_session(page)
+        post_art = page.locator("[role='article']").filter(has_text=key).first
+        try:
+            box = _comment_box_in(post_art, timeout)
+        except Exception:  # noqa: BLE001
+            # trang riêng của bài (…/posts/ID): bài chính là bài đầu tiên nên dùng ô bình luận đầu tiên
+            if re.search(r"/(posts|permalink)/\d+", page.url):
+                try:
+                    box = page.get_by_role("textbox", name=COMMENT_BOX).first
+                    box.wait_for(state="visible", timeout=timeout)
+                except Exception:  # noqa: BLE001
+                    box = None
+        if box is None:
+            raise GroupBotError("Không thấy ô bình luận dưới bài (nhóm tắt bình luận / Facebook đổi giao diện)")
+    _log("… gõ link vào ô bình luận")
     box.click()
     page.keyboard.insert_text(link)
     page.wait_for_timeout(1500)                      # để Facebook dựng khung xem trước của link
+    if not _has_text(box, link[:14]):                # ô không nhận chữ chèn trực tiếp → dán
+        try:
+            box.evaluate("""(el, t) => { el.focus(); const dt = new DataTransfer(); dt.setData('text/plain', t);
+                el.dispatchEvent(new ClipboardEvent('paste', {clipboardData: dt, bubbles: true, cancelable: true})); }""", link)
+        except Exception:  # noqa: BLE001
+            pass
+        page.wait_for_timeout(800)
     page.keyboard.press("Enter")
     page.wait_for_timeout(PAUSE_AFTER_POST)
     left = ""
@@ -580,7 +631,9 @@ def _comment_link(page, job_id: int, g: dict, link: str) -> bool:
     try:
         comment_under_post(page, g["url"], g.get("text") or "", link)
     except Exception as e:  # noqa: BLE001
-        _log(f"⚠ «{g['name']}»: đã đăng bài nhưng CHƯA bình luận được link ({str(e)[:150]}) — bấm '💬 Copy link' rồi dán vào bình luận")
+        _screenshot(page)
+        _log(f"⚠ «{g['name']}»: đã đăng bài nhưng CHƯA bình luận được link ({str(e)[:150]}) — bấm '💬 Copy link' rồi dán vào bình luận. "
+             "Ảnh chụp lỗi lưu ở data/groupbot-errors")
         return False
     db.mark_group_commented(job_id, g["id"])
     _log(f"💬 «{g['name']}»: đã bình luận link bài viết dưới bài")
