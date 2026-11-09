@@ -442,10 +442,14 @@
           bạn chỉ cần dán, bấm đăng rồi bấm <b>✓ Đã đăng</b>. Mỗi nhóm khoảng 10 giây.
           Chỉ đăng ở nhóm cho phép quảng cáo.</p>
         <label>Nội dung</label>
-        <textarea id="gjMsg" style="min-height:180px" placeholder="Nội dung bài sẽ đăng vào nhóm..."></textarea>
+        <textarea id="gjMsg" style="min-height:180px" placeholder="Nội dung bài sẽ đăng vào nhóm... (điền ý chính rồi bấm ✨ AI viết bài — AI sẽ viết mỗi nhóm một bài khác nhau)"></textarea>
         <div class="btns" style="margin-top:6px">
           <button class="btn" onclick="gjFromPosts()">↙ Lấy từ bài ở tab Bài đăng</button>
         </div>
+        <label>Ảnh đính kèm (tùy chọn) <span class="muted small">— tối đa 10 ảnh, được tải lên cùng bài ở mỗi nhóm</span></label>
+        <div id="gjImgs" class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:6px"></div>
+        <div class="btns" style="margin-top:0"><label class="btn" style="cursor:pointer">📁 Chọn ảnh từ máy
+          <input type="file" accept="image/*" multiple hidden onchange="gjUpload(this)"></label></div>
         <label>Link kèm theo (tùy chọn)</label><input id="gjLink" placeholder="https://dailythuehungphuc.com/...">
         <label>Đăng vào các nhóm</label>
         <div id="gjGroups" class="small"></div>
@@ -453,7 +457,12 @@
         <input id="gjTime" type="datetime-local">
         <label style="font-weight:400"><input type="checkbox" id="gjAuto" style="width:auto">
           Đến giờ <b>tự đăng bằng trình duyệt</b> (cần đã đăng nhập Facebook ở khung 🤖, máy bật và phần mềm đang chạy)</label>
-        <div class="btns"><button class="btn pri" onclick="saveGroupJob()">⏰ Hẹn giờ nhắc</button>
+        <div class="btns" style="margin-bottom:0">
+          <button class="btn pri" id="gjAiPost" onclick="gjAi(true)" title="AI viết mỗi nhóm một bài khác nhau (kèm ảnh) rồi tự mở trình duyệt đăng lên các nhóm đã chọn">✨ AI viết bài &amp; đăng lên nhóm</button>
+          <button class="btn" id="gjAiPrev" onclick="gjAi(false)" title="AI viết xong chỉ tạo lịch để bạn xem và sửa, chưa đăng">✨ AI viết (xem trước, chưa đăng)</button></div>
+        <p class="muted small" style="margin:4px 0 8px">AI giữ đúng ý và thông tin của bạn nhưng mỗi nhóm một câu chữ, mở bài, bố cục khác nhau (không đăng y hệt — tránh bị Facebook coi là spam).
+          Nhóm đông thành viên nhất được đăng trước. Có link ở ô trên thì link được bình luận dưới bài.</p>
+        <div class="btns"><button class="btn" onclick="saveGroupJob()">⏰ Hẹn giờ nhắc (đăng đúng nội dung này, không qua AI)</button>
           <button class="btn" id="notifBtn" onclick="enableNotify()">🔔 Bật thông báo trình duyệt</button></div>
       </div>
     </div>
@@ -1434,14 +1443,54 @@ async function delGroup(id) { if (!confirm('Xóa nhóm này khỏi danh sách?')
 function gjFromPosts() { const t = $('pMsg').value.trim();
   if (!t) return toast('Tab Bài đăng chưa có nội dung — soạn bài ở đó trước');
   $('gjMsg').value = t; $('gjLink').value = $('pLink').value.trim(); }
+// ---- ảnh đính kèm + AI viết bài đăng nhóm
+let GJ_IMGS = [];
+function gjImgRender() {
+  $('gjImgs').innerHTML = GJ_IMGS.map((u, i) => `<div style="position:relative;width:72px;height:72px"><img src="${esc(u)}" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--line)">
+    <button class="btn danger" style="position:absolute;top:-6px;right:-6px;padding:0 6px;line-height:18px;min-height:0" onclick="gjImgDel(${i})">×</button></div>`).join('');
+}
+function gjImgDel(i) { GJ_IMGS.splice(i, 1); gjImgRender(); }
+async function gjUpload(input) {
+  for (const f of [...input.files]) {
+    if (GJ_IMGS.length >= 10) { toast('Tối đa 10 ảnh'); break; }
+    if (f.size > 8 * 1024 * 1024) { toast('⚠ ' + f.name + ' lớn hơn 8 MB'); continue; }
+    const data = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(f); });
+    const r = await api('/api/media', { method: 'POST', body: { data } });
+    GJ_IMGS.push(r.url);
+  }
+  input.value = ''; gjImgRender();
+}
+async function gjAi(post) {
+  const ids = [...document.querySelectorAll('#gjGroups input:checked')].map(i => +i.value);
+  if (!$('gjMsg').value.trim()) return toast('Điền nội dung vào khung "Nội dung" trước rồi bấm ✨ AI viết bài');
+  if (!ids.length) return toast('Tick chọn ít nhất 1 nhóm ở mục "Đăng vào các nhóm"');
+  if (post) {
+    if (!GB_RISK()) return toast('Tick "Tôi hiểu và chấp nhận rủi ro" ở khung 🤖 trước');
+    if (!GBS?.logged_in) return toast('Bấm "Đăng nhập Facebook" ở khung 🤖 trước');
+    if (!confirm(`AI sẽ viết ${ids.length} bài KHÁC NHAU rồi tự mở trình duyệt đăng vào ${ids.length} nhóm${GJ_IMGS.length ? ' kèm ' + GJ_IMGS.length + ' ảnh' : ''}. Đừng đóng cửa sổ trình duyệt đó khi đang chạy. Tiếp tục?`)) return;
+  }
+  const t = $('gjTime').value, at = t ? Math.floor(new Date(t).getTime() / 1000) : null;
+  const btn = $(post ? 'gjAiPost' : 'gjAiPrev'), old = btn.innerHTML;
+  $('gjAiPost').disabled = $('gjAiPrev').disabled = true; btn.textContent = '⏳ AI đang viết bài...';
+  try {
+    let key = ''; try { key = localStorage.getItem('gkey') || ''; } catch {}
+    const r = await api('/api/group-jobs/ai', { method: 'POST', body: { message: $('gjMsg').value, link: $('gjLink').value.trim(), group_ids: ids,
+      images: GJ_IMGS, scheduled_at: at, gemini_key: key, post_now: post, accept_risk: post } });
+    toast(r.posting ? `✨ AI đã viết ${r.groups} bài khác nhau — đang đăng lên nhóm (xem tiến trình ở khung 🤖)`
+      : r.note ? `✨ Đã viết ${r.groups} bài nhưng chưa đăng được: ${r.note}` : `✨ AI đã viết ${r.groups} bài khác nhau — xem và sửa ở "Lịch đăng nhóm" bên dưới`);
+    $('gjMsg').value = ''; $('gjLink').value = ''; GJ_IMGS = []; gjImgRender();
+    loadGroupJobs(); loadGroupBot(); pollBadges();
+  } catch {} finally { $('gjAiPost').disabled = $('gjAiPrev').disabled = false; btn.innerHTML = old; }
+}
 async function saveGroupJob() {
   const ids = [...document.querySelectorAll('#gjGroups input:checked')].map(i => +i.value);
   const t = $('gjTime').value;
   const at = t ? Math.floor(new Date(t).getTime() / 1000) : null;
   const auto = $('gjAuto').checked;
   if (auto && !GB_RISK()) return toast('Tick "Tôi hiểu và chấp nhận rủi ro" ở khung 🤖 trước');
-  await api('/api/group-jobs', { method: 'POST', body: { message: $('gjMsg').value, link: $('gjLink').value.trim(),
+  await api('/api/group-jobs', { method: 'POST', body: { message: $('gjMsg').value, link: $('gjLink').value.trim(), images: GJ_IMGS,
                                                          scheduled_at: at, group_ids: ids, auto, accept_risk: auto } });
+  GJ_IMGS = []; gjImgRender();
   toast(at && at > Date.now() / 1000 ? '⏰ Đã hẹn giờ nhắc' : '🔔 Đến giờ rồi — xem lịch bên dưới');
   $('gjMsg').value = ''; $('gjLink').value = ''; $('gjTime').value = '';
   loadGroupJobs(); pollBadges();
@@ -1521,6 +1570,8 @@ async function loadGroupJobs() {
       <div class="gsum small"><span class="pill p-ok">Được phép / đã duyệt: ${cnt(['ok', 'approved'])}</span>
         <span class="pill p-warn">Chờ duyệt: ${pend}</span><span class="pill p-err">Từ chối / không cho đăng: ${cnt(['declined', 'blocked', 'failed'])}</span>
         <span class="pill p-info">Chưa đăng: ${cnt([''])}</span></div>
+      ${(j.images || []).length ? `<div class="row" style="gap:6px;margin:4px 0">${j.images.map(u => `<img src="${esc(u)}" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--line)">`).join('')}
+        <span class="small muted" style="align-self:center">${j.images.length} ảnh đính kèm khi đăng</span></div>` : ''}
       ${j.link ? `<div class="small muted">🔗 Link bài viết (đăng ở <b>bình luận</b> dưới bài, không nằm trong bài): ${esc(j.link)}</div>` : ''}
       ${j.groups.map((g, k) => { const [sl, sc] = GSTATE[g.state] || GSTATE['']; return `<div class="grp">
         <b>${k + 1}. ${esc(g.name)} ${g.members ? `<span class="muted small" style="font-weight:400">· ${fmtNum(g.members)} thành viên</span>` : ''}</b>

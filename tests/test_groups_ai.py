@@ -96,7 +96,7 @@ def test_bot_posts_each_group_its_own_text_biggest_first_and_skips_blocked(clien
         pages = [Page()]
         def close(self): pass
 
-    def fake_post(page, text, timeout=0):
+    def fake_post(page, text, timeout=0, images=None):
         if page.url.endswith("333"):
             raise groupbot.NoComposer("không có ô viết bài")
         posted.append((page.url.rsplit("/", 1)[-1], text))
@@ -199,3 +199,59 @@ def test_group_posts_are_short_and_link_is_left_for_comments(client, monkeypatch
         assert g["commented"] is False
     client.post(f"/api/group-jobs/{job['id']}/commented", json={"group_id": job["groups"][0]["id"], "state": "1"})
     assert client.get("/api/group-jobs").json()[0]["groups"][0]["commented"] is True
+
+
+def test_ai_writes_distinct_posts_from_user_text_with_images_and_can_post(client, monkeypatch):
+    import base64
+    a, b, c = _groups(client, ("Nhỏ", "111", 1000), ("Lớn", "222", 90000), ("Vừa", "333", 20000))
+    newsagent.save_config({"gemini_key": "k"})
+    png = base64.b64encode(b"\x89PNG\r\n\x1a\n").decode()
+    img = client.post("/api/media", json={"data": "data:image/png;base64," + png}).json()["url"]
+    seen = []
+
+    def fake(prompt, cfg):
+        seen.append(prompt)
+        return {"posts": [{"n": k, "text": f"Bản {k}: dịch vụ kế toán trọn gói chỉ 1 triệu mỗi tháng, liên hệ 0986883137 để được tư vấn. "
+                                           f"Cách nói khác biệt số {k * 11} dành cho nhóm này nhé anh chị."} for k in range(3)]}
+    monkeypatch.setattr(newsagent, "gemini_json", fake)
+    assert client.post("/api/group-jobs/ai", json={"message": "ngắn", "group_ids": [a]}).status_code == 400           # nội dung quá ngắn
+    assert client.post("/api/group-jobs/ai", json={"message": "Dịch vụ kế toán trọn gói 1 triệu/tháng, liên hệ 0986883137.", "group_ids": []}).status_code == 400
+    r = client.post("/api/group-jobs/ai", json={"message": "Dịch vụ kế toán trọn gói 1 triệu/tháng, liên hệ 0986883137.",
+                                                "group_ids": [a, b, c], "images": [img, "/media/khong-co.png", "https://x.vn/a.jpg"]})
+    assert r.status_code == 200 and r.json()["groups"] == 3 and r.json()["posting"] is False
+    p = seen[0]
+    assert "NỘI DUNG GỐC do người dùng soạn" in p and "bình luận / trao đổi" not in p and "BÌNH LUẬN" not in p      # không có link → không nhắc bình luận
+    job = client.get("/api/group-jobs").json()[0]
+    assert job["images"] == [img] and job["source"] == "ai"                              # chỉ giữ ảnh đã tải lên phần mềm
+    assert [g["name"] for g in job["groups"]] == ["Lớn", "Vừa", "Nhỏ"]                     # nhóm đông trước
+    texts = [g["text"] for g in job["groups"]]
+    assert len(set(texts)) == 3 and all(g["custom"] for g in job["groups"])
+    # đăng luôn: cần xác nhận rủi ro; chưa đăng nhập Facebook thì vẫn giữ lịch và báo lý do
+    assert client.post("/api/group-jobs/ai", json={"message": "Nội dung đủ dài để AI viết lại nhé", "group_ids": [a], "post_now": True}).status_code == 400
+    r = client.post("/api/group-jobs/ai", json={"message": "Nội dung đủ dài để AI viết lại nhé", "group_ids": [a], "post_now": True, "accept_risk": True}).json()
+    assert r["posting"] is False and r["note"]
+    started = []
+    import tempfile
+    from pathlib import Path
+    marker = Path(tempfile.mkdtemp()) / "logged"
+    marker.write_text("1")
+    monkeypatch.setattr(groupbot, "MARKER", marker)
+    monkeypatch.setattr(groupbot, "start_run", lambda jid, visible=None: started.append(jid))
+    r = client.post("/api/group-jobs/ai", json={"message": "Nội dung đủ dài để AI viết lại nhé", "group_ids": [a, b], "post_now": True, "accept_risk": True,
+                                                "link": "https://x.vn/bai/"}).json()
+    assert r["posting"] is True and started == [r["id"]] and "BÌNH LUẬN" in seen[-1]       # có link → bình luận dưới bài
+
+
+def test_ai_needs_gemini_key(client, monkeypatch):
+    a = _groups(client, ("A", "111", 0))[0]
+    newsagent.save_config({"gemini_key": ""})
+    cfg = newsagent.get_config()
+    monkeypatch.setattr(newsagent, "get_config", lambda: dict(cfg, gemini_key=""))
+    r = client.post("/api/group-jobs/ai", json={"message": "Nội dung đủ dài để AI viết lại nhé", "group_ids": [a]})
+    assert r.status_code == 400 and "Gemini key" in r.json()["detail"]
+
+
+def test_group_tab_has_ai_button_and_image_upload():
+    html = TestClient(server.app).get("/").text
+    assert "gjAi(true)" in html and "✨ AI viết bài &amp; đăng lên nhóm" in html and "gjUpload(this)" in html
+    assert "/api/group-jobs/ai" in html

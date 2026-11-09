@@ -70,7 +70,16 @@ DIALOG_POST = """<!doctype html><meta charset=utf-8>
 <script>cbox.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault();
   comments.append(cbox.innerText.trim()); cbox.innerText = ''; } });</script>"""
 MY_POSTS_DLG = MY_POSTS_REAL.replace("/ok/posts/123", "/ok/dialogpost?multi_permalinks=2266")
+# Soạn bài có nút "Ảnh/video": bấm thì hiện ô chọn tệp; chọn xong hiện ảnh xem trước (blob:)
+PHOTO_PAGE = COMPOSER_PAGE.replace('<div role="button" aria-label="Đăng"', '<div role="button" aria-label="Ảnh/video" id="photobtn">Ảnh/video</div><div id="thumbs"></div>\n  <div role="button" aria-label="Đăng"').replace(
+    "openbtn.onclick", """photobtn.onclick = () => { if (document.getElementById('fin')) return; const i = document.createElement('input');
+  i.type = 'file'; i.multiple = true; i.id = 'fin'; i.hidden = true; dlg.append(i);
+  i.onchange = () => { for (const f of i.files) { const im = document.createElement('img'); im.src = URL.createObjectURL(f); thumbs.append(im); }
+    window.__files = [...i.files].map(f => f.name); }; };
+openbtn.onclick""", 1) % ""
+NOPHOTO_PAGE = COMPOSER_PAGE % ""
 PAGES = {
+    "/photo": PHOTO_PAGE,
     "/dlg/my_posted_content": MY_POSTS_DLG,
     "/ok/dialogpost": DIALOG_POST,
     "/real/my_posted_content": MY_POSTS_REAL,
@@ -266,7 +275,7 @@ def test_run_job_posts_without_link_then_comments_it(site, headless, monkeypatch
     jid, gids = _setup_job(site, ["/ok", "/pending"])
     posts, comments = [], []
     real = groupbot.post_to_open_group
-    monkeypatch.setattr(groupbot, "post_to_open_group", lambda page, text, timeout=0: posts.append(text) or real(page, text, timeout))
+    monkeypatch.setattr(groupbot, "post_to_open_group", lambda page, text, timeout=0, images=None: posts.append(text) or real(page, text, timeout, images))
     monkeypatch.setattr(groupbot, "comment_under_post", lambda page, url, text, link, timeout=0: comments.append((url.rsplit("/", 1)[-1], link)))
     groupbot._run_job(jid)
     assert all("https://x.vn/bai" not in t for t in posts)                         # link không nằm trong bài đăng
@@ -315,3 +324,26 @@ def test_comment_in_post_dialog_with_comment_under_name_box(page, site):
     assert "multi_permalinks" in page.url
     assert page.locator("#comments").inner_text() == "https://dailythuehungphuc.com/giam-30-thue/"       # vào ô trong hộp thoại của bài
     assert page.locator("#other").inner_text() == ""                                                   # không vào ô bình luận khác
+
+
+def test_images_are_attached_to_the_post(page, site, tmp_path):
+    import base64
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")
+    files = []
+    for k in range(2):
+        f = tmp_path / f"anh{k}.png"
+        f.write_bytes(png)
+        files.append(f)
+    page.goto(site + "/photo")
+    assert groupbot.post_to_open_group(page, "Bài có ảnh", timeout=4000, images=files) == "ok"
+    assert page.evaluate("window.__files") == ["anh0.png", "anh1.png"]                    # cả 2 ảnh được chọn trong hộp soạn bài
+    assert page.locator("#thumbs img").count() == 2 and page.locator("#posted").inner_text() == "Bài có ảnh"
+    assert any("đính kèm 2 ảnh" in l for l in groupbot.state["log"])
+
+
+def test_attach_fails_clearly_when_group_has_no_photo_button(page, site, tmp_path):
+    f = tmp_path / "a.png"
+    f.write_bytes(b"x")
+    page.goto(site + "/ok")
+    with pytest.raises(groupbot.GroupBotError, match="Ảnh/video"):
+        groupbot.post_to_open_group(page, "Bài", timeout=3000, images=[f])

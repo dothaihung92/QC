@@ -52,11 +52,26 @@ def _shorten(t: str, limit: int = MAX_CHARS) -> str:
     return out if len(out) <= limit * 1.25 else out[:limit].rsplit(" ", 1)[0].rstrip(",;:") + "…"
 
 
+HOOKS = ["❓ Doanh nghiệp của bạn đã nắm rõ điều này chưa?", "⚠️ Lưu ý quan trọng cho kế toán và chủ doanh nghiệp:",
+         "📌 Chia sẻ để anh chị em trong nhóm cùng tham khảo:", "💡 Một kinh nghiệm thực tế đáng để lưu lại:",
+         "📢 Cập nhật mới cho anh chị làm kế toán – thuế:", "🔎 Nhiều doanh nghiệp vẫn đang làm sai điểm này:",
+         "✅ Ghi nhớ nhanh trước khi kê khai:"]
+
+
+def hooks_for(k: int) -> str:
+    return HOOKS[k % len(HOOKS)]
+
+
 def _fallback(article: dict, groups: list) -> dict:
     """Không có AI: ghép mở bài khác nhau + ý chính của bài."""
     title = article.get("title", "")
+    text_mode = article.get("mode") == "text"
     desc = _plain(article.get("description") or article.get("content", ""))
-    desc = (desc[:200].rsplit(" ", 1)[0] + "…") if len(desc) > 200 else desc
+    lim = 420 if text_mode else 200
+    desc = (desc[:lim].rsplit(" ", 1)[0] + "…") if len(desc) > lim else desc
+    if text_mode:                                       # nội dung do người dùng viết: giữ nguyên ý, chỉ đổi câu mở đầu / kết
+        note = lambda k: LINK_NOTE[k % len(LINK_NOTE)] if article.get("url") else ""      # noqa: E731
+        return {g["id"]: "\n".join(x for x in (hooks_for(k), desc, note(k)) if x) for k, g in enumerate(groups)}
     hooks = ["❓ Doanh nghiệp của bạn đã nắm rõ điều này chưa?", "⚠️ Lưu ý quan trọng cho kế toán và chủ doanh nghiệp:",
              "📌 Chia sẻ để anh chị em trong nhóm cùng tham khảo:", "💡 Một kinh nghiệm thực tế đáng để lưu lại:",
              "📢 Cập nhật mới cho anh chị làm kế toán – thuế:", "🔎 Nhiều doanh nghiệp vẫn đang làm sai điểm này:",
@@ -75,21 +90,27 @@ def make_variants(article: dict, groups: list, gemini_key: str = "", model: str 
     if not cfg.get("gemini_key"):
         return _fallback(article, groups)
     body = _plain(article.get("content", ""))[:5000]
+    text_mode = article.get("mode") == "text"
+    has_link = bool(article.get("url"))
 
     def ask(targets, avoid=None):
         lines = "\n".join(f'{k}. Nhóm "{g["name"]}" — cách viết: {STYLES[(g.get("_k", k)) % len(STYLES)]}'
                           for k, g in enumerate(targets))
-        prompt = (f'Bạn là kế toán viên đang chia sẻ bài viết trong các nhóm Facebook về kế toán – thuế.\n'
+        source = (f'NỘI DUNG GỐC do người dùng soạn (là ý cần truyền tải, viết lại cho hay hơn nhưng giữ đúng ý):\n{body}\n\n' if text_mode else
                   f'BÀI GỐC: "{article.get("title", "")}" (từ khóa chính: "{article.get("keyword", "")}").\n'
-                  f'Tóm tắt: {article.get("description", "")}\nNội dung: {body}\n\n'
-                  f'Viết {len(targets)} bài đăng nhóm, MỖI NHÓM MỘT BÀI theo cách viết được giao:\n{lines}\n\n'
-                  'Yêu cầu cho từng bài:\n'
+                  f'Tóm tắt: {article.get("description", "")}\nNội dung: {body}\n\n')
+        length = ('- Độ dài vừa phải: 4-8 dòng, dưới 700 ký tự; GIỮ ĐỦ các ý chính, số liệu, thông tin liên hệ / ưu đãi có trong nội dung gốc.\n' if text_mode else
                   '- NGẮN GỌN: tối đa 4 dòng ngắn, tổng dưới 380 ký tự — chỉ nêu Ý CHÍNH (điều gì thay đổi / kết luận / con số quan trọng nhất), '
-                  'không giải thích dài dòng, không liệt kê hết chi tiết (chi tiết nằm ở bài viết).\n'
-                  '- Giữ đúng số liệu, số hiệu văn bản, mức phạt có trong bài gốc; không bịa.\n'
+                  'không giải thích dài dòng, không liệt kê hết chi tiết (chi tiết nằm ở bài viết).\n')
+        ending = ('- KHÔNG chèn đường link. Dòng cuối là câu mời xem chi tiết ở BÌNH LUẬN (vd "Link bài viết đầy đủ em để ở bình luận nhé"), mỗi bài nói một cách khác nhau.\n'
+                  if has_link else '- KHÔNG chèn đường link. Dòng cuối là một câu mời trao đổi / bình luận, mỗi bài nói một cách khác nhau.\n')
+        prompt = (f'Bạn là kế toán viên đang chia sẻ bài viết trong các nhóm Facebook về kế toán – thuế.\n' + source +
+                  f'Viết {len(targets)} bài đăng nhóm, MỖI NHÓM MỘT BÀI theo cách viết được giao:\n{lines}\n\n'
+                  'Yêu cầu cho từng bài:\n' + length +
+                  '- Giữ đúng số liệu, số hiệu văn bản, mức phạt có trong nội dung gốc; không bịa.\n'
                   '- Câu chữ, câu mở đầu và bố cục KHÁC HẲN các bài còn lại (không lặp câu, không chỉ đổi vài từ).\n'
                   '- Giọng chia sẻ tự nhiên trong cộng đồng, không quảng cáo lộ liễu, không "inbox", tối đa 1-2 biểu tượng cảm xúc, tối đa 2 hashtag cuối bài.\n'
-                  '- KHÔNG chèn đường link. Dòng cuối là câu mời xem chi tiết ở BÌNH LUẬN (vd "Link bài viết đầy đủ em để ở bình luận nhé"), mỗi bài nói một cách khác nhau.\n'
+                  + ending
                   + (f'- TRÁNH viết giống các bài đã có: {" || ".join(_plain(a)[:200] for a in avoid)}\n' if avoid else '')
                   + 'Chỉ trả về JSON {"posts":[{"n":0,"text":"..."}]}')
         out = newsagent.gemini_json(prompt, cfg)
@@ -99,7 +120,7 @@ def make_variants(article: dict, groups: list, gemini_key: str = "", model: str 
                 n = int(p.get("n"))
             except (TypeError, ValueError):
                 continue
-            t = _shorten(_clean(p.get("text", ""), article.get("url", "")))
+            t = _shorten(_clean(p.get("text", ""), article.get("url", "")), 900 if text_mode else MAX_CHARS)
             if 0 <= n < len(targets) and len(t) > 60:
                 res[targets[n]["id"]] = t
         return res

@@ -388,8 +388,47 @@ def _type_text(page, box, text: str) -> str:
                         "bật 'Hiện cửa sổ khi đăng' để xem, hoặc dùng nút Copy bài rồi đăng tay")
 
 
-def post_to_open_group(page, text: str, timeout: int = 0) -> str:
-    """Trang group đang mở → đăng `text`. Trả 'ok' hoặc 'pending' (chờ quản trị viên duyệt)."""
+PHOTO_BTN = re.compile(r"Ảnh\/video|Photo\/video|Ảnh|Photo", re.I)         # "/" phải escape: Playwright truyền regex dạng /…/i
+ADD_PHOTO = re.compile(r"Thêm ảnh\/video|Add photos\/videos|Add photo", re.I)
+
+
+def _attach_images(page, dialog, paths: list, timeout: int):
+    """Đính kèm ảnh vào bài đang soạn: bấm biểu tượng Ảnh/video → chọn tệp. Thử ô nhập tệp có sẵn, rồi tới hộp chọn tệp."""
+    inp = dialog.locator("input[type='file']")
+    if not inp.count():
+        btn = dialog.get_by_role("button", name=PHOTO_BTN).first
+        try:
+            btn.wait_for(state="visible", timeout=min(timeout, 8000))
+        except Exception:  # noqa: BLE001
+            raise GroupBotError("Không thấy nút 'Ảnh/video' trong hộp soạn bài (nhóm không cho đăng ảnh / Facebook đổi giao diện)")
+        btn.click()
+        page.wait_for_timeout(1200)
+        inp = dialog.locator("input[type='file']")
+        if not inp.count():                           # có khu "Thêm ảnh/video" → bấm sẽ mở hộp chọn tệp
+            try:
+                with page.expect_file_chooser(timeout=6000) as fc:
+                    dialog.get_by_text(ADD_PHOTO).first.click()
+                fc.value.set_files(paths)
+                inp = None
+            except Exception:  # noqa: BLE001
+                inp = dialog.locator("input[type='file']")
+    if inp is not None:
+        if not inp.count():
+            raise GroupBotError("Không đính kèm được ảnh (không tìm thấy ô chọn tệp)")
+        inp.first.set_input_files(paths)
+    page.wait_for_timeout(2500 + 1500 * len(paths))   # chờ Facebook tải ảnh lên
+    ok = False
+    for _ in range(12):
+        if dialog.locator("img[src^='blob:'], img[src*='scontent'], [aria-label*='Xóa ảnh'], [aria-label*='Remove photo']").count():
+            ok = True
+            break
+        page.wait_for_timeout(500)
+    if not ok:
+        raise GroupBotError("Đã chọn ảnh nhưng không thấy ảnh hiện trong bài (chưa tải lên được)")
+
+
+def post_to_open_group(page, text: str, timeout: int = 0, images: list = None) -> str:
+    """Trang group đang mở → đăng `text` (kèm `images`: danh sách đường dẫn tệp ảnh). Trả 'ok' hoặc 'pending' (chờ quản trị viên duyệt)."""
     timeout = timeout or STEP_TIMEOUT
     _check_session(page)
     opener = None
@@ -411,6 +450,9 @@ def post_to_open_group(page, text: str, timeout: int = 0) -> str:
     how = _type_text(page, box, text)
     _log(f"… đã nhập nội dung ({how})")
     dialog = box.locator("xpath=ancestor::*[@role='dialog'][1]")
+    if images:
+        _log(f"… đính kèm {len(images)} ảnh")
+        _attach_images(page, dialog, [str(p) for p in images], timeout)
 
     btn = dialog.get_by_role("button", name=POST_BTN).last
     btn.wait_for(state="visible", timeout=timeout)
@@ -465,6 +507,8 @@ def _run_job(job_id: int, visible: bool = False):
         _log(f"Chỉ còn {room} lượt hôm nay, sẽ đăng {room}/{len(todo)} nhóm.")
         todo = todo[:room]
     link = job["link"]                                   # link KHÔNG để trong bài đăng — bình luận ngay dưới bài sau khi đăng
+    from . import facebook
+    imgs = [p for p in (facebook.local_media(r) for r in job.get("images", [])) if p]    # ảnh đính kèm (đã tải lên phần mềm)
 
     _log("Chạy " + ("có hiện cửa sổ trình duyệt." if visible else "ẩn (không hiện cửa sổ)."))
     with sync_playwright() as p:
@@ -480,7 +524,7 @@ def _run_job(job_id: int, visible: bool = False):
                 try:
                     page.goto(g["url"], wait_until="domcontentloaded", timeout=60000)
                     page.wait_for_timeout(random.randint(*PAUSE_AFTER_LOAD))
-                    result = post_to_open_group(page, g.get("text") or job["message"])   # mỗi nhóm 1 nội dung riêng, gọn, không kèm link
+                    result = post_to_open_group(page, g.get("text") or job["message"], images=imgs)   # mỗi nhóm 1 nội dung riêng
                 except NoComposer as e:                    # nhóm không cho mình đăng → ghi nhận rồi sang nhóm khác
                     db.set_group_state(job_id, g["id"], "blocked")
                     _log(f"⛔ «{g['name']}»: {e} — bỏ qua nhóm này")

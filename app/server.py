@@ -1216,9 +1216,20 @@ def delete_group(gid: int):
     return {"ok": True}
 
 
+def _job_images(refs) -> list:
+    """Chỉ nhận ảnh đã tải lên phần mềm (/media/...); bỏ ảnh không còn trên máy. Tối đa 10."""
+    out = []
+    for r in refs or []:
+        r = str(r).strip()
+        if r.startswith("/media/") and facebook.local_media(r) and r not in out:
+            out.append(r)
+    return out[:10]
+
+
 class GroupJobIn(BaseModel):
     message: str
     link: str = ""
+    images: list[str] = []
     scheduled_at: Optional[int] = None    # None = đăng ngay (nhắc luôn)
     group_ids: list[int]
     auto: bool = False                    # đến giờ tự đăng bằng trình duyệt (thử nghiệm)
@@ -1240,8 +1251,58 @@ def add_group_job(body: GroupJobIn):
         raise HTTPException(400, "Chọn ít nhất 1 group")
     if body.auto and not body.accept_risk:
         raise HTTPException(400, RISK_MSG)
-    jid = db.add_group_job(body.message.strip(), body.link.strip(), body.scheduled_at or db.now(), ids, auto=body.auto)
+    jid = db.add_group_job(body.message.strip(), body.link.strip(), body.scheduled_at or db.now(), ids, auto=body.auto,
+                           images=_job_images(body.images))
     return {"id": jid}
+
+
+class AiJobIn(BaseModel):
+    message: str                          # nội dung người dùng soạn — AI viết lại thành mỗi nhóm một bài khác nhau
+    link: str = ""                        # (tùy chọn) link bài viết: bình luận dưới bài sau khi đăng
+    group_ids: list[int]
+    images: list[str] = []                # ảnh đính kèm (đã tải lên: /media/...)
+    scheduled_at: Optional[int] = None
+    gemini_key: str = ""
+    post_now: bool = False                # đăng luôn bằng trình duyệt sau khi AI viết xong
+    accept_risk: bool = False
+
+
+@admin.post("/api/group-jobs/ai")
+def group_job_ai(body: AiJobIn):
+    """Người dùng điền nội dung → AI soạn mỗi nhóm một bài khác nhau (kèm ảnh) → tạo lịch, tùy chọn đăng luôn."""
+    text = body.message.strip()
+    if len(text) < 15:
+        raise HTTPException(400, "Điền nội dung vào khung trước (ít nhất vài chữ) rồi bấm AI viết bài")
+    by_id = {g["id"]: g for g in db.list_groups()}
+    groups = [by_id[g] for g in body.group_ids if g in by_id]
+    groups.sort(key=lambda g: (-(g.get("members") or 0), g["id"]))
+    if not groups:
+        raise HTTPException(400, "Chọn ít nhất 1 nhóm để đăng")
+    key = body.gemini_key.strip() or newsagent.get_config().get("gemini_key", "")
+    if not key:
+        raise HTTPException(400, "Chưa có Gemini key — điền ở tab Tin tức AI hoặc Viết bài SEO (lấy miễn phí ở aistudio.google.com)")
+    if body.post_now and not body.accept_risk:
+        raise HTTPException(400, RISK_MSG)
+    first_line = next((l.strip() for l in text.splitlines() if l.strip()), text)[:90]
+    variants = groupwriter.make_variants({"title": first_line, "content": text, "description": text[:400],
+                                          "url": body.link.strip(), "mode": "text"}, groups, key)
+    jid = db.add_group_job(variants.get(groups[0]["id"]) or text, body.link.strip(), body.scheduled_at or db.now(),
+                           [g["id"] for g in groups], variants=variants, title=first_line, source="ai",
+                           images=_job_images(body.images))
+    db.log("group_job", f"AI viết bài đăng nhóm '{first_line[:50]}' → {len(groups)} nhóm")
+    out = {"id": jid, "groups": len(groups), "posting": False, "note": ""}
+    if body.post_now:
+        try:
+            bot_module = _bot()
+            if not bot_module.playwright_available():
+                raise ValueError("Chưa cài trình điều khiển — bấm 'Cài đặt trình điều khiển' ở khung 🤖")
+            if not bot_module.MARKER.exists():
+                raise ValueError("Chưa đăng nhập Facebook trong phần mềm — bấm 'Đăng nhập Facebook' ở khung 🤖 (bài đã viết xong, nằm ở Lịch đăng nhóm)")
+            bot_module.start_run(jid)
+            out["posting"] = True
+        except Exception as e:                                          # noqa: BLE001 — chưa đăng nhập / đang bận: vẫn giữ lịch
+            out["note"] = str(e)
+    return out
 
 
 class FromArticleIn(BaseModel):
