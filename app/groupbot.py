@@ -549,10 +549,35 @@ def _first_line(text: str) -> str:
 VIEW_IN_GROUP = re.compile(r"Xem trong nhóm|View in group|Xem bài viết|View post", re.I)
 
 
-def _comment_box_in(art, timeout):
-    box = art.get_by_role("textbox", name=COMMENT_BOX).first
-    box.wait_for(state="visible", timeout=timeout)
-    return box
+POST_DIALOG_TITLE = re.compile(r"^Bài viết của|^.+'s post$|^Post by", re.I)
+POST_URL = re.compile(r"multi_permalinks|/posts/\d+|/permalink/\d+|[?&]story_fbid=|/pfbid", re.I)
+
+
+def _find_comment_box(page, key: str, timeout: int):
+    """Ô bình luận của ĐÚNG bài (khớp theo nội dung): trong hộp thoại 'Bài viết của …' hoặc trong khung bài (role=article).
+    Chỉ khi đang ở trang / hộp thoại riêng của một bài mới lấy ô bình luận đầu tiên."""
+    end = time.time() + timeout / 1000
+    while True:
+        for scope in (page.locator("[role='dialog']").filter(has_text=key), page.locator("[role='article']").filter(has_text=key)):
+            for i in range(min(scope.count(), 3)):
+                tb = scope.nth(i).get_by_role("textbox", name=COMMENT_BOX)
+                try:
+                    if tb.count() and tb.first.is_visible():
+                        return tb.first
+                except Exception:  # noqa: BLE001
+                    continue
+        on_post_view = bool(POST_URL.search(page.url)) or page.get_by_text(POST_DIALOG_TITLE).count() > 0
+        if on_post_view:
+            tbs = page.get_by_role("textbox", name=COMMENT_BOX)
+            for i in range(min(tbs.count(), 3)):
+                try:
+                    if tbs.nth(i).is_visible():
+                        return tbs.nth(i)
+                except Exception:  # noqa: BLE001
+                    continue
+        if time.time() >= end:
+            return None
+        page.wait_for_timeout(500)
 
 
 def comment_under_post(page, group_url: str, post_text: str, link: str, timeout: int = 0) -> None:
@@ -569,11 +594,7 @@ def comment_under_post(page, group_url: str, post_text: str, link: str, timeout:
         art.wait_for(state="visible", timeout=timeout)
     except Exception:  # noqa: BLE001
         raise GroupBotError("Không thấy bài vừa đăng trong mục 'Nội dung của bạn' (có thể chưa kịp hiện)")
-    box = None
-    try:                                              # có ô bình luận ngay tại đây thì dùng luôn
-        box = _comment_box_in(art, 2500)
-    except Exception:  # noqa: BLE001
-        box = None
+    box = _find_comment_box(page, key, 2500)          # có ô bình luận ngay tại đây thì dùng luôn
     if box is None:                                   # thường gặp: chỉ có nút "Xem trong nhóm" → mở bài rồi bình luận
         _log("… mở bài viết trong nhóm")
         view = art.locator("a, [role='button']").filter(has_text=VIEW_IN_GROUP).first
@@ -592,17 +613,7 @@ def comment_under_post(page, group_url: str, post_text: str, link: str, timeout:
             view.click()
         page.wait_for_timeout(random.randint(*PAUSE_AFTER_LOAD))
         _check_session(page)
-        post_art = page.locator("[role='article']").filter(has_text=key).first
-        try:
-            box = _comment_box_in(post_art, timeout)
-        except Exception:  # noqa: BLE001
-            # trang riêng của bài (…/posts/ID): bài chính là bài đầu tiên nên dùng ô bình luận đầu tiên
-            if re.search(r"/(posts|permalink)/\d+", page.url):
-                try:
-                    box = page.get_by_role("textbox", name=COMMENT_BOX).first
-                    box.wait_for(state="visible", timeout=timeout)
-                except Exception:  # noqa: BLE001
-                    box = None
+        box = _find_comment_box(page, key, timeout)       # Facebook mở bài trong hộp thoại "Bài viết của …" hoặc trang riêng
         if box is None:
             raise GroupBotError("Không thấy ô bình luận dưới bài (nhóm tắt bình luận / Facebook đổi giao diện)")
     _log("… gõ link vào ô bình luận")

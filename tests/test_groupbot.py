@@ -59,7 +59,20 @@ POST_PAGE = """<!doctype html><meta charset=utf-8>
   <div role="textbox" aria-label="Viết bình luận công khai..." contenteditable="true" id="cbox"></div><div id="comments"></div></div>
 <script>cbox.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault();
   comments.append(cbox.innerText.trim()); cbox.innerText = ''; } });</script>"""
+# Facebook mới: bài mở trong HỘP THOẠI "Bài viết của …" (URL ?multi_permalinks=…), nội dung bài không có role=article,
+# ô bình luận tên "Bình luận dưới tên …"
+DIALOG_POST = """<!doctype html><meta charset=utf-8>
+<div role="dialog"><h2>Bài viết của Đỗ Thái Hưng</h2>
+  <div dir="auto">Chính phủ giảm 30% thuế TNDN cho doanh nghiệp nhỏ giai đoạn 2026-2027 nhé!</div>
+  <div>Chưa có bình luận nào</div>
+  <div role="textbox" aria-label="Bình luận dưới tên Đỗ" contenteditable="true" id="cbox"></div><div id="comments"></div></div>
+<div role="textbox" aria-label="Bình luận dưới tên Đỗ" contenteditable="true" id="other"></div>
+<script>cbox.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault();
+  comments.append(cbox.innerText.trim()); cbox.innerText = ''; } });</script>"""
+MY_POSTS_DLG = MY_POSTS_REAL.replace("/ok/posts/123", "/ok/dialogpost?multi_permalinks=2266")
 PAGES = {
+    "/dlg/my_posted_content": MY_POSTS_DLG,
+    "/ok/dialogpost": DIALOG_POST,
     "/real/my_posted_content": MY_POSTS_REAL,
     "/viabtn/my_posted_content": MY_POSTS_BTN,
     "/ok/posts/123": POST_PAGE,
@@ -295,3 +308,10 @@ def test_comment_opens_post_via_view_in_group_then_comments(page, site):
 def test_comment_fails_fast_with_clear_message_when_no_way_to_comment(page, site):
     with pytest.raises(groupbot.GroupBotError, match="Xem trong nhóm"):
         groupbot.comment_under_post(page, site + "/nocmt", POST_TEXT, "https://x.vn", timeout=1500)
+
+
+def test_comment_in_post_dialog_with_comment_under_name_box(page, site):
+    groupbot.comment_under_post(page, site + "/dlg", POST_TEXT, "https://dailythuehungphuc.com/giam-30-thue/", timeout=4000)
+    assert "multi_permalinks" in page.url
+    assert page.locator("#comments").inner_text() == "https://dailythuehungphuc.com/giam-30-thue/"       # vào ô trong hộp thoại của bài
+    assert page.locator("#other").inner_text() == ""                                                   # không vào ô bình luận khác
