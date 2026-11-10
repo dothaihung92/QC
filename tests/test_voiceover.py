@@ -94,7 +94,7 @@ def test_api_upload_create_edit_publish_delete(client, src_clip, tmp_path, monke
     assert client.post("/api/voiceover", json={"token": up["token"], "script": "ab"}).status_code == 400
     v = client.post("/api/voiceover", json={"token": up["token"], "script": "Xin chào các bạn, đây là clip thử.", "title": "Clip thử",
                                             "fit": "xyz", "audio": "low", "captions": False}).json()
-    assert v["kind"] == "voiceover" and v["status"] == "done" and v["has_file"] and v["options"] == {"fit": "keep", "audio": "low", "captions": False}
+    assert v["kind"] == "voiceover" and v["status"] == "done" and v["has_file"] and v["options"] == {"fit": "keep", "audio": "low", "captions": False, "caption_pos": "none", "sync": True}
     assert "source" not in v and v["source_name"].endswith(".mp4")
     assert client.get(f"/api/videos/{v['id']}/file").status_code == 200
     e = client.put(f"/api/voiceover/{v['id']}", json={"script": "Kịch bản mới được sửa.", "fit": "loop", "captions": True, "description": "mô tả"}).json()
@@ -133,3 +133,128 @@ def test_captions_of_consecutive_chunks_never_overlap(src_clip, tmp_path, monkey
     assert db.video_get(vid)["status"] == "done" and seen
     ordered = sorted(seen, key=lambda c: c[2])
     assert all(a[3] <= b[2] + 1e-6 for a, b in zip(ordered, ordered[1:]))
+
+
+SCRIPT = """KỊCH BẢN LỜI ĐỌC — Clip hướng dẫn Tra cứu & tải tờ khai thuế hàng loạt
+(dùng để thu âm lại giọng người thật nếu muốn)
+
+Cảnh 1 — Tra cứu & tải tờ khai thuế HÀNG LOẠT
+Chào mừng bạn đến với hướng dẫn chức năng tra cứu. Chỉ với một lần bấm, phần mềm tự tra cứu.
+
+Cảnh 2 — NỔI BẬT: Tải được cả tờ khai Quyết toán TNCN năm
+Điểm nổi bật: tờ khai quyết toán TNCN năm không cho tải về.
+
+Cảnh 3 — BƯỚC 1: Mở chức năng
+Bước một. Ở thanh bên trái, bấm Hỗ trợ kê khai tự động.
+"""
+
+
+def test_parse_script_skips_headings_and_scene_markers():
+    p = voiceover.parse_script(SCRIPT)
+    assert [s["n"] for s in p["scenes"]] == [1, 2, 3]
+    assert len(p["skipped"]) == 2 and "KỊCH BẢN" in p["skipped"][0] and p["skipped"][1].startswith("(dùng")
+    spoken = " ".join(s["text"] for s in p["scenes"])
+    for bad in ("Cảnh", "KỊCH BẢN", "BƯỚC 1", "NỔI BẬT:", "thu âm lại", "người thật"):
+        assert bad not in spoken
+    assert p["scenes"][0]["text"].startswith("Chào mừng") and p["scenes"][2]["label"] == "BƯỚC 1: Mở chức năng"
+    # không có "Cảnh" → một cảnh, tiêu đề đầu vẫn bỏ; "Phần mềm ..." không bị nhầm là mốc cảnh
+    q = voiceover.parse_script("# Tiêu đề\n(ghi chú đạo diễn)\nPhần mềm này rất tiện.\nCâu hai.")
+    assert len(q["scenes"]) == 1 and q["scenes"][0]["text"] == "Phần mềm này rất tiện.\nCâu hai." and len(q["skipped"]) == 2
+    t = voiceover.parse_script("Cảnh 1 [00:00] — A\nLời một.\nCảnh 2 (01:05) — B\nLời hai.")
+    assert [s["time"] for s in t["scenes"]] == [0, 65]
+
+
+def test_summarize_and_parse_endpoint(client):
+    r = client.post("/api/voiceover/parse", json={"script": SCRIPT}).json()
+    assert len(r["scenes"]) == 3 and r["skipped_count"] == 2 and r["seconds"] > 0
+    assert "ghi chú" not in " ".join(x["preview"] for x in r["scenes"])
+
+
+def test_abbreviations_are_spoken_in_full():
+    assert video.expand_abbr("Quyết toán TNCN và MST của NNT") == "Quyết toán thuế thu nhập cá nhân và mã số thuế của người nộp thuế"
+    assert video.expand_abbr("TNCNX không đổi") == "TNCNX không đổi"
+    assert video.phonetic("Hạn token còn 3 ngày") == "Hạn tô-ken còn 3 ngày"
+    assert "tô-ken" not in video.clean_tts_text("token")                         # phụ đề giữ nguyên chữ, chỉ giọng đọc đổi cách đọc
+
+
+@pytest.fixture
+def three_scene_clip(tmp_path):
+    """Clip 9 giây gồm 3 cảnh màu khác hẳn nhau (đỏ / xanh lá / xanh dương), mỗi cảnh 3 giây."""
+    out = tmp_path / "three.mp4"
+    parts = ["color=c=red", "color=c=green", "color=c=blue"]
+    cmd = []
+    for c in parts:
+        cmd += ["-f", "lavfi", "-i", f"{c}:size=320x240:rate=30:duration=3"]
+    video._ffmpeg([*cmd, "-filter_complex", "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]", "-map", "[v]", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(out)], tmp_path)
+    return out
+
+
+def _frame_color(path, t, tmp_path):
+    """Màu trội của khung hình tại giây t: trả về 'r' / 'g' / 'b'."""
+    png = tmp_path / f"f{t}.png"
+    video._ffmpeg(["-ss", str(t), "-i", str(path), "-frames:v", "1", str(png)], tmp_path)
+    from PIL import Image
+    r, g, b = Image.open(png).convert("RGB").resize((1, 1)).getpixel((0, 0))
+    return max((r, "r"), (g, "g"), (b, "b"))[1]
+
+
+@pytest.mark.parametrize("audio", ["none", "low"])
+def test_lines_stay_in_sync_with_scenes_of_the_clip(three_scene_clip, tmp_path, audio):
+    """Mỗi đoạn lời đọc phải rơi đúng cảnh: cảnh 1 đỏ, cảnh 2 xanh lá, cảnh 3 xanh dương — và không đọc dòng "Cảnh N"."""
+    spoken, hows = [], []
+    real, real_sb = video.tts, voiceover.scene_bounds
+    video.tts = lambda text, *a, **k: spoken.append(text) or real(text, *a, **k)
+    voiceover.scene_bounds = lambda *a: hows.append(real_sb(*a)) or hows[-1]
+    try:
+        script = ("Tiêu đề kịch bản lời đọc\nCảnh 1 — Đỏ\nMột hai ba.\nCảnh 2 — Lục\nBốn năm sáu bảy tám.\nCảnh 3 — Lam\nChín mười.")
+        vid = _make(three_scene_clip, tmp_path, fit="keep", audio=audio, caption_pos="bottom", script=script)
+        video.start_render(vid)
+    finally:
+        video.tts, voiceover.scene_bounds = real, real_sb
+    v = db.video_get(vid)
+    assert v["status"] == "done", v["error"]
+    assert hows[0][1] == "detect" and abs(hows[0][0][1] - 3) < 0.4 and abs(hows[0][0][2] - 6) < 0.4        # tự dò đúng chỗ chuyển cảnh
+    assert spoken == ["Một hai ba.", "Bốn năm sáu bảy tám.", "Chín mười."]            # không đọc tiêu đề / "Cảnh N"
+    assert 8.5 < v["duration"] < 10.5
+    assert [_frame_color(v["path"], t, tmp_path) for t in (1.0, 4.5, 8.0)] == ["r", "g", "b"]
+
+
+def test_scene_sync_with_explicit_times_and_long_narration(three_scene_clip, tmp_path):
+    """Ghi thời điểm [mm:ss]; cảnh 1 có lời đọc dài hơn cảnh gốc (~4,2s > 3s) → cảnh 1 kéo dài, cảnh 2 vẫn bắt đầu bằng hình xanh lá."""
+    script = ("Cảnh 1 [00:00] — A\n" + "chữ " * 14 + "\nCảnh 2 [00:03] — B\nHai.\nCảnh 3 [00:06] — C\nBa.")
+    vid = _make(three_scene_clip, tmp_path, fit="keep", caption_pos="none", script=script)
+    video.start_render(vid)
+    v = db.video_get(vid)
+    assert v["status"] == "done", v["error"]
+    assert v["duration"] > 9.8                                                       # cảnh 1 đã dài ra so với 3s
+    assert _frame_color(v["path"], 1.0, tmp_path) == "r"
+    start2 = 0.3 * 14 + voiceover.SCENE_GAP                                           # lời đọc cảnh 1 xong → cảnh 2 bắt đầu
+    assert _frame_color(v["path"], start2 + 0.4, tmp_path) == "g"
+    assert _frame_color(v["path"], v["duration"] - 0.3, tmp_path) == "b"
+
+
+def test_scene_bounds_fallback_and_detect(three_scene_clip, tmp_path):
+    scenes = [{"time": None}] * 3
+    b, how = voiceover.scene_bounds(three_scene_clip, 9.0, scenes, [3, 3, 3])
+    assert how == "detect" and abs(b[1] - 3) < 0.4 and abs(b[2] - 6) < 0.4
+    b, how = voiceover.scene_bounds(three_scene_clip, 9.0, [{"time": None}] * 4, [3, 3, 3, 3])      # cần 3 mốc nhưng chỉ có 2 → chia theo lời đọc
+    assert how == "prop" and [round(x, 1) for x in b] == [0.0, 2.2, 4.5, 6.8, 9.0]
+
+
+def test_caption_position_option(src_clip, tmp_path, monkeypatch):
+    ys = {}
+    for pos in ("bottom", "top"):
+        seen = []
+        real = voiceover._burn_captions
+        monkeypatch.setattr(voiceover, "_burn_captions", lambda work, base, audio, caps, total, out, step, _r=real, _s=seen: _s.extend(caps) or _r(work, base, audio, caps, total, out, step))
+        vid = _make(src_clip, tmp_path, caption_pos=pos, script="Một hai ba bốn năm sáu bảy tám.")
+        video.start_render(vid)
+        assert db.video_get(vid)["status"] == "done"
+        ys[pos] = seen
+        monkeypatch.setattr(voiceover, "_burn_captions", real)
+    assert ys["bottom"] and ys["top"]
+    assert min(c[1][1] for c in ys["bottom"]) > max(c[1][1] for c in ys["top"])                  # phụ đề "trên" nằm cao hơn "dưới"
+    assert voiceover.clean_options({"captions": False})["caption_pos"] == "none" and voiceover.clean_options({})["caption_pos"] == "bottom"
+    vid = _make(src_clip, tmp_path, caption_pos="none", script="Một hai ba.")
+    video.start_render(vid)
+    assert db.video_get(vid)["status"] == "done"

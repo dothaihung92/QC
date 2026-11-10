@@ -1155,6 +1155,8 @@ class VoiceoverIn(BaseModel):
     fit: str = "keep"
     audio: str = "none"
     captions: bool = True
+    caption_pos: str = ""
+    sync: bool = True
     render: bool = True
 
 
@@ -1165,7 +1167,10 @@ def voiceover_create(body: VoiceoverIn):
         raise HTTPException(400, "Chưa có clip — chọn clip và đợi tải lên xong")
     if len(body.script.strip()) < 5:
         raise HTTPException(400, "Nhập kịch bản lời đọc")
-    opts = voiceover.clean_options(body.model_dump())
+    d = body.model_dump()
+    if not d["caption_pos"]:
+        d.pop("caption_pos")
+    opts = voiceover.clean_options(d)
     vid = db.video_add(body.title.strip() or "Clip lồng tiếng", "", [], kind="voiceover", script=body.script.strip(),
                        source=str(src), options=opts)
     if body.render:
@@ -1183,6 +1188,8 @@ class VoiceoverEdit(BaseModel):
     fit: Optional[str] = None
     audio: Optional[str] = None
     captions: Optional[bool] = None
+    caption_pos: Optional[str] = None
+    sync: Optional[bool] = None
 
 
 @admin.put("/api/voiceover/{vid}")
@@ -1197,9 +1204,11 @@ def voiceover_edit(vid: int, body: VoiceoverEdit):
         if getattr(body, k) is not None:
             fields[k] = getattr(body, k).strip() if k != "script" else getattr(body, k)
     opts = dict(v["options"])
-    for k in ("fit", "audio", "captions"):
+    for k in ("fit", "audio", "captions", "caption_pos", "sync"):
         if getattr(body, k) is not None:
             opts[k] = getattr(body, k)
+    if body.caption_pos is None and body.captions is not None:        # chỉ gửi captions (bản cũ)
+        opts.pop("caption_pos", None)
     fields["options"] = voiceover.clean_options(opts)
     db.video_update(vid, **fields)
     return video.to_json(db.video_get(vid))
@@ -1207,7 +1216,17 @@ def voiceover_edit(vid: int, body: VoiceoverEdit):
 
 @admin.get("/api/voiceover/options")
 def voiceover_options():
-    return {"fit": voiceover.FIT, "audio": voiceover.ORIG}
+    return {"fit": voiceover.FIT, "audio": voiceover.ORIG, "caption_pos": voiceover.CAPS}
+
+
+class VoiceoverParse(BaseModel):
+    script: str = ""
+
+
+@admin.post("/api/voiceover/parse")
+def voiceover_parse(body: VoiceoverParse):
+    """Xem trước: phần mềm sẽ đọc những gì (bỏ dòng tiêu đề / "Cảnh N —" / ghi chú), chia thành mấy cảnh."""
+    return voiceover.summarize(body.script)
 
 
 @admin.post("/api/videos/{vid}/render")

@@ -679,11 +679,39 @@ def pexels_photo(keyword: str, key: str, vertical: bool, dest: Path) -> bool:
 
 # ---------------------------------------------------------------- 3. giọng đọc
 
+# Từ viết tắt thuế/kế toán: giọng đọc sẽ đọc từng chữ cái (en-nờ-xê-en...) nếu không đọc đầy đủ
+ABBR = [(r"TNCN", "thuế thu nhập cá nhân"), (r"TNDN", "thuế thu nhập doanh nghiệp"), (r"GTGT", "giá trị gia tăng"),
+        (r"BHXH", "bảo hiểm xã hội"), (r"BHYT", "bảo hiểm y tế"), (r"BHTN", "bảo hiểm thất nghiệp"),
+        (r"MST", "mã số thuế"), (r"HĐĐT", "hóa đơn điện tử"), (r"NNT", "người nộp thuế"),
+        (r"CCCD", "căn cước công dân"), (r"CQT", "cơ quan thuế"), (r"BCTC", "báo cáo tài chính"),
+        (r"TSCĐ", "tài sản cố định"), (r"HĐKD", "hoạt động kinh doanh"), (r"TTĐB", "tiêu thụ đặc biệt"),
+        (r"QTT", "quyết toán thuế")]
+# Từ tiếng Anh: chỉ đổi cách đọc khi tạo giọng (phụ đề vẫn giữ nguyên chữ)
+PHON = [(r"[Tt]oken", "tô-ken"), (r"[Ee]xcel", "éc-xeo"), (r"[Ww]ord", "quớt"), (r"PDF", "pi đi ép"), (r"XML", "ích em eo"),
+        (r"[Ff]acebook", "Phây-búc"), (r"[Zz]alo", "Da-lô"), (r"[Ss]oftware", "sóp-quê")]
+
+
+def _subs(text: str, table: list) -> str:
+    for pat, rep in table:
+        text = re.sub(rf"(?<![\w]){pat}(?![\w])", rep, text)
+    return text
+
+
+def expand_abbr(text: str) -> str:
+    """TNCN → thuế thu nhập cá nhân, MST → mã số thuế... (đọc và hiện phụ đề đầy đủ)."""
+    return _subs(text, ABBR)
+
+
+def phonetic(text: str) -> str:
+    """Viết lại từ tiếng Anh theo cách đọc tiếng Việt (chỉ dùng khi gửi cho giọng đọc)."""
+    return _subs(text, PHON)
+
+
 def clean_tts_text(text: str) -> str:
     """Bỏ emoji, ký hiệu markdown... — Edge-TTS hay trả "No audio was received" khi gặp chúng."""
     text = re.sub(r"[#*_`>|~^=\[\]{}<]+", " ", text)
     text = "".join(ch for ch in text if unicodedata.category(ch) not in ("So", "Sk", "Cs", "Co", "Cn", "Cf"))
-    return re.sub(r"\s+", " ", text).strip()
+    return expand_abbr(re.sub(r"\s+", " ", text).strip())
 
 
 def _edge(text: str, voice: str, rate: str, dest: Path):
@@ -781,7 +809,7 @@ def tts(text: str, voice: str, rate: int, dest: Path, style: str = "") -> str:
     """Tạo giọng đọc, thử lần lượt tới khi được. Giọng Microsoft: giọng đã chọn → tốc độ chuẩn →
     giọng Microsoft còn lại → Piper offline (nếu đã cài) → Google. Giọng Piper: Piper → Microsoft → Google.
     Trả về tên giọng đã dùng."""
-    text = clean_tts_text(text)
+    text = phonetic(clean_tts_text(text))
     if not text:
         raise VideoError("Lời đọc trống sau khi bỏ ký tự đặc biệt")
     label = lambda v: VOICES.get(v, v).split(" — ")[0]

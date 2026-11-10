@@ -746,12 +746,15 @@
         <select id="voFit"></select>
         <label>Tiếng gốc của clip</label>
         <select id="voAudio"></select>
-        <label style="font-weight:400"><input type="checkbox" id="voCaps" style="width:auto" checked> Hiện phụ đề tô sáng từng chữ đang đọc</label>
+        <label>Phụ đề tô sáng từng chữ <span class="muted small">(clip đã có phụ đề sẵn → chọn "Không" hoặc "cao hơn")</span></label>
+        <select id="voCapPos"></select>
+        <label style="font-weight:400"><input type="checkbox" id="voSync" style="width:auto" checked> Khớp từng đoạn lời đọc với từng cảnh trong clip (kịch bản chia "Cảnh 1 — ...")</label>
       </div>
       <div class="col">
         <label>Kịch bản lời đọc</label>
-        <textarea id="voScript" rows="11" placeholder="Dán hoặc viết lời đọc vào đây. Mỗi câu một ý, xuống dòng khi sang đoạn mới (phần mềm nghỉ lâu hơn ở chỗ xuống dòng).&#10;Số, ngày tháng nên viết như người đọc (vd: ngày một tháng bảy)."></textarea>
+        <textarea id="voScript" rows="11" oninput="voPreview()" placeholder="Dán hoặc viết lời đọc vào đây. Mỗi câu một ý, xuống dòng khi sang đoạn mới (phần mềm nghỉ lâu hơn ở chỗ xuống dòng).&#10;Nếu clip có nhiều cảnh: mở đầu mỗi cảnh bằng dòng riêng &quot;Cảnh 1 — tên cảnh&quot; (dòng này KHÔNG được đọc), muốn ép đúng thời điểm thì ghi &quot;Cảnh 2 [00:12] — ...&quot;.&#10;Dòng tiêu đề hoặc ghi chú trong (ngoặc) cũng không được đọc. Số, ngày tháng nên viết như người đọc (vd: ngày một tháng bảy)."></textarea>
         <div class="btns"><button class="btn pri" id="voMake" onclick="voCreate()">🎙 Tạo giọng đọc vào clip</button></div>
+        <div class="small" id="voPrev" style="margin:6px 0"></div>
         <p class="muted small" id="voHint"></p>
       </div>
     </div>
@@ -1029,7 +1032,7 @@ let VO = null, VO_OPT = null;
 async function voInit() {
   if (!VO_OPT) VO_OPT = await api('/api/voiceover/options');
   const fill = (id, o, cur) => { $(id).innerHTML = Object.entries(o).map(([k, t]) => `<option value="${k}">${esc(t)}</option>`).join(''); if (cur) $(id).value = cur; };
-  if (!$('voFit').options.length) { fill('voFit', VO_OPT.fit); fill('voAudio', VO_OPT.audio); }
+  if (!$('voFit').options.length) { fill('voFit', VO_OPT.fit); fill('voAudio', VO_OPT.audio); fill('voCapPos', VO_OPT.caption_pos); }
 }
 function voUp(file) {                                   // gửi nguyên tệp (có thanh tiến độ)
   return new Promise((ok, no) => {
@@ -1048,7 +1051,24 @@ async function voPick() {
     VO = await voUp(f);
     $('voInfo').innerHTML = `✅ Đã tải lên: <b>${esc(f.name)}</b> · ${VO.width}×${VO.height} · dài ${vdFmtSec(Math.round(VO.duration))} · ${VO.has_audio ? 'có tiếng gốc' : 'không có tiếng'}`;
     if (!$('voTitle').value) $('voTitle').value = f.name.replace(/\.[^.]+$/, '');
+    voPreview();
   } catch (e) { $('voInfo').textContent = '⚠ ' + e.message; toast('⚠ ' + e.message); }
+}
+let voTimer = null;
+function voPreview() {                                   // cho người dùng thấy phần mềm sẽ đọc gì, bỏ qua dòng nào
+  clearTimeout(voTimer);
+  voTimer = setTimeout(async () => {
+    const t = $('voScript').value;
+    if (t.trim().length < 5) { $('voPrev').innerHTML = ''; return; }
+    try {
+      const r = await api('/api/voiceover/parse', { method: 'POST', body: { script: t } });
+      let h = `📋 Nhận <b>${r.scenes.length} cảnh</b> · ước tính đọc ~${vdFmtSec(Math.round(r.seconds))}`;
+      if (VO && r.seconds) h += ` · clip dài ${vdFmtSec(Math.round(VO.duration))}`;
+      if (r.skipped_count) h += `<br>🚫 Bỏ qua ${r.skipped_count} dòng ghi chú (không đọc): <span class="muted">${r.skipped.map(x => esc(x.slice(0, 50))).join(' · ')}</span>`;
+      if (r.scenes.length > 1) h += '<br>' + r.scenes.map(s => `<span class="muted">Cảnh ${s.n}${s.time != null ? ' @' + vdFmtSec(s.time) : ''}: ${s.seconds}s</span>`).join(' · ');
+      $('voPrev').innerHTML = h;
+    } catch (e) { $('voPrev').textContent = ''; }
+  }, 500);
 }
 async function voCreate() {
   if (!VO) return toast('Chọn clip và đợi tải lên xong');
@@ -1056,15 +1076,15 @@ async function voCreate() {
   $('voMake').disabled = true;
   try {
     await api('/api/voiceover', { method: 'POST', body: { token: VO.token, script: $('voScript').value, title: $('voTitle').value,
-      fit: $('voFit').value, audio: $('voAudio').value, captions: $('voCaps').checked } });
+      fit: $('voFit').value, audio: $('voAudio').value, caption_pos: $('voCapPos').value, sync: $('voSync').checked } });
     toast('🎙 Đang tạo giọng đọc và ghép vào clip — xem tiến trình ở "Clip của bạn"');
-    VO = null; $('voFile').value = ''; $('voInfo').textContent = ''; $('voScript').value = ''; $('voTitle').value = '';
+    VO = null; $('voFile').value = ''; $('voInfo').textContent = ''; $('voScript').value = ''; $('voTitle').value = ''; $('voPrev').innerHTML = '';
     vdLoadList();
   } finally { $('voMake').disabled = false; }
 }
 async function voRender(id) {
   await api('/api/voiceover/' + id, { method: 'PUT', body: { title: $('vt' + id).value, script: $('vos' + id).value, fit: $('vof' + id).value,
-    audio: $('voa' + id).value, captions: $('voc' + id).checked } });
+    audio: $('voa' + id).value, caption_pos: $('vop' + id).value, sync: $('vos2' + id).checked } });
   await api('/api/videos/' + id + '/render', { method: 'POST' });
   toast('🎙 Đang tạo lại giọng đọc và ghép vào clip...'); vdLoadList();
 }
@@ -1083,7 +1103,8 @@ function voCard(v) {
       <label>Kịch bản lời đọc</label><textarea id="vos${v.id}" rows="8">${esc(v.script || '')}</textarea>
       <label>Khi lời đọc dài / ngắn hơn clip</label>${sel('vof', VO_OPT?.fit || {}, o.fit)}
       <label>Tiếng gốc của clip</label>${sel('voa', VO_OPT?.audio || {}, o.audio)}
-      <label style="font-weight:400"><input type="checkbox" id="voc${v.id}" style="width:auto" ${o.captions === false ? '' : 'checked'}> Phụ đề tô sáng từng chữ</label>
+      <label>Phụ đề tô sáng từng chữ</label>${sel('vop', VO_OPT?.caption_pos || {}, o.caption_pos || (o.captions === false ? 'none' : 'bottom'))}
+      <label style="font-weight:400"><input type="checkbox" id="vos2${v.id}" style="width:auto" ${o.sync === false ? '' : 'checked'}> Khớp lời đọc với từng cảnh trong clip</label>
       <label>Mô tả đăng kèm (khi đăng Fanpage)</label><textarea id="vds${v.id}" rows="2" onblur="voDesc(${v.id}, this.value)">${esc(v.description || '')}</textarea>
     </details>
     <div class="btns">

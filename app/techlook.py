@@ -380,7 +380,7 @@ def caption_layer(L, words: list, active: int, dest: Path):
         cur_w += ww + (space if len(cur) > 1 else 0)
     lines.append(cur)
     lh = int(size * 1.4)
-    top = int(L.H * 0.875) - lh * len(lines) // 2
+    top = int(L.H * getattr(L, "cap_frac", 0.875)) - lh * len(lines) // 2
     wi = 0
     for li, line in enumerate(lines):
         x = (L.W - (sum(w[1] for w in line) + space * (len(line) - 1))) / 2
