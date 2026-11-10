@@ -1487,13 +1487,23 @@ def start_render(video_id: int):
     v = db.video_get(video_id)
     if not v:
         raise VideoError("Không có clip này")
-    if not v["scenes"]:
+    voiceover = v.get("kind") == "voiceover"
+    if voiceover:
+        if not (v.get("script") or "").strip():
+            raise VideoError("Kịch bản lời đọc đang trống")
+        if not v.get("source") or not Path(v["source"]).is_file():
+            raise VideoError("Clip gốc đã bị xóa — tải lại clip lên")
+    elif not v["scenes"]:
         raise VideoError("Kịch bản chưa có cảnh nào")
     if missing_tools():
         raise VideoError("Chưa cài công cụ làm video — bấm 'Cài công cụ' trước")
     db.video_update(video_id, status="rendering", progress="Bắt đầu...", error="")
     try:
-        _run_bg(_render_safe, video_id)
+        if voiceover:
+            from . import voiceover as vo
+            _run_bg(vo.render_safe, video_id)
+        else:
+            _run_bg(_render_safe, video_id)
     except VideoError:
         db.video_update(video_id, status="draft", progress="")
         raise
@@ -1685,6 +1695,9 @@ def render(video_id: int):
 
 
 def delete(video_id: int):
+    v = db.video_get(video_id)
+    if v and v.get("kind") == "voiceover" and v.get("source"):        # xóa luôn clip gốc đã tải lên
+        Path(v["source"]).unlink(missing_ok=True)
     shutil.rmtree(VIDEO_DIR / str(video_id), ignore_errors=True)
     db.video_delete(video_id)
 
@@ -1692,6 +1705,8 @@ def delete(video_id: int):
 def to_json(v: dict) -> dict:
     v = dict(v)
     v["has_file"] = bool(v["path"]) and Path(v["path"]).exists()
+    v["source_name"] = Path(v["source"]).name if v.get("source") else ""
     v.pop("path", None)
+    v.pop("source", None)
     return v
 

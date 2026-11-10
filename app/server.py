@@ -19,7 +19,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
 from . import (autoreply, bot, config, content, db, facebook, groupwriter, legallinks, newsagent, replies, video,
-               wordpress)
+               voiceover, wordpress)
 from .facebook import FacebookError
 
 try:
@@ -1117,6 +1117,97 @@ def video_edit(vid: int, body: VideoEdit):
         fields["scenes"] = video.clean_scenes(fields["scenes"])
     db.video_update(vid, **fields)
     return video.to_json(db.video_get(vid))
+
+
+# ----- lồng giọng đọc vào clip có sẵn ---------------------------------------------
+
+@admin.post("/api/voiceover/upload")
+async def voiceover_upload(request: Request, filename: str = ""):
+    """Nhận clip người dùng tải lên (gửi nguyên tệp trong thân yêu cầu, ghi dần ra đĩa). Trả về mã tệp."""
+    try:
+        path = voiceover.new_upload_path(filename)
+    except voiceover.VoiceoverError as e:
+        raise HTTPException(400, str(e))
+    size = 0
+    try:
+        with open(path, "wb") as f:
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > voiceover.MAX_UPLOAD:
+                    raise HTTPException(413, "Clip lớn hơn 1 GB — nén nhỏ lại rồi tải lên")
+                f.write(chunk)
+        if size == 0:
+            raise HTTPException(400, "Tệp rỗng")
+        info = voiceover.probe(path)
+    except voiceover.VoiceoverError as e:
+        path.unlink(missing_ok=True)
+        raise HTTPException(400, str(e))
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+    return {"token": path.name, "size": size, **info, "name": filename}
+
+
+class VoiceoverIn(BaseModel):
+    token: str
+    script: str
+    title: str = ""
+    fit: str = "keep"
+    audio: str = "none"
+    captions: bool = True
+    render: bool = True
+
+
+@admin.post("/api/voiceover")
+def voiceover_create(body: VoiceoverIn):
+    src = voiceover.upload_file(body.token)
+    if not src:
+        raise HTTPException(400, "Chưa có clip — chọn clip và đợi tải lên xong")
+    if len(body.script.strip()) < 5:
+        raise HTTPException(400, "Nhập kịch bản lời đọc")
+    opts = voiceover.clean_options(body.model_dump())
+    vid = db.video_add(body.title.strip() or "Clip lồng tiếng", "", [], kind="voiceover", script=body.script.strip(),
+                       source=str(src), options=opts)
+    if body.render:
+        try:
+            video.start_render(vid)
+        except video.VideoError as e:
+            raise HTTPException(409, str(e))
+    return video.to_json(db.video_get(vid))
+
+
+class VoiceoverEdit(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    script: Optional[str] = None
+    fit: Optional[str] = None
+    audio: Optional[str] = None
+    captions: Optional[bool] = None
+
+
+@admin.put("/api/voiceover/{vid}")
+def voiceover_edit(vid: int, body: VoiceoverEdit):
+    v = _video_or_404(vid)
+    if v["kind"] != "voiceover":
+        raise HTTPException(400, "Đây không phải clip lồng tiếng")
+    if v["status"] == "rendering":
+        raise HTTPException(409, "Clip đang dựng, đợi xong rồi sửa")
+    fields = {}
+    for k in ("title", "description", "script"):
+        if getattr(body, k) is not None:
+            fields[k] = getattr(body, k).strip() if k != "script" else getattr(body, k)
+    opts = dict(v["options"])
+    for k in ("fit", "audio", "captions"):
+        if getattr(body, k) is not None:
+            opts[k] = getattr(body, k)
+    fields["options"] = voiceover.clean_options(opts)
+    db.video_update(vid, **fields)
+    return video.to_json(db.video_get(vid))
+
+
+@admin.get("/api/voiceover/options")
+def voiceover_options():
+    return {"fit": voiceover.FIT, "audio": voiceover.ORIG}
 
 
 @admin.post("/api/videos/{vid}/render")

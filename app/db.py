@@ -149,6 +149,10 @@ def init():
         for col, ddl in GROUP_JOB_EXTRA.items():       # nội dung riêng từng nhóm + trạng thái duyệt bài
             if col not in cols:
                 c.execute(f"ALTER TABLE group_jobs ADD COLUMN {col} {ddl}")
+        vcols = {r["name"] for r in c.execute("PRAGMA table_info(videos)")}
+        for col, ddl in VIDEO_EXTRA.items():          # clip lồng giọng đọc vào video có sẵn
+            if col not in vcols:
+                c.execute(f"ALTER TABLE videos ADD COLUMN {col} {ddl}")
         gcols = {r["name"] for r in c.execute("PRAGMA table_info(group_targets)")}
         for col, ddl in GROUP_EXTRA.items():           # số thành viên, nhóm có cho đăng thẳng không
             if col not in gcols:
@@ -168,6 +172,12 @@ def init():
                   "error='Phần mềm bị tắt khi đang dựng — bấm Dựng clip lại' WHERE status='rendering'")
 
 
+VIDEO_EXTRA = {
+    "kind":    "TEXT NOT NULL DEFAULT 'script'",   # script = AI dựng từ bài viết · voiceover = lồng giọng đọc vào clip người dùng tải lên
+    "script":  "TEXT NOT NULL DEFAULT ''",         # kịch bản lời đọc (voiceover)
+    "source":  "TEXT NOT NULL DEFAULT ''",         # đường dẫn clip gốc đã tải lên (voiceover)
+    "options": "TEXT NOT NULL DEFAULT '{}'",       # JSON tùy chọn lồng tiếng
+}
 GROUP_JOB_EXTRA = {
     "variants": "TEXT NOT NULL DEFAULT '{}'",    # {group_id: nội dung riêng cho nhóm đó} — AI viết lại, mỗi nhóm 1 kiểu
     "states":   "TEXT NOT NULL DEFAULT '{}'",    # {group_id: ok|pending|approved|declined|blocked|failed}
@@ -720,19 +730,27 @@ def _video_row(row):
         return None
     d = dict(row)
     d["scenes"] = json.loads(d["scenes"] or "[]")
+    try:
+        d["options"] = json.loads(d.get("options") or "{}")
+    except ValueError:
+        d["options"] = {}
     return d
 
 
-def video_add(title, description, scenes, image_url="") -> int:
+def video_add(title, description, scenes, image_url="", kind="script", script="", source="", options=None) -> int:
     with conn() as c:
         return c.execute(
-            "INSERT INTO videos(title, description, scenes, image_url, created_at) VALUES(?, ?, ?, ?, ?)",
-            (title, description, json.dumps(scenes, ensure_ascii=False), image_url, now())).lastrowid
+            "INSERT INTO videos(title, description, scenes, image_url, created_at, kind, script, source, options) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (title, description, json.dumps(scenes, ensure_ascii=False), image_url, now(), kind, script, source,
+             json.dumps(options or {}, ensure_ascii=False))).lastrowid
 
 
 def video_update(video_id, **fields):
     if "scenes" in fields:
         fields["scenes"] = json.dumps(fields["scenes"], ensure_ascii=False)
+    if "options" in fields:
+        fields["options"] = json.dumps(fields["options"], ensure_ascii=False)
     if not fields:
         return
     with conn() as c:

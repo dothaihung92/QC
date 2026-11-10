@@ -733,6 +733,30 @@
     </div>
   </div>
   <div class="card">
+    <h2>🎙 Lồng giọng đọc vào clip có sẵn</h2>
+    <p class="muted small">Tải clip của bạn lên + dán kịch bản → phần mềm tạo <b>giọng đọc tiếng Việt</b> (giọng chọn ở "Cài đặt clip") rồi ghép vào clip,
+      tự khớp độ dài, có thể kèm <b>phụ đề tô sáng từng chữ</b>.</p>
+    <div class="row2">
+      <div class="col">
+        <label>Clip của bạn <span class="muted small">(MP4, MOV, WEBM… tối đa 1 GB)</span></label>
+        <input type="file" id="voFile" accept="video/*,.mp4,.mov,.m4v,.webm,.mkv,.avi" onchange="voPick()">
+        <div id="voInfo" class="small muted" style="margin:4px 0"></div>
+        <label>Tên clip (tùy chọn)</label><input id="voTitle" placeholder="Clip lồng tiếng">
+        <label>Khi lời đọc dài / ngắn hơn clip</label>
+        <select id="voFit"></select>
+        <label>Tiếng gốc của clip</label>
+        <select id="voAudio"></select>
+        <label style="font-weight:400"><input type="checkbox" id="voCaps" style="width:auto" checked> Hiện phụ đề tô sáng từng chữ đang đọc</label>
+      </div>
+      <div class="col">
+        <label>Kịch bản lời đọc</label>
+        <textarea id="voScript" rows="11" placeholder="Dán hoặc viết lời đọc vào đây. Mỗi câu một ý, xuống dòng khi sang đoạn mới (phần mềm nghỉ lâu hơn ở chỗ xuống dòng).&#10;Số, ngày tháng nên viết như người đọc (vd: ngày một tháng bảy)."></textarea>
+        <div class="btns"><button class="btn pri" id="voMake" onclick="voCreate()">🎙 Tạo giọng đọc vào clip</button></div>
+        <p class="muted small" id="voHint"></p>
+      </div>
+    </div>
+  </div>
+  <div class="card">
     <h2>Clip của bạn</h2>
     <div id="vdList"></div>
   </div>
@@ -872,6 +896,7 @@ let VCFG = null, VIDEOS = [], VSRC = [], VPRESET = null, vdTimer = null;
 const VD_ST = { draft: ['Kịch bản','p-info'], rendering: ['Đang dựng','p-warn'], done: ['Đã dựng','p-ok'], failed: ['Lỗi','p-err'] };
 function vdFromNews(id) { VPRESET = 'news:' + id; openTab('video'); }
 async function loadVideo() {
+  voInit().then(() => vdRenderList()).catch(() => {});
   VCFG = await api('/api/video/config');
   $('vdVoice').innerHTML = [['vieneu:', '⭐ VieNeu-TTS — giọng Việt chạy trên máy bạn, miễn phí'], ['gemini:', 'Gemini AI (cần Gemini key)'], ['vi-VN', 'Microsoft — cần Internet'], ['piper:', 'Piper — offline']]
     .map(([pre, lbl]) => `<optgroup label="${lbl}">${Object.entries(VCFG.voices).filter(([k]) => k.startsWith(pre))
@@ -999,8 +1024,79 @@ function vdScene(v, s, i) {
     <textarea data-v="${v.id}" data-i="${i}" data-f="items" rows="2" placeholder="Ý hiện trên màn hình — mỗi dòng 1 ý (tối đa 4)">${esc((s.items || []).join('\n'))}</textarea>
   </div>`;
 }
+// ---- lồng giọng đọc vào clip có sẵn
+let VO = null, VO_OPT = null;
+async function voInit() {
+  if (!VO_OPT) VO_OPT = await api('/api/voiceover/options');
+  const fill = (id, o, cur) => { $(id).innerHTML = Object.entries(o).map(([k, t]) => `<option value="${k}">${esc(t)}</option>`).join(''); if (cur) $(id).value = cur; };
+  if (!$('voFit').options.length) { fill('voFit', VO_OPT.fit); fill('voAudio', VO_OPT.audio); }
+}
+function voUp(file) {                                   // gửi nguyên tệp (có thanh tiến độ)
+  return new Promise((ok, no) => {
+    const x = new XMLHttpRequest();
+    x.open('POST', '/api/voiceover/upload?filename=' + encodeURIComponent(file.name));
+    x.upload.onprogress = e => { if (e.lengthComputable) $('voInfo').textContent = `⏳ Đang tải clip lên... ${Math.round(e.loaded / e.total * 100)}%`; };
+    x.onload = () => { let d = {}; try { d = JSON.parse(x.responseText); } catch {} x.status < 300 ? ok(d) : no(new Error(d.detail || x.statusText)); };
+    x.onerror = () => no(new Error('Mất kết nối khi tải clip lên'));
+    x.send(file);
+  });
+}
+async function voPick() {
+  const f = $('voFile').files[0]; VO = null;
+  if (!f) { $('voInfo').textContent = ''; return; }
+  try {
+    VO = await voUp(f);
+    $('voInfo').innerHTML = `✅ Đã tải lên: <b>${esc(f.name)}</b> · ${VO.width}×${VO.height} · dài ${vdFmtSec(Math.round(VO.duration))} · ${VO.has_audio ? 'có tiếng gốc' : 'không có tiếng'}`;
+    if (!$('voTitle').value) $('voTitle').value = f.name.replace(/\.[^.]+$/, '');
+  } catch (e) { $('voInfo').textContent = '⚠ ' + e.message; toast('⚠ ' + e.message); }
+}
+async function voCreate() {
+  if (!VO) return toast('Chọn clip và đợi tải lên xong');
+  if ($('voScript').value.trim().length < 5) return toast('Nhập kịch bản lời đọc');
+  $('voMake').disabled = true;
+  try {
+    await api('/api/voiceover', { method: 'POST', body: { token: VO.token, script: $('voScript').value, title: $('voTitle').value,
+      fit: $('voFit').value, audio: $('voAudio').value, captions: $('voCaps').checked } });
+    toast('🎙 Đang tạo giọng đọc và ghép vào clip — xem tiến trình ở "Clip của bạn"');
+    VO = null; $('voFile').value = ''; $('voInfo').textContent = ''; $('voScript').value = ''; $('voTitle').value = '';
+    vdLoadList();
+  } finally { $('voMake').disabled = false; }
+}
+async function voRender(id) {
+  await api('/api/voiceover/' + id, { method: 'PUT', body: { title: $('vt' + id).value, script: $('vos' + id).value, fit: $('vof' + id).value,
+    audio: $('voa' + id).value, captions: $('voc' + id).checked } });
+  await api('/api/videos/' + id + '/render', { method: 'POST' });
+  toast('🎙 Đang tạo lại giọng đọc và ghép vào clip...'); vdLoadList();
+}
+function voCard(v) {
+  const [lbl, cls] = VD_ST[v.status] || [v.status, 'p-info'], busy = v.status === 'rendering', o = v.options || {};
+  const sel = (id, opts, cur) => `<select id="${id}${v.id}">${Object.entries(opts).map(([k, t]) => `<option value="${k}" ${k === cur ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
+  return `<div class="card" style="margin:0 0 12px">
+    <span class="pill ${cls}">${lbl}</span> <span class="pill p-info">🎙 lồng giọng</span> <b>${esc(v.title || 'Clip #' + v.id)}</b>
+    <span class="muted small">${fmt(v.created_at)}${v.duration ? ' · dài ' + vdFmtSec(Math.round(v.duration)) : ''}${v.fb_video_id ? ' · đã đăng Fanpage' : ''}</span>
+    ${busy ? `<p class="small">⏳ ${esc(v.progress || 'Đang dựng...')}</p>` : ''}
+    ${v.error ? `<div class="small" style="color:#b42318">${esc(v.error)}</div>` : ''}
+    ${v.has_file && !busy ? `<div style="margin:8px 0"><video src="/api/videos/${v.id}/file?t=${v.duration}" controls preload="metadata"
+        style="max-height:420px;max-width:100%;border-radius:8px;background:#000"></video></div>` : ''}
+    <details ${v.status === 'draft' || v.status === 'failed' ? 'open' : ''}><summary class="small">Sửa kịch bản &amp; tùy chọn</summary>
+      <label>Tên clip</label><input id="vt${v.id}" value="${esc(v.title)}">
+      <label>Kịch bản lời đọc</label><textarea id="vos${v.id}" rows="8">${esc(v.script || '')}</textarea>
+      <label>Khi lời đọc dài / ngắn hơn clip</label>${sel('vof', VO_OPT?.fit || {}, o.fit)}
+      <label>Tiếng gốc của clip</label>${sel('voa', VO_OPT?.audio || {}, o.audio)}
+      <label style="font-weight:400"><input type="checkbox" id="voc${v.id}" style="width:auto" ${o.captions === false ? '' : 'checked'}> Phụ đề tô sáng từng chữ</label>
+      <label>Mô tả đăng kèm (khi đăng Fanpage)</label><textarea id="vds${v.id}" rows="2" onblur="voDesc(${v.id}, this.value)">${esc(v.description || '')}</textarea>
+    </details>
+    <div class="btns">
+      <button class="btn pri" onclick="voRender(${v.id})" ${busy ? 'disabled' : ''}>🎙 ${v.has_file ? 'Tạo lại' : 'Tạo giọng đọc vào clip'}</button>
+      ${v.has_file && !busy ? `<a class="btn" href="/api/videos/${v.id}/file?download=1">⬇ Tải về</a>
+        <button class="btn" onclick="vdPublish(${v.id})">📤 Đăng lên Fanpage</button>` : ''}
+      <button class="btn" onclick="vdDelete(${v.id})" ${busy ? 'disabled' : ''}>Xóa</button>
+    </div></div>`;
+}
+async function voDesc(id, text) { await api('/api/voiceover/' + id, { method: 'PUT', body: { description: text } }); }
 function vdRenderList() {
   $('vdList').innerHTML = VIDEOS.length ? VIDEOS.map(v => {
+    if (v.kind === 'voiceover') return voCard(v);
     const [lbl, cls] = VD_ST[v.status] || [v.status, 'p-info'];
     const busy = v.status === 'rendering';
     return `<div class="card" style="margin:0 0 12px">

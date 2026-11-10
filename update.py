@@ -54,6 +54,7 @@ FILES = [
     "app/techlook.py",
     "app/themes.py",
     "app/formats.py",
+    "app/voiceover.py",
     "app/layouts.py",
     "app/server.py",
     "static/index.html",
