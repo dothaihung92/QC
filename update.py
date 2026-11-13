@@ -46,6 +46,7 @@ FILES = [
     "app/newsagent.py",
     "app/legallinks.py",
     "app/wordpress.py",
+    "app/backlinks.py",
     "app/video.py",
     "app/aimedia.py",
     "app/explainer.py",

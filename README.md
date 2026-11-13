@@ -93,6 +93,7 @@ app/db.py         # SQLite: bài đăng, khách tiềm năng, cài đặt, nhậ
 app/newsagent.py  # Agent tin tức: dò bài thuế/kế toán, AI viết lại, đăng web + Fanpage
 app/video.py      # Tạo clip ngắn từ bài viết (kịch bản AI, giọng đọc, phụ đề, FFmpeg)
 static/index.html # Giao diện
+app/backlinks.py                  # Hệ thống đi backlink chất lượng (tab 🔗 Backlink)
 static/seo-writer.html, static/qc-bridge.js  # Công cụ viết bài SEO + nút đẩy bài sang Fanpage
 update.py         # Tự cập nhật phần mềm từ GitHub, chạy mỗi lần bấm start.bat
 start.bat / run_server.bat / start.sh  # Chạy nhanh trên Windows / Mac-Linux
@@ -137,6 +138,12 @@ trình duyệt như trên. Bài đăng trong nhóm **không có** thống kê/b�
 
 ## Viết bài bằng AI
 
+- **🔗 Backlink** (tab trên thanh menu): hệ thống đi backlink chất lượng, an toàn (white-hat) cho website dịch vụ kế toán — không mua bán link, không spam, không đăng tự động hàng loạt.
+  - *Hồ sơ website*: thương hiệu, NAP, từ khóa → trang đích, đối thủ, mục tiêu link/tuần.
+  - *Cơ hội & công cụ tìm*: 11 hướng đi (hồ sơ NAP, danh bạ uy tín, guest post, báo chí/chuyên gia, trang tài nguyên, link chết, nhắc thương hiệu chưa link, học từ đối thủ, đối tác/hiệp hội/trường học, diễn đàn hỏi đáp, tài sản liên kết) kèm câu tìm Google sẵn. Nút **Tự tìm & chấm điểm** chạy Bing/DuckDuckGo, mở từng trang thật và chấm 0–100 (đúng chủ đề kế toán/thuế, spam, noindex, quá nhiều link ra ngoài, có nhận bài, có email) → hạng A/B/C, loại trang spam. Có công cụ chấm một trang, **quét link chết** (broken link building).
+  - *Sổ backlink*: ý tưởng → đã liên hệ → phản hồi → đã đăng → LIVE / mất link, hẹn follow-up sau 5 ngày, lịch sử từng dòng, xuất CSV. Nút **Kiểm tra** mở trang chứa link, xác nhận còn link không, anchor, dofollow/nofollow/sponsored/ugc, trang có noindex không; tự kiểm tra lại mỗi ngày và ghi Nhật ký khi mất link.
+  - *Tổng quan*: số link sống, tên miền liên kết, % dofollow, hạng A, nhịp tuần/tháng, **anchor text** (thương hiệu / URL / một phần / chung chung / chính xác — cảnh báo khi lạm dụng từ khóa chính xác, gợi ý anchor kế tiếp), việc cần làm hôm nay.
+  - *AI soạn nội dung* (cần Gemini key): email chào hàng guest post / xin vào trang tài nguyên / báo link chết / nhờ gắn link / đối tác / follow-up, nhận định chuyên gia gửi báo, bài guest post có đúng 1 link tự nhiên (link lạ AI tự chèn bị gỡ), mô tả danh bạ 3 độ dài, nháp trả lời diễn đàn, ý tưởng tài sản liên kết. AI chỉ dùng thông tin trong hồ sơ; email gửi 1-1 qua ứng dụng email của bạn (mailto), không gửi hàng loạt.
 - **✍️ Viết bài SEO** (nút trên thanh menu, mở `/seo-writer`): công cụ SEO Article Writer dùng Gemini. Ở tab *Tin tức AI*, nút **✍️ SEO bài viết** chuyển bài tin sang đây, tự điền form (từ khóa, văn bản pháp luật, nội dung nguồn) và tự bấm tạo bài chuẩn SEO (cần Gemini key đã nhập ở tab này).
 - **📌 SEO bài viết bám sát bài gốc**: bài gửi từ Tin tức AI được viết lại KHÔNG dùng Google Search / Nghiên cứu sâu, giữ đủ tình huống, số liệu, số hiệu văn bản và kết luận của bài gốc; viết xong phần mềm đối chiếu (số tiền, tỷ lệ, số hiệu, ngày, năm) — có thông tin lạ hoặc thiếu số liệu thì AI tự sửa lại và hiện thẻ "Đối chiếu với bài gốc". Mục lục "Nội dung chính" mặc định tắt (tránh trùng plugin mục lục của web).
 - **✨ AI viết bài đăng nhóm + ảnh đính kèm** (tab Đăng nhóm): điền nội dung vào khung, tick các nhóm, bấm "✨ AI viết bài & đăng lên nhóm" — AI viết lại mỗi nhóm một bài khác nhau (giữ đúng ý / thông tin của bạn, kiểm tra độ giống nhau), kèm ảnh bạn chọn từ máy (tối đa 10 ảnh, tải lên cùng bài ở mỗi nhóm), rồi tự đăng bằng trình duyệt, nhóm đông thành viên nhất trước. Có nút "xem trước, chưa đăng" để duyệt / sửa từng bài trước khi đăng. Điền link thì link được bình luận dưới bài. Ô "Link kèm theo": mặc định **gắn thẳng vào cuối bài viết** (có thể đổi sang bình luận dưới bài); ô "Hướng viết của AI" mặc định **kêu gọi tải & dùng thử phần mềm** (hoặc giới thiệu dịch vụ / chia sẻ kiến thức).

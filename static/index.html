@@ -156,6 +156,7 @@
     <button data-s="activity">Nhật ký</button>
     <button data-s="guide">Hướng dẫn</button>
     <button data-s="seo">✍️ Viết bài SEO</button>
+    <button data-s="backlink">🔗 Backlink</button>
   </nav>
 </header>
 
@@ -766,6 +767,107 @@
 </section>
 
 <!-- ============================ VIẾT BÀI SEO (nạp khi mở tab lần đầu) -->
+<!-- ============================ BACKLINK -->
+<section id="backlink">
+  <div class="card">
+    <h2>🔗 Hệ thống đi backlink chất lượng — dịch vụ kế toán</h2>
+    <p class="muted small" style="margin:0 0 8px">Làm theo cách <b>an toàn, bền vững</b>: tìm trang đúng chủ đề → chấm điểm → liên hệ bằng email cá nhân hóa → theo dõi → tự kiểm tra link còn sống.
+      Không mua bán link, không spam, không đăng tự động hàng loạt (Google sẽ phạt). Mọi trang đều do công cụ tìm kiếm trả về và được mở kiểm tra thật.</p>
+    <div class="btns" style="margin:0" id="blTabs">
+      <button class="btn pri" data-t="dash" onclick="blTab('dash')">📊 Tổng quan & kế hoạch</button>
+      <button class="btn" data-t="opps" onclick="blTab('opps')">🎯 Cơ hội & công cụ tìm</button>
+      <button class="btn" data-t="list" onclick="blTab('list')">📒 Sổ backlink</button>
+      <button class="btn" data-t="ai" onclick="blTab('ai')">✨ AI soạn nội dung</button>
+      <button class="btn" data-t="site" onclick="blTab('site')">⚙ Hồ sơ website</button>
+    </div>
+  </div>
+
+  <div id="bl-dash"></div>
+
+  <div id="bl-opps" style="display:none">
+    <div class="card">
+      <h2>🧰 Công cụ nhanh</h2>
+      <div class="row2">
+        <div class="col"><label>Chấm điểm một trang (có đáng đi link không?)</label>
+          <div style="display:flex;gap:8px"><input id="blAnUrl" placeholder="https://trang-can-xem.vn/bai-viet"><button class="btn" onclick="blAnalyze()">Chấm điểm</button></div>
+          <div id="blAnOut" class="small" style="margin-top:8px"></div></div>
+        <div class="col"><label>Quét link chết trên trang tài nguyên (broken link building)</label>
+          <div style="display:flex;gap:8px"><input id="blBrUrl" placeholder="https://trang-tai-nguyen.vn/lien-ket-huu-ich"><button class="btn" onclick="blBroken()">Quét</button></div>
+          <div id="blBrOut" class="small" style="margin-top:8px"></div></div>
+      </div>
+    </div>
+    <div id="blOppList"></div>
+    <div class="card"><h2>⛔ Tuyệt đối tránh (bị Google phạt)</h2><ul id="blAvoid" class="small"></ul></div>
+  </div>
+
+  <div id="bl-list" style="display:none">
+    <div class="card">
+      <h2>➕ Thêm vào sổ</h2>
+      <div class="row2">
+        <div class="col"><label>Trang tiềm năng / trang sẽ chứa link (URL)</label><input id="blaUrl" placeholder="https://..."></div>
+        <div class="col"><label>Loại cơ hội</label><select id="blaKind"></select></div>
+        <div class="col"><label>Trang của bạn được link tới</label><input id="blaTarget" placeholder="để trống = trang chủ"></div>
+        <div class="col"><label>Email liên hệ</label><input id="blaContact" placeholder="ban-bien-tap@..."></div>
+      </div>
+      <label>Ghi chú</label><input id="blaNotes" placeholder="vd: chuyên mục Thuế, nhận bài 800 chữ trở lên">
+      <div class="btns"><button class="btn pri" onclick="blAdd()">Thêm</button>
+        <button class="btn" onclick="blAdd(true)">Thêm + chấm điểm trang</button></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><h2 style="margin:0">📒 Sổ backlink</h2>
+        <select id="blFilter" style="width:auto" onchange="blLoadList()"></select>
+        <button class="btn" onclick="blRecheck()">🔄 Kiểm tra lại link đã đăng</button>
+        <a class="btn" href="/api/backlinks-export.csv">⬇ Xuất CSV</a></div>
+      <div id="blTable" style="overflow-x:auto;margin-top:10px"></div>
+    </div>
+  </div>
+
+  <div id="bl-ai" style="display:none">
+    <div class="card">
+      <h2>✨ AI soạn nội dung backlink</h2>
+      <p class="muted small">Chỉ dùng thông tin trong Hồ sơ website (không bịa giải thưởng, số liệu, điều luật). Cần có Gemini API key (nhập ở tab 🤖 Tin tức AI). Luôn đọc và sửa lại trước khi gửi.</p>
+      <div class="row2">
+        <div class="col"><label>Loại nội dung</label><select id="blAiKind"></select></div>
+        <div class="col"><label>Dành cho trang trong sổ (tùy chọn)</label><select id="blAiRow"></select></div>
+      </div>
+      <div class="row2">
+        <div class="col"><label>Chủ đề / tiêu đề mong muốn <span class="muted small">(hoặc nội dung câu hỏi nếu trả lời diễn đàn)</span></label><input id="blAiTopic"></div>
+        <div class="col"><label>Anchor muốn dùng <span class="muted small" id="blAiAnchorHint"></span></label><input id="blAiAnchor" placeholder="để trống = AI chọn theo gợi ý"></div>
+      </div>
+      <div class="row2">
+        <div class="col"><label>Link chết cần thay (cho email báo link chết)</label><input id="blAiDead"></div>
+        <div class="col"><label>Ghi chú thêm</label><input id="blAiNotes"></div>
+      </div>
+      <div class="btns"><button class="btn pri" id="blAiGo" onclick="blAi()">✨ Soạn</button></div>
+    </div>
+    <div id="blAiOut"></div>
+  </div>
+
+  <div id="bl-site" style="display:none">
+    <div class="card">
+      <h2>⚙ Hồ sơ website</h2>
+      <div class="row2">
+        <div class="col"><label>Địa chỉ website</label><input id="bsUrl" placeholder="https://tenmiencuaban.vn"></div>
+        <div class="col"><label>Tên thương hiệu (đúng như muốn xuất hiện)</label><input id="bsBrand"></div>
+        <div class="col"><label>Thành phố / khu vực</label><input id="bsCity" placeholder="Hà Nội"></div>
+        <div class="col"><label>Số backlink chất lượng mong muốn mỗi tuần</label><input id="bsTarget" type="number" min="1" max="50"></div>
+      </div>
+      <div class="row2">
+        <div class="col"><label>Điện thoại</label><input id="bsPhone"></div>
+        <div class="col"><label>Email</label><input id="bsEmail"></div>
+        <div class="col"><label>Địa chỉ văn phòng</label><input id="bsAddr"></div>
+      </div>
+      <label>Dịch vụ chính</label><input id="bsServices" placeholder="kế toán trọn gói, báo cáo thuế, quyết toán, thành lập doanh nghiệp...">
+      <label>Mô tả doanh nghiệp (chỉ nêu điều có thật)</label><textarea id="bsDesc" rows="3"></textarea>
+      <label>Từ khóa → trang đích <span class="muted small">(mỗi dòng: từ khóa | https://trang-dich — dùng để chấm anchor và đặt câu tìm)</span></label>
+      <textarea id="bsKeywords" rows="4" placeholder="dịch vụ kế toán trọn gói | https://tenmien.vn/dich-vu-ke-toan&#10;quyết toán thuế cuối năm | https://tenmien.vn/quyet-toan-thue"></textarea>
+      <label>Đối thủ (tên miền, mỗi dòng một cái)</label><textarea id="bsComp" rows="2"></textarea>
+      <label style="font-weight:400"><input type="checkbox" id="bsAuto" style="width:auto"> Tự kiểm tra lại mọi link đã đăng mỗi ngày và báo khi mất link</label>
+      <div class="btns"><button class="btn pri" onclick="blSaveSite()">Lưu hồ sơ</button></div>
+    </div>
+  </div>
+</section>
+
 <section id="seo">
   <iframe id="seoFrame" title="Viết bài SEO" allow="clipboard-read; clipboard-write"></iframe>
 </section>
@@ -799,7 +901,7 @@ function openTab(name) {
   document.querySelector('main').classList.toggle('full', name === 'seo');
   if (name === 'seo' && !$('seoFrame').src) $('seoFrame').src = '/seo-writer';
   ({ overview: loadStatus, posts: loadPosts, script: loadScript, leads: loadLeads, activity: loadActivity,
-     groups: loadGroups, comments: loadComments, stats: loadStats, news: loadNews, video: loadVideo })[name]?.();
+     groups: loadGroups, comments: loadComments, stats: loadStats, news: loadNews, video: loadVideo, backlink: loadBacklink })[name]?.();
   // Ghi tab vào địa chỉ (vd 127.0.0.1:8787/#seo) để mở lại / lưu dấu trang đúng tab.
   if (location.hash.slice(1) !== name) history.replaceState(null, '', '#' + name);
 }
@@ -811,6 +913,216 @@ window.addEventListener('message', e => {
   if (e.origin === location.origin && e.data?.qc === 'group-job') { if (location.hash === '#groups') loadGroups(); pollBadges(); }
   if (e.origin === location.origin && e.data?.qc === 'open-tab') openTab(e.data.tab);
 });
+
+// ---------------- Backlink
+let BL = { tab: 'dash', opps: null, rows: [], st: {}, at: {}, site: null, rep: null };
+const BL_ST_CLS = { idea: 'p-info', contacted: 'p-warn', replied: 'p-warn', negotiating: 'p-warn', published: 'p-info', live: 'p-ok', lost: 'p-err', rejected: 'p-info' };
+const blTier = t => t ? `<span class="pill ${t === 'A' ? 'p-ok' : t === 'B' ? 'p-warn' : 'p-info'}">Hạng ${t}</span>` : '';
+const blSel = (id, o, cur, extra = '') => `<select id="${id}" ${extra}>${Object.entries(o).map(([k, t]) => `<option value="${esc(k)}" ${k === cur ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>`;
+async function blTab(t) {
+  BL.tab = t;
+  document.querySelectorAll('#blTabs button').forEach(b => b.classList.toggle('pri', b.dataset.t === t));
+  ['dash', 'opps', 'list', 'ai', 'site'].forEach(x => $('bl-' + x).style.display = x === t ? '' : 'none');
+  await ({ dash: blDash, opps: blOpps, list: blLoadList, ai: blAiInit, site: blLoadSite })[t]();
+}
+async function loadBacklink() { blTab(BL.tab); }
+async function blDash() {
+  const r = BL.rep = await api('/api/backlinks-report');
+  const A = r.anchors, na = r.next_anchor;
+  const bar = k => { const [lo, hi] = A.target[k], p = A.percent[k], bad = p > hi + 5;
+    return `<div style="display:flex;align-items:center;gap:8px;margin:4px 0"><span style="width:150px" class="small">${esc(BL.at[k] || k)}</span>
+      <div style="flex:1;background:#eef2f7;border-radius:6px;height:14px;position:relative"><div style="width:${Math.min(100, p)}%;height:100%;border-radius:6px;background:${bad ? 'var(--err)' : 'var(--pri)'}"></div>
+        <div style="position:absolute;left:${lo}%;width:${Math.max(1, hi - lo)}%;top:-2px;bottom:-2px;border:1px dashed #667;border-radius:4px;opacity:.6" title="Mức tự nhiên ${lo}–${hi}%"></div></div>
+      <span class="small" style="width:70px;text-align:right">${A.count[k]} · ${p}%</span></div>`; };
+  const st = (n, l, c = '') => `<div class="stat"><b ${c}>${n}</b><span>${l}</span></div>`;
+  $('bl-dash').innerHTML = `
+    <div class="grid" style="margin:14px 0">${st(r.live, 'Backlink đang sống')}${st(r.domains, 'Tên miền liên kết')}${st(r.dofollow_pct + '%', 'Dofollow')}${st(r.tierA, 'Link hạng A')}
+      ${st(r.week + ' / ' + r.target, 'Mới tuần này / mục tiêu')}${st(r.month, 'Mới 30 ngày')}${st(r.counts.lost, 'Mất link', r.counts.lost ? 'style="color:var(--err)"' : '')}</div>
+    <div class="row2"><div class="card"><h2>✅ Việc cần làm hôm nay</h2>
+      ${r.plan.length ? `<ul style="margin:0;padding-left:18px">${r.plan.map(t => `<li style="margin:6px 0">${esc(t.text)}
+        ${t.id ? ` <a href="#" onclick="blJump(${t.id});return false">mở</a>` : ''}</li>`).join('')}</ul>` : '<p class="muted">Không có việc gấp — tốt lắm! Hãy tiếp tục tìm cơ hội mới.</p>'}</div>
+    <div class="card"><h2>🔠 Anchor text (link đã đăng) ${A.total ? `<span class="muted small">— ${A.total} link</span>` : ''}</h2>
+      ${Object.keys(A.target).map(bar).join('')}
+      <p class="small muted" style="margin:6px 0">Khung nét đứt = tỉ lệ tự nhiên nên có. Từ khóa chính xác nhiều quá sẽ bị Google coi là thao túng.</p>
+      ${A.warnings.map(w => `<div class="small" style="color:var(--err)">⚠ ${esc(w)}</div>`).join('')}
+      <div class="small" style="margin-top:8px">👉 Link kế tiếp nên dùng anchor <b>${esc(na.label)}</b>${na.examples.length ? ': ' + na.examples.map(e => `<code>${esc(e)}</code>`).join(' · ') : ''}</div></div></div>
+    <div class="card"><div class="btns" style="margin:0"><button class="btn" onclick="blRecheck()">🔄 Kiểm tra lại tất cả link đã đăng</button>
+      <span class="muted small" style="align-self:center">${r.last_recheck ? 'Lần kiểm tra gần nhất: ' + fmt(r.last_recheck) : 'Chưa kiểm tra lần nào'}</span></div></div>`;
+}
+async function blJump(id) { await blTab('list'); $('blr' + id)?.scrollIntoView({ block: 'center' }); }
+async function blOpps() {
+  if (!BL.opps) BL.opps = await api('/api/backlinks/opportunities');
+  $('blAvoid').innerHTML = BL.opps.avoid.map(a => `<li>${esc(a)}</li>`).join('');
+  $('blOppList').innerHTML = BL.opps.items.map(o => `<div class="card" id="blo-${o.id}">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>${esc(o.name)}</b> ${blTier(o.tier)} <span class="pill p-info">Công sức: ${esc(o.effort)}</span>
+      <span class="muted small">${esc(o.link)}</span></div>
+    <p class="small" style="margin:6px 0">${esc(o.desc)}</p><p class="small muted" style="margin:6px 0"><b>Cách làm:</b> ${esc(o.how)}</p>
+    ${o.checklist ? `<p class="small">Nơi nên có hồ sơ: ${o.checklist.map(c => `<span class="pill p-info">${esc(c)}</span>`).join(' ')}</p>` : ''}
+    ${o.queries.length ? `<div class="small">Câu tìm: ${o.queries.map(q => `<a href="${esc(q.google)}" target="_blank" rel="noopener">${esc(q.q)}</a>`).join(' · ')}</div>` : ''}
+    <div class="btns">${o.queries.length ? `<button class="btn pri" onclick="blDiscover('${o.id}', this)">🔍 Tự tìm & chấm điểm trang</button>` : ''}
+      <button class="btn" onclick="blAddKind('${o.id}')">+ Thêm tay vào sổ</button>
+      ${o.ai ? `<button class="btn" onclick="blAiFor('${o.ai}')">✨ ${esc(BL.opps.ai[o.ai] || 'AI soạn')}</button>` : ''}</div>
+    <div id="blres-${o.id}"></div></div>`).join('');
+}
+async function blDiscover(kind, btn) {
+  const box = $('blres-' + kind); btn.disabled = true; box.innerHTML = '<p class="small">⏳ Đang tìm và mở từng trang để chấm điểm (30–90 giây)...</p>';
+  try {
+    const r = await api('/api/backlinks/discover', { method: 'POST', body: { kind } });
+    BL.cands = BL.cands || {}; BL.cands[kind] = r.candidates;
+    box.innerHTML = r.candidates.length ? `<p class="small muted">Đã mở ${r.scanned} trang, ${r.candidates.length} trang dùng được. Chỉ thêm trang hạng A/B, không có cờ đỏ.</p>
+      <table><tr><th></th><th>Trang</th><th>Điểm</th><th>Nhận xét</th></tr>${r.candidates.map((c, i) => `<tr style="${c.reject ? 'opacity:.55' : ''}">
+        <td><input type="checkbox" style="width:auto" ${!c.reject && !c.known && c.tier !== 'C' ? 'checked' : ''} ${c.known ? 'disabled' : ''} data-i="${i}"></td>
+        <td><a href="${esc(c.url)}" target="_blank" rel="noopener">${esc(c.title || c.domain)}</a><div class="muted small">${esc(c.domain)}${c.emails[0] ? ' · ✉ ' + esc(c.emails[0]) : ''}${c.known ? ' · đã có trong sổ' : ''}</div></td>
+        <td>${blTier(c.tier)} ${c.score}</td><td class="small">${c.why.map(w => '✓ ' + esc(w)).join('<br>')}${c.flags.map(w => `<br><span style="color:var(--err)">⚠ ${esc(w)}</span>`).join('')}
+        ${c.mentions_brand && !c.has_link ? '<br>🔔 nhắc thương hiệu nhưng chưa có link' : ''}${c.has_link ? '<br>✅ đã có link về bạn' : ''}</td></tr>`).join('')}</table>
+      <div class="btns"><button class="btn pri" onclick="blAddCands('${kind}')">Thêm các trang đã chọn vào sổ</button></div>`
+      : '<p class="small muted">Không tìm được trang phù hợp (công cụ tìm kiếm có thể đang chặn). Thử bấm các câu tìm ở trên để tự tìm trên Google, rồi dán link vào ô "Chấm điểm một trang".</p>';
+  } catch (e) { box.innerHTML = ''; } finally { btn.disabled = false; }
+}
+async function blAddCands(kind) {
+  const picks = [...document.querySelectorAll(`#blres-${kind} input[type=checkbox]:checked`)].map(x => BL.cands[kind][+x.dataset.i]);
+  let n = 0;
+  for (const c of picks) {
+    try { await api('/api/backlinks', { method: 'POST', body: { page_url: c.url, kind, score: c.score, tier: c.tier, contact: c.emails[0] || '', notes: c.title,
+        status: c.has_link ? 'live' : 'idea' } }); n++; } catch (e) { /* trùng / lỗi: bỏ qua */ }
+  }
+  toast(`Đã thêm ${n} trang vào sổ`); if (n) { document.querySelectorAll(`#blres-${kind} input:checked`).forEach(x => { x.checked = false; x.disabled = true; }); }
+}
+async function blAddKind(kind) { await blTab('list'); $('blaKind').value = kind; $('blaUrl').focus(); }
+async function blAnalyze() {
+  const u = $('blAnUrl').value.trim(); if (!u) return;
+  $('blAnOut').textContent = '⏳ Đang mở trang...';
+  const a = await api('/api/backlinks/analyze', { method: 'POST', body: { url: u } });
+  $('blAnOut').innerHTML = !a.ok ? `⚠ ${esc(a.error)}` : `<b>${esc(a.title || a.domain)}</b> — ${blTier(a.tier)} ${a.score}/100${a.reject ? ' <b style="color:var(--err)">· KHÔNG nên dùng</b>' : ''}
+    <br>${a.why.map(w => '✓ ' + esc(w)).join(' · ')} ${a.flags.map(w => `<span style="color:var(--err)">⚠ ${esc(w)}</span>`).join(' · ')}
+    <br>${a.emails.length ? '✉ ' + a.emails.map(esc).join(', ') : 'Không thấy email liên hệ'}${a.links_to_me.length ? '<br>✅ Trang đã có link về bạn: ' + a.links_to_me.map(l => esc(l.anchor) + ' (' + l.rel + ')').join(', ') : a.mentions_brand ? '<br>🔔 Nhắc thương hiệu nhưng chưa có link' : ''}
+    <br><a href="#" onclick="blFromAn('${esc(a.url)}', ${a.score}, '${a.tier}', '${esc(a.emails[0] || '')}');return false">+ Thêm vào sổ</a>`;
+}
+async function blFromAn(url, score, tier, contact) { await api('/api/backlinks', { method: 'POST', body: { page_url: url, score, tier, contact } }); toast('Đã thêm vào sổ'); }
+async function blBroken() {
+  const u = $('blBrUrl').value.trim(); if (!u) return;
+  $('blBrOut').textContent = '⏳ Đang kiểm tra từng link trên trang (có thể mất 1 phút)...';
+  const r = await api('/api/backlinks/broken', { method: 'POST', body: { url: u } });
+  $('blBrOut').innerHTML = !r.ok ? `⚠ ${esc(r.error)}` : `Đã kiểm tra ${r.checked} link ra ngoài trên “${esc(r.title)}”: <b>${r.dead.length} link chết</b>` +
+    (r.dead.length ? `<ul>${r.dead.map(d => `<li><code>${esc(d.url)}</code> <span class="muted">(${esc(d.anchor)})</span></li>`).join('')}</ul>
+      <a href="#" onclick="blFromBroken('${esc(r.url)}', '${esc(r.dead[0].url)}');return false">+ Thêm trang này vào sổ & soạn email báo link chết</a>` : '');
+}
+async function blFromBroken(url, dead) {
+  let row; try { row = await api('/api/backlinks', { method: 'POST', body: { page_url: url, kind: 'broken', notes: 'Link chết: ' + dead } }); } catch (e) { return; }
+  await blTab('ai'); $('blAiKind').value = 'pitch_broken'; $('blAiRow').value = row.id; $('blAiDead').value = dead;
+}
+async function blLoadList() {
+  if (!BL.opps) BL.opps = await api('/api/backlinks/opportunities');
+  const f = $('blFilter').value || '';
+  const d = await api('/api/backlinks' + (f ? '?status=' + f : ''));
+  BL.rows = d.items; BL.st = d.statuses; BL.at = d.anchor_types;
+  if (!$('blFilter').options.length) $('blFilter').innerHTML = '<option value="">Tất cả trạng thái</option>' + Object.entries(d.statuses).map(([k, t]) => `<option value="${k}">${esc(t)}</option>`).join('');
+  $('blFilter').value = f;
+  if (!$('blaKind').options.length) $('blaKind').innerHTML = BL.opps.items.map(o => `<option value="${o.id}">${esc(o.name)}</option>`).join('');
+  $('blTable').innerHTML = d.items.length ? `<table><tr><th>Trang</th><th>Hạng</th><th>Trạng thái</th><th>Link</th><th>Nhắc lại</th><th></th></tr>${d.items.map(blRow).join('')}</table>`
+    : '<p class="muted small">Sổ trống. Vào “Cơ hội & công cụ tìm” để tự tìm trang tiềm năng, hoặc thêm tay ở trên.</p>';
+}
+function blRow(r) {
+  const opp = BL.opps.items.find(o => o.id === r.kind);
+  const due = r.followup_at && r.followup_at * 1000 <= Date.now() && ['contacted', 'replied', 'negotiating'].includes(r.status);
+  return `<tr id="blr${r.id}"><td><a href="${esc(r.found_url || r.page_url)}" target="_blank" rel="noopener"><b>${esc(r.domain)}</b></a>
+      <div class="muted small">${esc(opp ? opp.name.split(':')[0].split('(')[0] : r.kind)}${r.contact ? ' · ✉ ' + esc(r.contact) : ''}</div>${r.notes ? `<div class="small">${esc(r.notes)}</div>` : ''}</td>
+    <td>${blTier(r.tier)}${r.score ? ' <span class="muted small">' + r.score + '</span>' : ''}</td>
+    <td><select onchange="blSet(${r.id}, {status: this.value})" style="width:auto">${Object.entries(BL.st).map(([k, t]) => `<option value="${k}" ${k === r.status ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+      ${r.last_result === 'not_found' ? '<div class="small" style="color:var(--err)">không thấy link</div>' : r.last_result === 'noindex' ? '<div class="small" style="color:var(--warn)">trang noindex</div>' : ''}</td>
+    <td class="small">${r.anchor ? `“${esc(r.anchor)}”<br>` : ''}${r.anchor_type ? `<span class="pill p-info">${esc(BL.at[r.anchor_type] || r.anchor_type)}</span> ` : ''}${r.rel ? `<span class="pill ${r.rel === 'dofollow' ? 'p-ok' : 'p-warn'}">${r.rel}</span>` : ''}
+      ${r.last_checked ? `<div class="muted">kiểm tra ${fmt(r.last_checked)}</div>` : ''}</td>
+    <td class="small" style="${due ? 'color:var(--err);font-weight:600' : ''}">${r.followup_at ? fmt(r.followup_at).split(',')[0] : ''}${due ? ' ⏰' : ''}</td>
+    <td style="white-space:nowrap"><button class="btn" title="Mở trang kiểm tra link còn không" onclick="blCheck(${r.id}, this)">✔ Kiểm tra</button>
+      <button class="btn" title="AI soạn email" onclick="blAiForRow(${r.id})">✉</button>
+      <button class="btn" title="Sửa" onclick="blEdit(${r.id})">✏</button>
+      <button class="btn" title="Xóa" onclick="blDel(${r.id})">🗑</button>
+      <details style="margin-top:4px"><summary class="small muted">lịch sử</summary><div class="small muted">${r.history.slice().reverse().map(h => `${fmt(h.t)} — ${esc(h.text)}`).join('<br>')}</div></details></td></tr>`;
+}
+async function blAdd(score) {
+  const u = $('blaUrl').value.trim(); if (!u) return toast('Nhập địa chỉ trang');
+  const body = { page_url: u, kind: $('blaKind').value, target_url: $('blaTarget').value.trim(), contact: $('blaContact').value.trim(), notes: $('blaNotes').value.trim() };
+  if (score) { const a = await api('/api/backlinks/analyze', { method: 'POST', body: { url: u } }); if (a.ok) { body.score = a.score; body.tier = a.tier; if (!body.contact) body.contact = a.emails[0] || ''; if (a.reject) toast('⚠ Trang này có cờ đỏ: ' + a.flags.join(', ')); } }
+  await api('/api/backlinks', { method: 'POST', body });
+  ['blaUrl', 'blaTarget', 'blaContact', 'blaNotes'].forEach(i => $(i).value = ''); toast('Đã thêm'); blLoadList();
+}
+async function blSet(id, body) { await api('/api/backlinks/' + id, { method: 'PUT', body }); blLoadList(); }
+async function blCheck(id, btn) {
+  btn.disabled = true; btn.textContent = '⏳';
+  try { const r = await api('/api/backlinks/' + id + '/check', { method: 'POST' }); const s = r.result.state;
+    toast(s === 'ok' ? `✅ Link còn sống (${r.result.rel}) — anchor “${r.result.anchor}”` : s === 'noindex' ? '⚠ Có link nhưng trang đặt noindex' : s === 'not_found' ? '❌ Trang mở được nhưng chưa thấy link về bạn' : '⚠ ' + (r.result.error || 'Không mở được trang')); }
+  finally { blLoadList(); }
+}
+function blEdit(id) {
+  const r = BL.rows.find(x => x.id === id); if (!r) return;
+  const tr = $('blr' + id); if ($('bled' + id)) { $('bled' + id).remove(); return; }
+  tr.insertAdjacentHTML('afterend', `<tr id="bled${id}"><td colspan="6" style="background:#f8fafc"><div class="row2">
+    <div class="col"><label>Trang chứa link (khi đã đăng, nếu khác trang liên hệ)</label><input id="bef${id}" value="${esc(r.found_url)}"></div>
+    <div class="col"><label>Trang của bạn được link tới</label><input id="bet${id}" value="${esc(r.target_url)}"></div>
+    <div class="col"><label>Anchor</label><input id="bea${id}" value="${esc(r.anchor)}"></div>
+    <div class="col"><label>Email liên hệ</label><input id="bec${id}" value="${esc(r.contact)}"></div>
+    <div class="col"><label>Chi phí (đ, nếu có)</label><input id="bek${id}" type="number" value="${r.cost || 0}"></div>
+    <div class="col"><label>Nhắc lại ngày</label><input id="bed${id}" type="date" value="${r.followup_at ? new Date(r.followup_at * 1000).toISOString().slice(0, 10) : ''}"></div></div>
+    <label>Ghi chú</label><input id="ben${id}" value="${esc(r.notes)}">
+    <div class="btns"><button class="btn pri" onclick="blSaveEdit(${id})">Lưu</button></div></td></tr>`);
+}
+async function blSaveEdit(id) {
+  const d = $('bed' + id).value;
+  await api('/api/backlinks/' + id, { method: 'PUT', body: { found_url: $('bef' + id).value, target_url: $('bet' + id).value, anchor: $('bea' + id).value, contact: $('bec' + id).value,
+    cost: $('bek' + id).value, notes: $('ben' + id).value, followup_at: d ? Math.floor(new Date(d + 'T09:00:00').getTime() / 1000) : null } });
+  blLoadList();
+}
+async function blDel(id) { if (!confirm('Xóa dòng này khỏi sổ?')) return; await api('/api/backlinks/' + id, { method: 'DELETE' }); blLoadList(); }
+async function blRecheck() {
+  toast('⏳ Đang kiểm tra lại các link đã đăng...');
+  const r = await api('/api/backlinks-recheck', { method: 'POST' });
+  toast(`Đã kiểm tra ${r.checked} link: ${r.ok} còn sống, ${r.lost.length} mất, ${r.errors} lỗi`); BL.tab === 'list' ? blLoadList() : blDash();
+}
+async function blAiInit() {
+  if (!BL.opps) BL.opps = await api('/api/backlinks/opportunities');
+  const d = await api('/api/backlinks'); BL.rows = d.items;
+  if (!$('blAiKind').options.length) $('blAiKind').innerHTML = Object.entries(BL.opps.ai).map(([k, t]) => `<option value="${k}">${esc(t)}</option>`).join('');
+  const cur = $('blAiRow').value;
+  $('blAiRow').innerHTML = '<option value="">— không chọn —</option>' + d.items.map(r => `<option value="${r.id}">${esc(r.domain)} · ${esc(d.statuses[r.status])}</option>`).join('');
+  $('blAiRow').value = cur;
+  const rep = BL.rep || await api('/api/backlinks-report');
+  $('blAiAnchorHint').textContent = rep.next_anchor.examples.length ? '— gợi ý: ' + rep.next_anchor.examples[0] : '';
+}
+async function blAiFor(kind) { await blTab('ai'); $('blAiKind').value = kind; }
+async function blAiForRow(id) { await blTab('ai'); $('blAiRow').value = id; }
+async function blAi() {
+  const btn = $('blAiGo'); btn.disabled = true; $('blAiOut').innerHTML = '<div class="card small">⏳ AI đang soạn...</div>';
+  try {
+    const r = await api('/api/backlinks-ai', { method: 'POST', body: { kind: $('blAiKind').value, id: +$('blAiRow').value || 0,
+      extra: { topic: $('blAiTopic').value, anchor: $('blAiAnchor').value, dead_url: $('blAiDead').value, notes: $('blAiNotes').value } } });
+    const box = (t, v) => `<label>${t} <button class="btn" onclick="navigator.clipboard.writeText(this.parentElement.nextElementSibling.value||this.parentElement.nextElementSibling.innerText);toast('Đã chép')">Chép</button></label><textarea rows="${Math.min(18, Math.max(3, String(v).split('\n').length + 2))}">${esc(v)}</textarea>`;
+    let h = '';
+    if (r.subject !== undefined) h += `<label>Tiêu đề email</label><input value="${esc(r.subject)}">`;
+    if (r.title) h += `<label>Tiêu đề bài</label><input value="${esc(r.title)}">`;
+    if (r.body) h += box(r.title ? 'Nội dung bài (HTML)' : 'Nội dung', r.body);
+    if (r.title && r.has_link === false) h += '<p class="small" style="color:var(--err)">⚠ AI chưa đặt link tới trang đích trong bài — hãy thêm tay đúng 1 link.</p>';
+    if (r.author_bio) h += box('Giới thiệu tác giả', r.author_bio);
+    for (const k of ['short', 'medium', 'long', 'tagline']) if (r[k]) h += box({ short: 'Mô tả ngắn (~50 từ)', medium: 'Mô tả vừa (~150 từ)', long: 'Mô tả dài (~300 từ)', tagline: 'Khẩu hiệu' }[k], r[k]);
+    if (r.categories) h += `<p class="small">Danh mục gợi ý: ${r.categories.map(c => `<span class="pill p-info">${esc(c)}</span>`).join(' ')}</p>`;
+    if (r.note) h += `<p class="small muted">${esc(r.note)}</p>`;
+    if (r.ideas) h += r.ideas.map(i => `<div class="cm"><b>${esc(i.title)}</b> <span class="pill p-info">Độ khó ${i.difficulty}/5</span><p class="small" style="margin:4px 0">${esc(i.what)}</p>
+      <p class="small muted" style="margin:4px 0"><b>Cách làm:</b> ${esc(i.how)}<br><b>Ai sẽ dẫn link:</b> ${esc(i.who_links)}</p></div>`).join('');
+    if (r.mailto) h += `<div class="btns"><a class="btn pri" href="${esc(r.mailto)}">✉ Mở trong ứng dụng email để gửi</a></div>`;
+    h += '<p class="small muted">Đọc lại, sửa cho đúng thực tế rồi mới gửi. Gửi 1-1, không gửi hàng loạt.</p>';
+    $('blAiOut').innerHTML = `<div class="card">${h}</div>`;
+  } catch (e) { $('blAiOut').innerHTML = ''; } finally { btn.disabled = false; }
+}
+async function blLoadSite() {
+  const s = BL.site = await api('/api/backlinks/site');
+  const m = { bsUrl: 'url', bsBrand: 'brand', bsCity: 'city', bsTarget: 'weekly_target', bsPhone: 'phone', bsEmail: 'email', bsAddr: 'address', bsServices: 'services', bsDesc: 'description', bsKeywords: 'keywords', bsComp: 'competitors' };
+  for (const [id, k] of Object.entries(m)) $(id).value = s[k] ?? '';
+  $('bsAuto').checked = s.auto_check;
+}
+async function blSaveSite() {
+  const m = { bsUrl: 'url', bsBrand: 'brand', bsCity: 'city', bsTarget: 'weekly_target', bsPhone: 'phone', bsEmail: 'email', bsAddr: 'address', bsServices: 'services', bsDesc: 'description', bsKeywords: 'keywords', bsComp: 'competitors' };
+  const body = { auto_check: $('bsAuto').checked }; for (const [id, k] of Object.entries(m)) body[k] = $(id).value;
+  await api('/api/backlinks/site', { method: 'PUT', body }); BL.opps = null; toast('✅ Đã lưu hồ sơ website');
+}
 
 // ---------------- Tin tức AI
 const NEWS_ST = { pending: ['Chờ duyệt','p-warn'], published: ['Đã đăng','p-ok'], rejected: ['Đã bỏ','p-info'],

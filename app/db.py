@@ -118,6 +118,31 @@ CREATE TABLE IF NOT EXISTS videos (
     error        TEXT DEFAULT '',
     created_at   INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS backlinks (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    domain       TEXT NOT NULL,
+    page_url     TEXT NOT NULL DEFAULT '',       -- trang tiềm năng / trang sẽ chứa link
+    kind         TEXT NOT NULL DEFAULT '',       -- loại cơ hội (guest, resource, directory...)
+    status       TEXT NOT NULL DEFAULT 'idea',   -- idea|contacted|replied|negotiating|published|live|lost|rejected
+    target_url   TEXT NOT NULL DEFAULT '',       -- trang của mình được link tới
+    anchor       TEXT NOT NULL DEFAULT '',
+    anchor_type  TEXT NOT NULL DEFAULT '',       -- brand|naked|partial|generic|exact|image
+    rel          TEXT NOT NULL DEFAULT '',       -- dofollow|nofollow|sponsored|ugc
+    found_url    TEXT NOT NULL DEFAULT '',       -- trang thực tế chứa link (nếu khác page_url)
+    contact      TEXT NOT NULL DEFAULT '',
+    notes        TEXT NOT NULL DEFAULT '',
+    score        INTEGER NOT NULL DEFAULT 0,
+    tier         TEXT NOT NULL DEFAULT '',
+    cost         INTEGER NOT NULL DEFAULT 0,
+    followup_at  INTEGER,
+    last_checked INTEGER,
+    last_result  TEXT NOT NULL DEFAULT '',
+    live_since   INTEGER,
+    created_at   INTEGER NOT NULL,
+    updated_at   INTEGER NOT NULL,
+    history      TEXT NOT NULL DEFAULT '[]'
+);
+CREATE INDEX IF NOT EXISTS idx_backlinks_status ON backlinks(status);
 CREATE TABLE IF NOT EXISTS activity (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     created_at INTEGER NOT NULL,

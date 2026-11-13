@@ -18,7 +18,7 @@ from fastapi.responses import (FileResponse, HTMLResponse, PlainTextResponse, Re
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 
-from . import (autoreply, bot, config, content, db, facebook, groupwriter, legallinks, newsagent, replies, video,
+from . import (autoreply, backlinks, bot, config, content, db, facebook, groupwriter, legallinks, newsagent, replies, video,
                voiceover, wordpress)
 from .facebook import FacebookError
 
@@ -99,6 +99,8 @@ def scheduler_loop(interval=20):
                 publish(post)
             run_plugs()
             newsagent.tick()
+            if backlinks.due():                                   # kiểm tra lại backlink mỗi ngày (luồng riêng, không làm nghẽn lịch đăng)
+                threading.Thread(target=backlinks.tick, daemon=True).start()
             if groupbot:
                 groupbot.run_due_auto_jobs()
         except Exception as e:
@@ -1117,6 +1119,124 @@ def video_edit(vid: int, body: VideoEdit):
         fields["scenes"] = video.clean_scenes(fields["scenes"])
     db.video_update(vid, **fields)
     return video.to_json(db.video_get(vid))
+
+
+# ----- hệ thống đi backlink --------------------------------------------------------
+
+def _bl_404(e):
+    return HTTPException(404, "Không có backlink này")
+
+
+@admin.get("/api/backlinks/site")
+def bl_site_get():
+    return backlinks.get_site()
+
+
+@admin.put("/api/backlinks/site")
+def bl_site_put(body: dict):
+    return backlinks.save_site(body)
+
+
+@admin.get("/api/backlinks/opportunities")
+def bl_opps():
+    return {"items": backlinks.opportunities(), "avoid": backlinks.AVOID, "ai": backlinks.AI_KINDS}
+
+
+@admin.post("/api/backlinks/discover")
+async def bl_discover(body: dict):
+    from starlette.concurrency import run_in_threadpool
+    try:
+        return await run_in_threadpool(backlinks.discover, str(body.get("kind", "")), str(body.get("query", "")).strip())
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@admin.post("/api/backlinks/analyze")
+async def bl_analyze(body: dict):
+    from starlette.concurrency import run_in_threadpool
+    url = str(body.get("url", "")).strip()
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    return await run_in_threadpool(backlinks.analyze, url)
+
+
+@admin.post("/api/backlinks/broken")
+async def bl_broken(body: dict):
+    from starlette.concurrency import run_in_threadpool
+    url = str(body.get("url", "")).strip()
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    return await run_in_threadpool(backlinks.broken_links, url)
+
+
+@admin.get("/api/backlinks")
+def bl_list(status: str = "", kind: str = ""):
+    return {"items": backlinks.list_rows(status, kind), "statuses": backlinks.STATUSES, "anchor_types": backlinks.ANCHOR_TYPES}
+
+
+@admin.post("/api/backlinks")
+def bl_add(body: dict):
+    try:
+        return backlinks.add_row(body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@admin.put("/api/backlinks/{bid}")
+def bl_update(bid: int, body: dict):
+    try:
+        return backlinks.update_row(bid, body)
+    except KeyError as e:
+        raise _bl_404(e)
+
+
+@admin.delete("/api/backlinks/{bid}")
+def bl_delete(bid: int):
+    if not backlinks.delete_row(bid):
+        raise HTTPException(404, "Không có backlink này")
+    return {"ok": True}
+
+
+@admin.post("/api/backlinks/{bid}/check")
+async def bl_check(bid: int):
+    from starlette.concurrency import run_in_threadpool
+    try:
+        return await run_in_threadpool(backlinks.verify_row, bid)
+    except KeyError as e:
+        raise _bl_404(e)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@admin.post("/api/backlinks-recheck")
+async def bl_recheck():
+    from starlette.concurrency import run_in_threadpool
+    return await run_in_threadpool(backlinks.recheck_all)
+
+
+@admin.get("/api/backlinks-report")
+def bl_report():
+    return backlinks.report()
+
+
+@admin.get("/api/backlinks-export.csv")
+def bl_export():
+    return PlainTextResponse(backlinks.export_csv(), media_type="text/csv; charset=utf-8",
+                             headers={"Content-Disposition": 'attachment; filename="backlinks.csv"'})
+
+
+@admin.post("/api/backlinks-ai")
+async def bl_ai(body: dict):
+    from starlette.concurrency import run_in_threadpool
+    try:
+        out = await run_in_threadpool(backlinks.generate, str(body.get("kind", "")), int(body.get("id") or 0),
+                                      body.get("extra") if isinstance(body.get("extra"), dict) else {})
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(400, str(e))
+    row = backlinks.get_row(int(body.get("id") or 0)) if body.get("id") else None
+    if row and row["contact"] and out.get("subject"):
+        out["mailto"] = backlinks.mailto(row["contact"], out["subject"], out.get("body", ""))
+    return out
 
 
 # ----- lồng giọng đọc vào clip có sẵn ---------------------------------------------
