@@ -30,6 +30,8 @@ MARKER = PROFILE_DIR / ".da_dang_nhap"
 SHOTS = config.DATA_DIR / "groupbot-errors"
 
 PAUSE_AFTER_LOAD = (3000, 5000)   # ms, chờ trang group tải xong
+VIDEO_ATTACH_WAIT = 120           # giây, chờ clip hiện bản xem trước trong hộp soạn bài
+VIDEO_POST_WAIT = 300             # giây, chờ Facebook xử lý clip xong (nút Đăng sáng lên, hộp soạn đóng)
 PAUSE_AFTER_POST = 3000           # ms, chờ Facebook xử lý sau khi bấm Đăng
 STEP_TIMEOUT = 30000              # ms, chờ mỗi bước trên trang (ô viết bài, hộp soạn, nút Đăng)
 
@@ -392,8 +394,8 @@ PHOTO_BTN = re.compile(r"Ảnh\/video|Photo\/video|Ảnh|Photo", re.I)         #
 ADD_PHOTO = re.compile(r"Thêm ảnh\/video|Add photos\/videos|Add photo", re.I)
 
 
-def _attach_images(page, dialog, paths: list, timeout: int):
-    """Đính kèm ảnh vào bài đang soạn: bấm biểu tượng Ảnh/video → chọn tệp. Thử ô nhập tệp có sẵn, rồi tới hộp chọn tệp."""
+def _attach_images(page, dialog, paths: list, timeout: int, video: bool = False):
+    """Đính kèm ảnh (hoặc 1 clip video) vào bài đang soạn: bấm biểu tượng Ảnh/video → chọn tệp. Thử ô nhập tệp có sẵn, rồi tới hộp chọn tệp."""
     inp = dialog.locator("input[type='file']")
     if not inp.count():
         btn = dialog.get_by_role("button", name=PHOTO_BTN).first
@@ -416,19 +418,22 @@ def _attach_images(page, dialog, paths: list, timeout: int):
         if not inp.count():
             raise GroupBotError("Không đính kèm được ảnh (không tìm thấy ô chọn tệp)")
         inp.first.set_input_files(paths)
-    page.wait_for_timeout(2500 + 1500 * len(paths))   # chờ Facebook tải ảnh lên
+    page.wait_for_timeout(4000 if video else 2500 + 1500 * len(paths))   # chờ Facebook tải lên
+    sel = "img[src^='blob:'], img[src*='scontent'], [aria-label*='Xóa ảnh'], [aria-label*='Remove photo']"
+    if video:
+        sel += ", video, [aria-label*='Xóa video'], [aria-label*='Remove video'], [aria-label*='Xóa ảnh/video'], [aria-label*='Remove photo/video']"
     ok = False
-    for _ in range(12):
-        if dialog.locator("img[src^='blob:'], img[src*='scontent'], [aria-label*='Xóa ảnh'], [aria-label*='Remove photo']").count():
+    for _ in range(VIDEO_ATTACH_WAIT * 2 if video else 12):         # clip lớn hiện bản xem trước chậm hơn ảnh
+        if dialog.locator(sel).count():
             ok = True
             break
         page.wait_for_timeout(500)
     if not ok:
-        raise GroupBotError("Đã chọn ảnh nhưng không thấy ảnh hiện trong bài (chưa tải lên được)")
+        raise GroupBotError("Đã chọn " + ("clip" if video else "ảnh") + " nhưng không thấy hiện trong bài (chưa tải lên được)")
 
 
-def post_to_open_group(page, text: str, timeout: int = 0, images: list = None) -> str:
-    """Trang group đang mở → đăng `text` (kèm `images`: danh sách đường dẫn tệp ảnh). Trả 'ok' hoặc 'pending' (chờ quản trị viên duyệt)."""
+def post_to_open_group(page, text: str, timeout: int = 0, images: list = None, video: str = "") -> str:
+    """Trang group đang mở → đăng `text` (kèm `images`: danh sách đường dẫn tệp ảnh, hoặc `video`: đường dẫn 1 clip). Trả 'ok' hoặc 'pending' (chờ quản trị viên duyệt)."""
     timeout = timeout or STEP_TIMEOUT
     _check_session(page)
     opener = None
@@ -450,7 +455,10 @@ def post_to_open_group(page, text: str, timeout: int = 0, images: list = None) -
     how = _type_text(page, box, text)
     _log(f"… đã nhập nội dung ({how})")
     dialog = box.locator("xpath=ancestor::*[@role='dialog'][1]")
-    if images:
+    if video:
+        _log("… đính kèm clip (tải lên có thể mất vài phút)")
+        _attach_images(page, dialog, [str(video)], timeout, video=True)
+    elif images:
         _log(f"… đính kèm {len(images)} ảnh")
         _attach_images(page, dialog, [str(p) for p in images], timeout)
 
@@ -460,7 +468,7 @@ def post_to_open_group(page, text: str, timeout: int = 0, images: list = None) -
         btn.scroll_into_view_if_needed(timeout=3000)
     except Exception:  # noqa: BLE001
         pass
-    for _ in range(20):                       # nút Đăng sáng lên sau vài giây
+    for _ in range(VIDEO_POST_WAIT * 2 if video else 20):    # nút Đăng sáng lên sau vài giây (clip: sau khi Facebook xử lý xong)
         if btn.get_attribute("aria-disabled") != "true":
             break
         page.wait_for_timeout(500)
@@ -469,7 +477,7 @@ def post_to_open_group(page, text: str, timeout: int = 0, images: list = None) -
     _log("… bấm Đăng")
     btn.click()
     try:
-        dialog.wait_for(state="hidden", timeout=60000)
+        dialog.wait_for(state="hidden", timeout=VIDEO_POST_WAIT * 1000 if video else 60000)
     except Exception:  # noqa: BLE001
         raise GroupBotError("Đã bấm Đăng nhưng hộp soạn bài vẫn còn — chưa chắc bài đã lên")
     page.wait_for_timeout(PAUSE_AFTER_POST)
@@ -510,6 +518,12 @@ def _run_job(job_id: int, visible: bool = False):
     in_post = job.get("link_mode") == "post"             # post: link nằm cuối bài đăng · comment: bình luận link ngay dưới bài sau khi đăng
     from . import facebook
     imgs = [p for p in (facebook.local_media(r) for r in job.get("images", [])) if p]    # ảnh đính kèm (đã tải lên phần mềm)
+    clip = ""
+    if job.get("video"):                                  # clip tạo ở tab Tạo clip, đăng kèm vào mỗi nhóm (thay cho ảnh)
+        vrow = db.video_get(job["video"])
+        if not vrow or not vrow.get("path") or not Path(vrow["path"]).is_file():
+            raise GroupBotError("Clip đính kèm đã bị xóa hoặc chưa dựng xong — dựng lại clip rồi tạo lịch mới")
+        clip, imgs = vrow["path"], []
 
     _log("Chạy " + ("có hiện cửa sổ trình duyệt." if visible else "ẩn (không hiện cửa sổ)."))
     with sync_playwright() as p:
@@ -528,7 +542,7 @@ def _run_job(job_id: int, visible: bool = False):
                     body_text = g.get("text") or job["message"]
                     if in_post and link and link not in body_text:
                         body_text += "\n\n" + link
-                    result = post_to_open_group(page, body_text, images=imgs)   # mỗi nhóm 1 nội dung riêng
+                    result = post_to_open_group(page, body_text, images=imgs, **({"video": clip} if clip else {}))   # mỗi nhóm 1 nội dung riêng
                 except NoComposer as e:                    # nhóm không cho mình đăng → ghi nhận rồi sang nhóm khác
                     db.set_group_state(job_id, g["id"], "blocked")
                     _log(f"⛔ «{g['name']}»: {e} — bỏ qua nhóm này")

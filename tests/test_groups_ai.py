@@ -312,3 +312,34 @@ def test_bot_appends_link_to_the_post_in_post_mode(client, monkeypatch, tmp_path
     assert posted == ["bài riêng cho A\n\nhttps://x.vn/tai/"] and comments == []        # link ở cuối bài, không bình luận
     with __import__("pytest").raises(groupbot.GroupBotError, match="đã nằm trong bài"):
         groupbot._comment_job(jid)
+
+
+def _done_clip(tmp_path, name="Clip hướng dẫn"):
+    f = tmp_path / "clip.mp4"
+    f.write_bytes(b"x")
+    vid = db.video_add(name, "", [])
+    db.video_update(vid, status="done", path=str(f))
+    return vid
+
+
+def test_clip_can_be_posted_to_groups(client, monkeypatch, tmp_path):
+    a, b = _groups(client, ("Nhỏ", "111", 1000), ("Lớn", "222", 90000))
+    newsagent.save_config({"gemini_key": "k"})
+    vid = _done_clip(tmp_path)
+    draft = db.video_add("Chưa xong", "", [])
+    assert client.post("/api/group-jobs", json={"message": "Xem clip nhé", "group_ids": [a], "video_id": draft}).status_code == 400     # clip chưa dựng xong
+    assert client.post("/api/group-jobs", json={"message": "Xem clip nhé", "group_ids": [a], "video_id": 9999}).status_code == 400
+    r = client.post("/api/group-jobs", json={"message": "Xem clip nhé", "group_ids": [a, b], "video_id": vid, "images": ["/media/x.png"]})
+    assert r.status_code == 200
+    job = client.get("/api/group-jobs").json()[0]
+    assert job["video"] == vid and job["video_title"] == "Clip hướng dẫn" and job["images"] == []
+    monkeypatch.setattr(newsagent, "gemini_json", lambda p, c: {"posts": [{"n": k, "text": f"Bản {k}: xem clip hướng dẫn phần mềm nhé anh chị, mỗi nhóm một cách nói số {k * 7}."} for k in range(2)]})
+    r = client.post("/api/group-jobs/ai", json={"message": "Clip hướng dẫn tải tờ khai hàng loạt, dùng thử phần mềm", "group_ids": [a, b], "video_id": vid})
+    assert r.status_code == 200
+    assert client.get("/api/group-jobs").json()[0]["video"] == vid
+    assert client.post("/api/group-jobs/ai", json={"message": "Clip hướng dẫn tải tờ khai hàng loạt", "group_ids": [a], "video_id": draft}).status_code == 400
+
+
+def test_ui_clip_cards_have_post_to_groups_button():
+    html = TestClient(server.app).get("/").text
+    assert html.count("vdToGroups(${v.id})") == 2 and 'id="gjVideo"' in html and "video_id: GJ_VIDEO" in html

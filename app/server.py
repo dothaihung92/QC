@@ -1467,11 +1467,22 @@ def _job_images(refs) -> list:
     return out[:10]
 
 
+def _job_video(video_id: int) -> int:
+    """Clip (tab Tạo clip) đăng kèm vào nhóm: phải dựng xong và còn tệp. 0 = không kèm clip."""
+    if not video_id:
+        return 0
+    v = db.video_get(video_id)
+    if not v or v["status"] != "done" or not v.get("path") or not Path(v["path"]).is_file():
+        raise HTTPException(400, "Clip chưa dựng xong hoặc đã bị xóa — dựng lại clip rồi chọn lại")
+    return video_id
+
+
 class GroupJobIn(BaseModel):
     message: str
     link: str = ""
     link_mode: str = "post"               # post = gắn link vào cuối bài đăng · comment = bình luận link dưới bài
     images: list[str] = []
+    video_id: int = 0                     # clip đính kèm (thay cho ảnh)
     scheduled_at: Optional[int] = None    # None = đăng ngay (nhắc luôn)
     group_ids: list[int]
     auto: bool = False                    # đến giờ tự đăng bằng trình duyệt (thử nghiệm)
@@ -1480,7 +1491,12 @@ class GroupJobIn(BaseModel):
 
 @admin.get("/api/group-jobs")
 def list_group_jobs():
-    return db.list_group_jobs()
+    jobs = db.list_group_jobs()
+    for j in jobs:
+        if j.get("video"):
+            v = db.video_get(j["video"])
+            j["video_title"] = (v or {}).get("title") or f"Clip #{j['video']}" if v else "(clip đã bị xóa)"
+    return jobs
 
 
 @admin.post("/api/group-jobs")
@@ -1494,7 +1510,7 @@ def add_group_job(body: GroupJobIn):
     if body.auto and not body.accept_risk:
         raise HTTPException(400, RISK_MSG)
     jid = db.add_group_job(body.message.strip(), body.link.strip(), body.scheduled_at or db.now(), ids, auto=body.auto,
-                           images=_job_images(body.images), link_mode=body.link_mode)
+                           images=_job_images(body.images), link_mode=body.link_mode, video=_job_video(body.video_id))
     return {"id": jid}
 
 
@@ -1505,6 +1521,7 @@ class AiJobIn(BaseModel):
     goal: str = "trial"                   # trial = kêu gọi tải & dùng thử phần mềm · service = giới thiệu dịch vụ · share = chia sẻ kiến thức
     group_ids: list[int]
     images: list[str] = []                # ảnh đính kèm (đã tải lên: /media/...)
+    video_id: int = 0                     # clip đính kèm (thay cho ảnh)
     scheduled_at: Optional[int] = None
     gemini_key: str = ""
     post_now: bool = False                # đăng luôn bằng trình duyệt sau khi AI viết xong
@@ -1527,13 +1544,14 @@ def group_job_ai(body: AiJobIn):
         raise HTTPException(400, "Chưa có Gemini key — điền ở tab Tin tức AI hoặc Viết bài SEO (lấy miễn phí ở aistudio.google.com)")
     if body.post_now and not body.accept_risk:
         raise HTTPException(400, RISK_MSG)
+    video_id = _job_video(body.video_id)
     first_line = next((l.strip() for l in text.splitlines() if l.strip()), text)[:90]
     variants = groupwriter.make_variants({"title": first_line, "content": text, "description": text[:400],
                                           "url": body.link.strip(), "mode": "text", "link_mode": body.link_mode, "goal": body.goal},
                                          groups, key)
     jid = db.add_group_job(variants.get(groups[0]["id"]) or text, body.link.strip(), body.scheduled_at or db.now(),
                            [g["id"] for g in groups], variants=variants, title=first_line, source="ai",
-                           images=_job_images(body.images), link_mode=body.link_mode)
+                           images=_job_images(body.images), link_mode=body.link_mode, video=video_id)
     db.log("group_job", f"AI viết bài đăng nhóm '{first_line[:50]}' → {len(groups)} nhóm")
     out = {"id": jid, "groups": len(groups), "posting": False, "note": ""}
     if body.post_now:

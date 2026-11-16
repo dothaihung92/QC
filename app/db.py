@@ -211,6 +211,7 @@ GROUP_JOB_EXTRA = {
     "comments": "TEXT NOT NULL DEFAULT '{}'",    # {group_id: 1} — đã bình luận link bài viết dưới bài đăng ở nhóm đó
     "title":    "TEXT NOT NULL DEFAULT ''",      # tiêu đề bài gốc (vd bài SEO) để nhận ra lịch
     "source":   "TEXT NOT NULL DEFAULT ''",      # seo / manual
+    "video":    "INTEGER NOT NULL DEFAULT 0",    # id clip (tab Tạo clip) đăng kèm vào mỗi nhóm; 0 = không
 }
 GROUP_EXTRA = {
     "members":    "INTEGER NOT NULL DEFAULT 0",  # số thành viên → nhóm đông được đăng trước
@@ -540,14 +541,14 @@ def delete_group(gid):
 
 
 def add_group_job(message, link, scheduled_at, group_ids, auto=False, variants=None, title="", source="", images=None,
-                  link_mode="comment"):
+                  link_mode="comment", video=0):
     with conn() as c:
         return c.execute(
-            "INSERT INTO group_jobs(message, link, scheduled_at, group_ids, created_at, auto, variants, title, source, images, link_mode) "
-            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO group_jobs(message, link, scheduled_at, group_ids, created_at, auto, variants, title, source, images, link_mode, video) "
+            "VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (message, link, scheduled_at, json.dumps(group_ids), now(), int(bool(auto)),
              json.dumps({str(k): v for k, v in (variants or {}).items()}, ensure_ascii=False), title, source,
-             json.dumps(list(images or [])[:10]), "post" if link_mode == "post" else "comment"),
+             json.dumps([] if video else list(images or [])[:10]), "post" if link_mode == "post" else "comment", int(video or 0)),
         ).lastrowid
 
 

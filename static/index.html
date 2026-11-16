@@ -447,6 +447,7 @@
         <div class="btns" style="margin-top:6px">
           <button class="btn" onclick="gjFromPosts()">↙ Lấy từ bài ở tab Bài đăng</button>
         </div>
+        <div id="gjVideo"></div>
         <label>Ảnh đính kèm (tùy chọn) <span class="muted small">— tối đa 10 ảnh, được tải lên cùng bài ở mỗi nhóm</span></label>
         <div id="gjImgs" class="row" style="gap:8px;flex-wrap:wrap;margin-bottom:6px"></div>
         <div class="btns" style="margin-top:0"><label class="btn" style="cursor:pointer">📁 Chọn ảnh từ máy
@@ -1441,7 +1442,8 @@ function voCard(v) {
       <button class="btn pri" onclick="voRender(${v.id})" ${busy ? 'disabled' : ''}>🎙 ${v.has_file ? 'Tạo lại (giữ kịch bản)' : 'Lồng tiếng cho clip'}</button>
       <button class="btn" title="Xóa kịch bản cũ, AI xem lại clip và viết lời đọc mới" onclick="voRegen(${v.id})" ${busy ? 'disabled' : ''}>🤖 AI xem lại clip & viết kịch bản mới</button>
       ${v.has_file && !busy ? `<a class="btn" href="/api/videos/${v.id}/file?download=1">⬇ Tải về</a>
-        <button class="btn" onclick="vdPublish(${v.id})">📤 Đăng lên Fanpage</button>` : ''}
+        <button class="btn" onclick="vdPublish(${v.id})">📤 Đăng lên Fanpage</button>
+        <button class="btn pri" onclick="vdToGroups(${v.id})" title="Chuyển sang tab Đăng nhóm với clip này đã đính kèm">👥 Đăng lên nhóm FB</button>` : ''}
       <button class="btn" onclick="vdDelete(${v.id})" ${busy ? 'disabled' : ''}>Xóa</button>
     </div></div>`;
 }
@@ -1467,7 +1469,8 @@ function vdRenderList() {
       <div class="btns">
         <button class="btn pri" onclick="vdRender(${v.id})" ${busy ? 'disabled' : ''}>🎬 ${v.has_file ? 'Dựng lại' : 'Dựng clip'}</button>
         ${v.has_file && !busy ? `<a class="btn" href="/api/videos/${v.id}/file?download=1">⬇ Tải về</a>
-          <button class="btn" onclick="vdPublish(${v.id})">📤 Đăng lên Fanpage</button>` : ''}
+          <button class="btn" onclick="vdPublish(${v.id})">📤 Đăng lên Fanpage</button>
+          <button class="btn pri" onclick="vdToGroups(${v.id})" title="Chuyển sang tab Đăng nhóm với clip này đã đính kèm">👥 Đăng lên nhóm FB</button>` : ''}
         <button class="btn" onclick="vdDelete(${v.id})" ${busy ? 'disabled' : ''}>Xóa</button>
       </div></div>`;
   }).join('') : '<p class="muted">Chưa có clip nào. Chọn bài viết ở trên rồi bấm "AI viết kịch bản".</p>';
@@ -1897,6 +1900,21 @@ async function delGroup(id) { if (!confirm('Xóa nhóm này khỏi danh sách?')
 function gjFromPosts() { const t = $('pMsg').value.trim();
   if (!t) return toast('Tab Bài đăng chưa có nội dung — soạn bài ở đó trước');
   $('gjMsg').value = t; $('gjLink').value = $('pLink').value.trim(); }
+// ---- clip đính kèm (từ tab Tạo clip)
+let GJ_VIDEO = null;
+function gjVideoRender() {
+  $('gjVideo').innerHTML = GJ_VIDEO ? `<div class="note small" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0">
+    <video src="/api/videos/${GJ_VIDEO.id}/file" style="height:70px;border-radius:6px;background:#000" muted preload="metadata"></video>
+    <div style="flex:1"><b>🎬 Clip đính kèm:</b> ${esc(GJ_VIDEO.title)}<br><span class="muted">Clip được tải lên cùng bài ở mỗi nhóm (ảnh bên dưới sẽ không dùng). Clip lớn có thể mất vài phút mỗi nhóm.</span></div>
+    <button class="btn" onclick="GJ_VIDEO = null; gjVideoRender()">✕ Bỏ clip</button></div>` : '';
+}
+function vdToGroups(id) {
+  const v = VIDEOS.find(x => x.id === id); if (!v) return;
+  GJ_VIDEO = { id, title: v.title || 'Clip #' + id };
+  if (!$('gjMsg').value.trim()) $('gjMsg').value = (v.description || '').trim() || v.title || '';
+  openTab('groups'); gjVideoRender();
+  toast('🎬 Đã đính kèm clip vào form Đăng nhóm — kiểm tra nội dung, chọn nhóm rồi bấm đăng');
+}
 // ---- ảnh đính kèm + AI viết bài đăng nhóm
 let GJ_IMGS = [];
 function gjImgRender() {
@@ -1921,7 +1939,7 @@ async function gjAi(post) {
   if (post) {
     if (!GB_RISK()) return toast('Tick "Tôi hiểu và chấp nhận rủi ro" ở khung 🤖 trước');
     if (!GBS?.logged_in) return toast('Bấm "Đăng nhập Facebook" ở khung 🤖 trước');
-    if (!confirm(`AI sẽ viết ${ids.length} bài KHÁC NHAU rồi tự mở trình duyệt đăng vào ${ids.length} nhóm${GJ_IMGS.length ? ' kèm ' + GJ_IMGS.length + ' ảnh' : ''}. Đừng đóng cửa sổ trình duyệt đó khi đang chạy. Tiếp tục?`)) return;
+    if (!confirm(`AI sẽ viết ${ids.length} bài KHÁC NHAU rồi tự mở trình duyệt đăng vào ${ids.length} nhóm${GJ_VIDEO ? ' kèm clip "' + GJ_VIDEO.title + '"' : GJ_IMGS.length ? ' kèm ' + GJ_IMGS.length + ' ảnh' : ''}. Đừng đóng cửa sổ trình duyệt đó khi đang chạy. Tiếp tục?`)) return;
   }
   const t = $('gjTime').value, at = t ? Math.floor(new Date(t).getTime() / 1000) : null;
   const btn = $(post ? 'gjAiPost' : 'gjAiPrev'), old = btn.innerHTML;
@@ -1930,10 +1948,10 @@ async function gjAi(post) {
     let key = ''; try { key = localStorage.getItem('gkey') || ''; } catch {}
     const r = await api('/api/group-jobs/ai', { method: 'POST', body: { message: $('gjMsg').value, link: $('gjLink').value.trim(), group_ids: ids,
       link_mode: $('gjLinkMode').value, goal: $('gjGoal').value,
-      images: GJ_IMGS, scheduled_at: at, gemini_key: key, post_now: post, accept_risk: post } });
+      images: GJ_IMGS, video_id: GJ_VIDEO ? GJ_VIDEO.id : 0, scheduled_at: at, gemini_key: key, post_now: post, accept_risk: post } });
     toast(r.posting ? `✨ AI đã viết ${r.groups} bài khác nhau — đang đăng lên nhóm (xem tiến trình ở khung 🤖)`
       : r.note ? `✨ Đã viết ${r.groups} bài nhưng chưa đăng được: ${r.note}` : `✨ AI đã viết ${r.groups} bài khác nhau — xem và sửa ở "Lịch đăng nhóm" bên dưới`);
-    $('gjMsg').value = ''; $('gjLink').value = ''; GJ_IMGS = []; gjImgRender();
+    $('gjMsg').value = ''; $('gjLink').value = ''; GJ_IMGS = []; gjImgRender(); GJ_VIDEO = null; gjVideoRender();
     loadGroupJobs(); loadGroupBot(); pollBadges();
   } catch {} finally { $('gjAiPost').disabled = $('gjAiPrev').disabled = false; btn.innerHTML = old; }
 }
@@ -1943,9 +1961,9 @@ async function saveGroupJob() {
   const at = t ? Math.floor(new Date(t).getTime() / 1000) : null;
   const auto = $('gjAuto').checked;
   if (auto && !GB_RISK()) return toast('Tick "Tôi hiểu và chấp nhận rủi ro" ở khung 🤖 trước');
-  await api('/api/group-jobs', { method: 'POST', body: { message: $('gjMsg').value, link: $('gjLink').value.trim(), link_mode: $('gjLinkMode').value, images: GJ_IMGS,
+  await api('/api/group-jobs', { method: 'POST', body: { message: $('gjMsg').value, link: $('gjLink').value.trim(), link_mode: $('gjLinkMode').value, images: GJ_IMGS, video_id: GJ_VIDEO ? GJ_VIDEO.id : 0,
                                                          scheduled_at: at, group_ids: ids, auto, accept_risk: auto } });
-  GJ_IMGS = []; gjImgRender();
+  GJ_IMGS = []; gjImgRender(); GJ_VIDEO = null; gjVideoRender();
   toast(at && at > Date.now() / 1000 ? '⏰ Đã hẹn giờ nhắc' : '🔔 Đến giờ rồi — xem lịch bên dưới');
   $('gjMsg').value = ''; $('gjLink').value = ''; $('gjTime').value = '';
   loadGroupJobs(); pollBadges();
@@ -2027,6 +2045,7 @@ async function loadGroupJobs() {
         <span class="pill p-info">Chưa đăng: ${cnt([''])}</span></div>
       ${(j.images || []).length ? `<div class="row" style="gap:6px;margin:4px 0">${j.images.map(u => `<img src="${esc(u)}" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--line)">`).join('')}
         <span class="small muted" style="align-self:center">${j.images.length} ảnh đính kèm khi đăng</span></div>` : ''}
+      ${j.video ? `<div class="small" style="margin:4px 0">🎬 Đăng kèm clip: <b>${esc(j.video_title || '')}</b> · <a href="/api/videos/${j.video}/file?download=1">⬇ Tải clip về (để đăng tay)</a></div>` : ''}
       ${j.link ? `<div class="small muted">🔗 Link (${j.link_mode === 'post' ? 'gắn <b>cuối bài viết</b>' : 'đăng ở <b>bình luận</b> dưới bài, không nằm trong bài'}): ${esc(j.link)}</div>` : ''}
       ${j.groups.map((g, k) => { const [sl, sc] = GSTATE[g.state] || GSTATE['']; return `<div class="grp">
         <b>${k + 1}. ${esc(g.name)} ${g.members ? `<span class="muted small" style="font-weight:400">· ${fmtNum(g.members)} thành viên</span>` : ''}</b>

@@ -347,3 +347,31 @@ def test_attach_fails_clearly_when_group_has_no_photo_button(page, site, tmp_pat
     page.goto(site + "/ok")
     with pytest.raises(groupbot.GroupBotError, match="Ảnh/video"):
         groupbot.post_to_open_group(page, "Bài", timeout=3000, images=[f])
+
+
+def test_video_clip_is_attached_to_the_post(page, site, tmp_path):
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"\x00\x00\x00\x18ftypmp42")
+    page.goto(site + "/photo")
+    assert groupbot.post_to_open_group(page, "Bài có clip", timeout=4000, video=str(clip)) == "ok"
+    assert page.evaluate("window.__files") == ["clip.mp4"]                                  # clip được chọn trong hộp soạn bài
+    assert page.locator("#posted").inner_text() == "Bài có clip" and any("đính kèm clip" in l for l in groupbot.state["log"])
+
+
+def test_run_job_with_video_attaches_clip_and_ignores_images(site, headless, monkeypatch, tmp_path):
+    clip = tmp_path / "c.mp4"
+    clip.write_bytes(b"x")
+    vid = db.video_add("Clip thử", "", [])
+    db.video_update(vid, status="done", path=str(clip))
+    gids = [db.add_group("G0", site + "/ok")]
+    jid = db.add_group_job("Nội dung thử", "", db.now() - 5, gids, auto=True, images=["/media/a.png"], video=vid)
+    assert db.list_group_jobs()[0]["images"] == [] and db.list_group_jobs()[0]["video"] == vid        # có clip thì bỏ ảnh
+    seen = []
+    monkeypatch.setattr(groupbot, "post_to_open_group", lambda page, text, timeout=0, images=None, video="": seen.append((images, video)) or "ok")
+    groupbot._run_job(jid)
+    assert seen == [([], str(clip))]
+    clip.unlink()                                                                                   # clip bị xóa → báo rõ, không đăng
+    db.set_group_state(jid, gids[0], "")
+    db.toggle_group_done(jid, gids[0]) if db.list_group_jobs()[0]["groups"][0]["done"] else None
+    with pytest.raises(groupbot.GroupBotError, match="Clip đính kèm"):
+        groupbot._run_job(jid)
