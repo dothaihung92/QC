@@ -746,7 +746,9 @@
           ⚡ <b>Tự động lồng tiếng ngay khi tải clip lên</b> (nếu ô kịch bản bên phải để trống — AI tự xem clip và viết lời đọc)</label>
         <label>Giọng văn khi AI viết lời đọc</label><select id="voTone"></select>
         <label>Gợi ý cho AI <span class="muted small">(tùy chọn: clip nói về gì, ai xem, từ cần đọc đúng...)</span></label>
-        <input id="voHintIn" placeholder="vd: hướng dẫn phần mềm quản lý hóa đơn điện tử cho kế toán">
+        <input id="voHintIn" placeholder="vd: hướng dẫn phần mềm quản lý hóa đơn điện tử; file xuất ra là XML (không phải PDF)">
+        <label>Lời kết cuối clip <span class="muted small">(đọc to + hiện chữ ở những giây cuối; để trống = không có)</span></label>
+        <textarea id="voOutro" rows="2"></textarea>
         <label>Tên clip (tùy chọn)</label><input id="voTitle" placeholder="Clip lồng tiếng">
         <label>Khi lời đọc dài / ngắn hơn clip</label>
         <select id="voFit"></select>
@@ -1350,6 +1352,7 @@ async function voInit() {
   if (!VO_OPT) VO_OPT = await api('/api/voiceover/options');
   const fill = (id, o, cur) => { $(id).innerHTML = Object.entries(o).map(([k, t]) => `<option value="${k}">${esc(t)}</option>`).join(''); if (cur) $(id).value = cur; };
   if (!$('voFit').options.length) { fill('voFit', VO_OPT.fit); fill('voAudio', VO_OPT.audio); fill('voCapPos', VO_OPT.caption_pos); fill('voTone', VO_OPT.tone); }
+  if (VO_OPT.outro !== undefined && !$('voOutro').dataset.set) { $('voOutro').value = VO_OPT.outro; $('voOutro').dataset.set = '1'; }
 }
 function voUp(file) {                                   // gửi nguyên tệp (có thanh tiến độ)
   return new Promise((ok, no) => {
@@ -1396,7 +1399,7 @@ async function voCreate() {
   try {
     await api('/api/voiceover', { method: 'POST', body: { token: VO.token, script: $('voScript').value, title: $('voTitle').value,
       fit: $('voFit').value, audio: $('voAudio').value, caption_pos: $('voCapPos').value, sync: $('voSync').checked,
-      tone: $('voTone').value, hint: $('voHintIn').value } });
+      tone: $('voTone').value, hint: $('voHintIn').value, outro: $('voOutro').value } });
     toast(sc ? '🎙 Đang tạo giọng đọc và ghép vào clip — xem tiến trình ở "Clip của bạn"' : '🤖 AI đang xem clip, viết lời đọc và lồng tiếng — xem tiến trình ở "Clip của bạn"');
     VO = null; $('voFile').value = ''; $('voInfo').textContent = ''; $('voScript').value = ''; $('voTitle').value = ''; $('voPrev').innerHTML = ''; $('voHintIn').value = '';
     vdLoadList();
@@ -1408,7 +1411,7 @@ async function voRegen(id) {
 }
 async function voRender(id) {
   await api('/api/voiceover/' + id, { method: 'PUT', body: { title: $('vt' + id).value, script: $('vos' + id).value, fit: $('vof' + id).value,
-    audio: $('voa' + id).value, caption_pos: $('vop' + id).value, sync: $('vos2' + id).checked, tone: $('vot' + id).value, hint: $('voh' + id).value } });
+    audio: $('voa' + id).value, caption_pos: $('vop' + id).value, sync: $('vos2' + id).checked, tone: $('vot' + id).value, hint: $('voh' + id).value, outro: $('voo' + id).value } });
   await api('/api/videos/' + id + '/render', { method: 'POST' });
   toast('🎙 Đang tạo lại giọng đọc và ghép vào clip...'); vdLoadList();
 }
@@ -1426,7 +1429,8 @@ function voCard(v) {
       <label>Tên clip</label><input id="vt${v.id}" value="${esc(v.title)}">
       <label>Kịch bản lời đọc</label><textarea id="vos${v.id}" rows="8">${esc(v.script || '')}</textarea>
       <label>Giọng văn khi AI viết lời đọc</label>${sel('vot', VO_OPT?.tone || {}, o.tone)}
-      <label>Gợi ý cho AI</label><input id="voh${v.id}" value="${esc(o.hint || '')}">
+      <label>Gợi ý cho AI <span class="muted small">(AI hiểu sai? ghi rõ ở đây, vd "file xuất ra là XML")</span></label><input id="voh${v.id}" value="${esc(o.hint || '')}">
+      <label>Lời kết cuối clip</label><textarea id="voo${v.id}" rows="2">${esc(o.outro || '')}</textarea>
       <label>Khi lời đọc dài / ngắn hơn clip</label>${sel('vof', VO_OPT?.fit || {}, o.fit)}
       <label>Tiếng gốc của clip</label>${sel('voa', VO_OPT?.audio || {}, o.audio)}
       <label>Phụ đề tô sáng từng chữ</label>${sel('vop', VO_OPT?.caption_pos || {}, o.caption_pos || (o.captions === false ? 'none' : 'bottom'))}

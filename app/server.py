@@ -1274,6 +1274,7 @@ class VoiceoverIn(BaseModel):
     title: str = ""
     tone: str = ""
     hint: str = ""
+    outro: Optional[str] = None         # lời kết cuối clip (giới thiệu đại lý); "" = không có
     fit: str = "keep"
     audio: str = "none"
     captions: bool = True
@@ -1293,6 +1294,10 @@ def voiceover_create(body: VoiceoverIn):
     for k in ("caption_pos", "tone"):
         if not d[k]:
             d.pop(k)
+    if d["outro"] is None:
+        d.pop("outro")
+    else:
+        db.set_setting("voiceover_outro", d["outro"].strip()[:300])       # nhớ cho clip sau
     opts = voiceover.clean_options(d)
     vid = db.video_add(body.title.strip() or "Clip lồng tiếng", "", [], kind="voiceover", script=body.script.strip(),
                        source=str(src), options=opts)
@@ -1315,6 +1320,7 @@ class VoiceoverEdit(BaseModel):
     sync: Optional[bool] = None
     tone: Optional[str] = None
     hint: Optional[str] = None
+    outro: Optional[str] = None
 
 
 @admin.put("/api/voiceover/{vid}")
@@ -1329,7 +1335,7 @@ def voiceover_edit(vid: int, body: VoiceoverEdit):
         if getattr(body, k) is not None:
             fields[k] = getattr(body, k).strip() if k != "script" else getattr(body, k)
     opts = dict(v["options"])
-    for k in ("fit", "audio", "captions", "caption_pos", "sync", "tone", "hint"):
+    for k in ("fit", "audio", "captions", "caption_pos", "sync", "tone", "hint", "outro"):
         if getattr(body, k) is not None:
             opts[k] = getattr(body, k)
     if body.caption_pos is None and body.captions is not None:        # chỉ gửi captions (bản cũ)
@@ -1341,7 +1347,7 @@ def voiceover_edit(vid: int, body: VoiceoverEdit):
 
 @admin.get("/api/voiceover/options")
 def voiceover_options():
-    return {"fit": voiceover.FIT, "audio": voiceover.ORIG, "caption_pos": voiceover.CAPS, "tone": voiceover.TONES}
+    return {"fit": voiceover.FIT, "audio": voiceover.ORIG, "caption_pos": voiceover.CAPS, "tone": voiceover.TONES, "outro": voiceover.default_outro()}
 
 
 class VoiceoverParse(BaseModel):

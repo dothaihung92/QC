@@ -702,8 +702,18 @@ def expand_abbr(text: str) -> str:
     return _subs(text, ABBR)
 
 
+_DIGITS = ["không", "một", "hai", "ba", "bốn", "năm", "sáu", "bảy", "tám", "chín"]
+
+
+def _phone_words(m) -> str:
+    d = re.sub(r"\D", "", m.group(0))
+    groups = [d[:4], d[4:7], d[7:]] if len(d) == 10 else [d[:4], d[4:8], d[8:]] if len(d) == 11 else [d]
+    return ", ".join(" ".join(_DIGITS[int(c)] for c in g) for g in groups if g)
+
+
 def phonetic(text: str) -> str:
-    """Viết lại từ tiếng Anh theo cách đọc tiếng Việt (chỉ dùng khi gửi cho giọng đọc)."""
+    """Viết lại từ tiếng Anh theo cách đọc tiếng Việt và số điện thoại đọc từng chữ số (chỉ dùng khi gửi cho giọng đọc)."""
+    text = re.sub(r"(?<!\d)0\d(?:[\s.]?\d){8,9}(?!\d)", _phone_words, text)
     return _subs(text, PHON)
 
 

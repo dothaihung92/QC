@@ -31,6 +31,8 @@ CAPS = {"bottom": "Phụ đề ở dưới (mặc định)", "high": "Phụ đ�
 CAP_Y = {"bottom": 0.875, "high": 0.74, "top": 0.12}
 TONES = {"guide": "Hướng dẫn từng bước (rõ ràng, dễ làm theo)", "promo": "Giới thiệu hấp dẫn (nêu lợi ích, kêu gọi dùng thử)",
          "plain": "Mô tả trung thực những gì đang diễn ra trong clip"}
+DEFAULT_OUTRO = "Đại Lý Thuế Hưng Phúc. Liên hệ 0986883137 để được hỗ trợ phần mềm."
+OUTRO_HOLD = 1.2                               # giữ màn hình kết thêm sau khi đọc xong lời kết (giây)
 DEFAULTS = {"fit": "keep", "audio": "none", "caption_pos": "bottom", "sync": True, "tone": "guide", "hint": ""}
 AUTO_MIN_SEG = 2.5                             # AI tự xem clip: mỗi cảnh dài tối thiểu (giây)
 AUTO_MAX_SEG = 16.0                            # ... và tối đa (cảnh dài hơn được chia đôi)
@@ -49,6 +51,12 @@ class VoiceoverError(Exception):
     pass
 
 
+def default_outro() -> str:
+    """Lời kết dùng cho clip mới: lần người dùng nhập gần nhất (nhớ lại), chưa có thì dùng mặc định."""
+    v = db.get_setting("voiceover_outro")
+    return DEFAULT_OUTRO if v is None else str(v)
+
+
 def clean_options(o) -> dict:
     o = o if isinstance(o, dict) else {}
     pos = o.get("caption_pos")
@@ -58,7 +66,8 @@ def clean_options(o) -> dict:
             "audio": o.get("audio") if o.get("audio") in ORIG else DEFAULTS["audio"],
             "caption_pos": pos, "captions": pos != "none",
             "sync": bool(o.get("sync", DEFAULTS["sync"])),
-            "tone": o.get("tone") if o.get("tone") in TONES else DEFAULTS["tone"], "hint": str(o.get("hint") or "").strip()[:600]}
+            "tone": o.get("tone") if o.get("tone") in TONES else DEFAULTS["tone"], "hint": str(o.get("hint") or "").strip()[:600],
+            "outro": (o["outro"] if isinstance(o.get("outro"), str) else default_outro()).strip()[:300]}
 
 
 # ---------------------------------------------------------------- tải lên
@@ -299,7 +308,7 @@ def auto_script(src: Path, info: dict, opts: dict, work: Path, step=lambda m: No
     tone = {"guide": "giọng hướng dẫn viên: nói người xem cần bấm/chọn/nhập gì, theo thứ tự từng bước",
             "promo": "giọng giới thiệu sản phẩm hấp dẫn nhưng trung thực: nêu lợi ích thật thấy được trong hình, cuối clip kêu gọi dùng thử",
             "plain": "giọng kể trung thực, mô tả điều đang diễn ra"}[opts["tone"]]
-    hint = f"\nGỢI Ý TỪ NGƯỜI DÙNG VỀ CLIP: {opts['hint']}" if opts.get("hint") else ""
+    hint = f"\nGỢI Ý CỦA NGƯỜI DÙNG VỀ CLIP (ĐÚNG SỰ THẬT, bám theo): {opts['hint']}" if opts.get("hint") else ""
     prompt = f"""Bạn là biên tập viên viết LỜI ĐỌC lồng tiếng cho một clip (thường là quay màn hình hướng dẫn phần mềm).
 Bạn được xem các khung hình đại diện của từng cảnh (mỗi khung có chú thích "Cảnh N"). Hãy viết lời đọc tiếng Việt cho từng cảnh.{hint}
 
@@ -309,6 +318,8 @@ DANH SÁCH CẢNH:
 YÊU CẦU:
 - {tone}.
 - Chỉ nói về những gì THẤY RÕ trong hình. Tên nút/menu/tính năng: đọc đúng chữ hiện trên màn hình. KHÔNG bịa tính năng, số liệu, tên công ty, điều luật không có trong hình.
+- Định dạng/loại file (PDF, Excel, XML, Word, ảnh...): CHỈ nói khi thấy RÕ đuôi file hoặc tên cửa sổ/ứng dụng đang mở. Không chắc thì nói chung "file", "tờ khai", "bảng kê" — TUYỆT ĐỐI không đoán (không tự gọi là PDF).
+- Phần GỢI Ý CỦA NGƯỜI DÙNG (nếu có) là sự thật, ưu tiên hơn mọi suy đoán từ hình.
 - Nếu trong hình có sẵn phụ đề/chữ giải thích, lấy ý đó làm nội dung chính (nói lại tự nhiên, không đọc nguyên văn từng chữ lộn xộn).
 - Câu ngắn, văn nói tự nhiên, dễ nghe. Số, ngày, tiền viết bằng chữ như người đọc. Không emoji, không markdown, không ký hiệu.
 - Cảnh đầu có lời chào/giới thiệu chủ đề clip; cảnh cuối có lời kết ngắn.
@@ -366,6 +377,65 @@ def scene_bounds(src: Path, vlen: float, scenes: list, narr: list) -> tuple:
         acc += x
         b.append(vlen * acc / tot)
     return [*b, vlen], "prop"
+
+
+_PHONE = re.compile(r"(?<!\d)0\d(?:[\s.]?\d){8,9}(?!\d)")
+
+
+def _end_card(last: Path, W: int, H: int, text: str, dest: Path):
+    """Màn hình kết: khung hình cuối của clip làm mờ + tối, chữ giới thiệu lớn ở giữa, số điện thoại nổi bật."""
+    from PIL import Image, ImageDraw, ImageFilter
+    from . import techlook
+    img = Image.new("RGB", (W, H), (10, 14, 26))
+    if last.is_file():
+        try:
+            fr = Image.open(last).convert("RGB")
+            fr.thumbnail((W, H))
+            img.paste(fr, ((W - fr.width) // 2, (H - fr.height) // 2))
+            img = img.filter(ImageFilter.GaussianBlur(7))
+        except Exception:  # noqa: BLE001 — không đọc được khung cuối thì dùng nền tối
+            img = Image.new("RGB", (W, H), (10, 14, 26))
+    img = Image.blend(img, Image.new("RGB", (W, H), (6, 10, 22)), 0.68)
+    d = ImageDraw.Draw(img)
+    base = min(W, H)
+    m = _PHONE.search(text)
+    before, phone, after = (text[:m.start()], m.group(0).strip(), text[m.end():]) if m else (text, "", "")
+    clean = lambda t: t.strip(" .—-:,;")  # noqa: E731
+    blocks = []                                                     # (chữ, cỡ, màu, có nền nút)
+    for t, k in ((clean(before), 1.0), ):
+        if t:
+            head, _, rest = t.partition(". ")                      # câu đầu (tên đại lý) in to hơn
+            blocks += [(head.strip(), 1.25, (255, 255, 255), False)] + ([(rest.strip(), 0.85, (205, 214, 232), False)] if rest.strip() else [])
+    if phone:
+        blocks.append((phone, 1.7, (255, 255, 255), True))
+    if clean(after):
+        blocks.append((clean(after), 0.9, (205, 214, 232), False))
+    rows, total = [], 0
+    for t, k, col, pill in blocks:
+        f = V._font(int(base * 0.05 * k), bold=True)
+        lines, cur = [], ""
+        for w in t.split():
+            if cur and d.textlength(cur + " " + w, font=f) > W * 0.82:
+                lines.append(cur)
+                cur = w
+            else:
+                cur = (cur + " " + w).strip()
+        lines.append(cur)
+        lh = int(f.size * 1.3)
+        rows.append((lines, f, col, pill, lh))
+        total += lh * len(lines) + int(base * 0.035)
+    y = (H - total) // 2
+    for lines, f, col, pill, lh in rows:
+        for ln in lines:
+            tw = d.textlength(ln, font=f)
+            x = (W - tw) / 2
+            if pill:
+                pad = int(base * 0.03)
+                d.rounded_rectangle((x - pad * 1.5, y - 2, x + tw + pad * 1.5, y + lh), radius=int(lh * 0.35), fill=techlook.KEYBOX)
+            d.text((x, y + lh / 2), ln, font=f, fill=col, anchor="lm")
+            y += lh
+        y += int(base * 0.035)
+    img.save(dest, "PNG")
 
 
 def render(video_id: int):
@@ -481,6 +551,26 @@ def render(video_id: int):
         segs.append(out_seg)
         tlen.append(T)
         factors.append(f)
+    main_len = sum(tlen)
+    outro = opts["outro"].strip()
+    if outro:                                                         # lời kết: màn hình tối + chữ giới thiệu, đọc to lời giới thiệu đại lý
+        step("Dựng lời kết cuối clip")
+        omp3 = work / "vo_out.mp3"
+        V.tts(outro, cfg["voice"], cfg["rate"], omp3, style)
+        on = V.media_duration(omp3)
+        V._ffmpeg(["-i", omp3.name, "-ar", "44100", "-ac", "1", "p_out.wav"], work)
+        T_o = on + OUTRO_HOLD
+        last = work / "last.png"
+        try:
+            V._ffmpeg(["-sseof", "-0.5", "-i", str(src), "-frames:v", "1", last.name], work)
+        except Exception:  # noqa: BLE001
+            last.unlink(missing_ok=True)
+        _end_card(last, W, H, outro, work / "endcard.png")
+        V._ffmpeg(["-loop", "1", "-framerate", str(V.FPS), "-i", "endcard.png", "-t", f"{T_o:.3f}", "-vf", f"fps={V.FPS},format=yuv420p",
+                   "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-r", str(V.FPS), "seg_out.mp4"], work)
+        segs.append("seg_out.mp4")
+        tlen.append(T_o)
+        scene_files.append(["p_out.wav"])
     total_len = sum(tlen)
     (work / "vsegs.txt").write_text("".join(f"file '{f}'\n" for f in segs), encoding="utf-8")
     base = work / "base.mp4"
@@ -489,7 +579,7 @@ def render(video_id: int):
     # 3) âm thanh: lời đọc từng cảnh bắt đầu đúng lúc cảnh đó bắt đầu (+ tiếng gốc nếu giữ)
     step("Trộn âm thanh")
     nfiles, starts_scene, acc = [], [], 0.0
-    for i in range(S):
+    for i in range(len(tlen)):
         (work / f"nl{i}.txt").write_text("".join(f"file '{f}'\n" for f in scene_files[i]), encoding="utf-8")
         V._ffmpeg(["-f", "concat", "-safe", "0", "-i", f"nl{i}.txt", "-af", f"apad,atrim=duration={tlen[i]:.3f}",
                    "-ar", "44100", "-ac", "1", f"ns{i}.wav"], work)
@@ -513,6 +603,9 @@ def render(video_id: int):
             V._ffmpeg(["-ss", f"{bounds[i]:.3f}", "-t", f"{max(0.2, bounds[i + 1] - bounds[i]):.3f}", "-i", str(src), "-vn", "-af",
                        ",".join(af), "-ar", "44100", "-ac", "1", f"os{i}.wav"], work)
             ofiles.append(f"os{i}.wav")
+        if outro:                                                     # màn hình kết: không có tiếng gốc
+            V._ffmpeg(["-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", f"{tlen[-1]:.3f}", "-c:a", "pcm_s16le", "os_out.wav"], work)
+            ofiles.append("os_out.wav")
         (work / "olist.txt").write_text("".join(f"file '{f}'\n" for f in ofiles), encoding="utf-8")
         V._ffmpeg(["-f", "concat", "-safe", "0", "-i", "olist.txt", "-c:a", "pcm_s16le", "orig.wav"], work)
         V._ffmpeg(["-i", "orig.wav", "-i", "narration.wav", "-filter_complex",
@@ -534,7 +627,7 @@ def render(video_id: int):
             except Exception as e:  # noqa: BLE001 — phụ đề lỗi không làm hỏng cả clip
                 V._log(f"Đoạn {k + 1}: không vẽ được phụ đề ({str(e)[:80]})")
                 continue
-            limit = starts[k + 1] if k + 1 < len(starts) else total_len
+            limit = starts[k + 1] if k + 1 < len(starts) else main_len
             caps += [(name, pos, starts[k] + a, min(starts[k] + b, limit)) for name, pos, a, b in cs if starts[k] + a < limit]
 
     out = work / "clip.mp4"

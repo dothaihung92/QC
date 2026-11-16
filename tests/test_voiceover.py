@@ -29,6 +29,7 @@ def fake_voice(monkeypatch, tmp_path):
     monkeypatch.setattr(video, "VIDEO_DIR", tmp_path / "videos")
     monkeypatch.setattr(video, "missing_tools", lambda: [])
     monkeypatch.setattr(video, "_run_bg", lambda fn, *a: fn(*a))
+    db.set_setting("voiceover_outro", "")                              # các test độ dài không tính lời kết (test riêng bên dưới)
 
     def tts(text, voice, rate, dest, style=""):                       # mỗi chữ ~0.3 giây tiếng bíp
         n = max(1, len(text.split())) * 0.3
@@ -94,7 +95,7 @@ def test_api_upload_create_edit_publish_delete(client, src_clip, tmp_path, monke
     assert client.post("/api/voiceover", json={"token": up["token"], "script": "ab"}).status_code == 400
     v = client.post("/api/voiceover", json={"token": up["token"], "script": "Xin chào các bạn, đây là clip thử.", "title": "Clip thử",
                                             "fit": "xyz", "audio": "low", "captions": False}).json()
-    assert v["kind"] == "voiceover" and v["status"] == "done" and v["has_file"] and v["options"] == {"fit": "keep", "audio": "low", "captions": False, "caption_pos": "none", "sync": True, "tone": "guide", "hint": ""}
+    assert v["kind"] == "voiceover" and v["status"] == "done" and v["has_file"] and v["options"] == {"fit": "keep", "audio": "low", "captions": False, "caption_pos": "none", "sync": True, "tone": "guide", "hint": "", "outro": ""}
     assert "source" not in v and v["source_name"].endswith(".mp4")
     assert client.get(f"/api/videos/{v['id']}/file").status_code == 200
     e = client.put(f"/api/voiceover/{v['id']}", json={"script": "Kịch bản mới được sửa.", "fit": "loop", "captions": True, "description": "mô tả"}).json()
@@ -340,3 +341,61 @@ def test_api_create_without_script_is_auto(client, src_clip, gemini):
 def test_ui_auto_dub_on_upload():
     html = TestClient(server.app).get("/").text
     assert 'id="voAuto"' in html and "voCreate();" in html and "voRegen" in html
+
+
+# ---------------------------------------------------------------- lời kết cuối clip
+
+def test_phone_numbers_are_spoken_digit_by_digit_but_captions_keep_digits():
+    assert video.phonetic("Liên hệ 0986883137 để được hỗ trợ") == "Liên hệ không chín tám sáu, tám tám ba, một ba bảy để được hỗ trợ"
+    assert video.phonetic("gọi 0986.883.137 nhé").startswith("gọi không chín tám sáu, tám tám ba, một ba bảy")
+    assert video.phonetic("năm 2026 có 12345 hóa đơn") == "năm 2026 có 12345 hóa đơn"          # số thường giữ nguyên
+    assert "0986883137" in video.clean_tts_text("Liên hệ 0986883137")
+
+
+def test_default_outro_is_remembered_and_cleared_by_empty():
+    db.set_setting("voiceover_outro", None)
+    assert voiceover.clean_options({})["outro"] == voiceover.DEFAULT_OUTRO and "0986883137" in voiceover.DEFAULT_OUTRO
+    assert voiceover.clean_options({"outro": ""})["outro"] == ""
+    db.set_setting("voiceover_outro", "Công ty A. Gọi 0901234567.")
+    assert voiceover.clean_options({})["outro"] == "Công ty A. Gọi 0901234567."
+
+
+def test_outro_adds_end_card_and_is_read_last(three_scene_clip, tmp_path):
+    spoken = []
+    real = video.tts
+    video.tts = lambda text, *a, **k: spoken.append(text) or real(text, *a, **k)
+    try:
+        outro = "Đại Lý Thuế Hưng Phúc. Liên hệ 0986883137 để được hỗ trợ phần mềm."
+        vid = _make(three_scene_clip, tmp_path, fit="keep", caption_pos="bottom", outro=outro,
+                    script="Cảnh 1 [00:00] — A\nMột hai ba.\nCảnh 2 [00:03] — B\nBốn năm.\nCảnh 3 [00:06] — C\nSáu bảy.")
+        video.start_render(vid)
+    finally:
+        video.tts = real
+    v = db.video_get(vid)
+    assert v["status"] == "done", v["error"]
+    assert spoken[-1] == outro and spoken[:-1] == ["Một hai ba.", "Bốn năm.", "Sáu bảy."]             # lời kết đọc cuối cùng
+    narr = 0.3 * len(outro.split()) + voiceover.OUTRO_HOLD
+    assert 9.0 + narr - 0.8 < v["duration"] < 9.0 + narr + 1.0                                        # 9 giây clip + màn hình kết
+    assert [_frame_color(v["path"], t, tmp_path) for t in (1.0, 4.5, 8.0)] == ["r", "g", "b"]          # nội dung chính vẫn khớp cảnh
+    end = tmp_path / "end.png"
+    video._ffmpeg(["-ss", f"{v['duration'] - 0.5:.2f}", "-i", str(v["path"]), "-frames:v", "1", str(end)], tmp_path)
+    from PIL import Image
+    im = Image.open(end).convert("RGB")
+    assert sum(im.getpixel((x, y))[2] > 150 and im.getpixel((x, y))[0] < 80 for x in range(0, im.width, 4) for y in range(0, im.height, 4)) > 0     # nút xanh dương chứa số điện thoại
+    assert max(im.getpixel((x, y))[2] for x in range(0, im.width, 8) for y in range(0, im.height, 8)) > 150
+
+
+def test_outro_with_original_audio_and_api_remembers_text(client, src_clip, gemini):
+    up = client.post("/api/voiceover/upload?filename=a.mp4", content=src_clip.read_bytes()).json()
+    v = client.post("/api/voiceover", json={"token": up["token"], "script": "Một hai ba bốn.", "audio": "low", "outro": "Hưng Phúc. Gọi 0986883137."}).json()
+    assert v["status"] == "done" and v["options"]["outro"] == "Hưng Phúc. Gọi 0986883137." and v["duration"] > 4
+    assert client.get("/api/voiceover/options").json()["outro"] == "Hưng Phúc. Gọi 0986883137."          # nhớ cho lần sau
+    e = client.put(f"/api/voiceover/{v['id']}", json={"outro": ""}).json()
+    assert e["options"]["outro"] == ""
+
+
+def test_ai_prompt_forbids_guessing_file_formats_and_trusts_hint(three_scene_clip, tmp_path, gemini):
+    vid = _make(three_scene_clip, tmp_path, script="", hint="file xuất ra là XML")
+    video.start_render(vid)
+    p = gemini[0]["prompt"]
+    assert "XML" in p and "ĐÚNG SỰ THẬT" in p and "TUYỆT ĐỐI không đoán" in p and "PDF" in p
