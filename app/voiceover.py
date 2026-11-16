@@ -29,7 +29,13 @@ ORIG = {"none": "Tắt tiếng gốc của clip", "low": "Giữ tiếng gốc nh
 CAPS = {"bottom": "Phụ đề ở dưới (mặc định)", "high": "Phụ đề cao hơn (tránh phụ đề có sẵn trong clip)",
         "top": "Phụ đề ở trên cùng", "none": "Không hiện phụ đề (clip đã có phụ đề)"}
 CAP_Y = {"bottom": 0.875, "high": 0.74, "top": 0.12}
-DEFAULTS = {"fit": "keep", "audio": "none", "caption_pos": "bottom", "sync": True}
+TONES = {"guide": "Hướng dẫn từng bước (rõ ràng, dễ làm theo)", "promo": "Giới thiệu hấp dẫn (nêu lợi ích, kêu gọi dùng thử)",
+         "plain": "Mô tả trung thực những gì đang diễn ra trong clip"}
+DEFAULTS = {"fit": "keep", "audio": "none", "caption_pos": "bottom", "sync": True, "tone": "guide", "hint": ""}
+AUTO_MIN_SEG = 2.5                             # AI tự xem clip: mỗi cảnh dài tối thiểu (giây)
+AUTO_MAX_SEG = 16.0                            # ... và tối đa (cảnh dài hơn được chia đôi)
+AUTO_MAX_SCENES = 40
+STRONG_CUT = 40.0                              # mức đổi hình (0-255) coi là chuyển cảnh thật dù clip ngắn
 SCENE_GAP = 0.3                                # nghỉ giữa hai cảnh
 CUT_FPS = 8                                    # số khung/giây dùng để dò chuyển cảnh
 CUT_MIN = 3.0                                  # mức thay đổi trung bình tối thiểu (0-255) để coi là chuyển cảnh
@@ -51,7 +57,8 @@ def clean_options(o) -> dict:
     return {"fit": o.get("fit") if o.get("fit") in FIT else DEFAULTS["fit"],
             "audio": o.get("audio") if o.get("audio") in ORIG else DEFAULTS["audio"],
             "caption_pos": pos, "captions": pos != "none",
-            "sync": bool(o.get("sync", DEFAULTS["sync"]))}
+            "sync": bool(o.get("sync", DEFAULTS["sync"])),
+            "tone": o.get("tone") if o.get("tone") in TONES else DEFAULTS["tone"], "hint": str(o.get("hint") or "").strip()[:600]}
 
 
 # ---------------------------------------------------------------- tải lên
@@ -92,7 +99,7 @@ def probe(path: Path) -> dict:
 # ---------------------------------------------------------------- kịch bản → các cảnh
 
 _MARK = re.compile(r"^\s*[#>*\-\s]*(Cảnh|Canh|Scene|Phần|Phan|Đoạn)\s*(\d+)\s*(.*)$", re.I)
-_TIME = re.compile(r"[\[(@]\s*(?:(\d{1,2}):)?(\d{1,2}):(\d{2})(?:[.,]\d+)?\s*[\])]?")
+_TIME = re.compile(r"[\[(@]\s*(?:(\d{1,2}):)?(\d{1,2}):(\d{2}(?:[.,]\d+)?)\s*[\])]?")
 
 
 def _meta_line(line: str, first: bool) -> bool:
@@ -122,7 +129,7 @@ def parse_script(script: str) -> dict:
         m = _MARK.match(line)
         if m and (not m[3] or re.match(r"[—–:.\-\[(@|]", m[3]) or m[1].lower() in ("cảnh", "canh", "scene")):
             tm = _TIME.search(m[3])
-            t = int(tm[1] or 0) * 3600 + int(tm[2]) * 60 + int(tm[3]) if tm else None
+            t = int(tm[1] or 0) * 3600 + int(tm[2]) * 60 + float(tm[3].replace(",", ".")) if tm else None
             label = _TIME.sub(" ", m[3]).strip(" —–:.-|\t")
             cur = {"n": int(m[2]), "label": label, "time": t, "lines": []}
             scenes.append(cur)
@@ -217,6 +224,121 @@ def detect_cuts(path: Path, dur: float) -> list:
     return out
 
 
+# ---------------------------------------------------------------- AI tự xem clip → viết kịch bản
+
+def auto_bounds(src: Path, vlen: float) -> list:
+    """Chia clip thành các cảnh theo chỗ hình ảnh đổi mạnh nhất; cảnh quá dài thì chia đôi. [0, b1, ..., vlen]."""
+    want = max(1, min(AUTO_MAX_SCENES, round(vlen / 8.0)))
+    try:
+        cuts = sorted(detect_cuts(src, vlen), key=lambda c: -c[1])
+    except Exception as e:  # noqa: BLE001
+        V._log(f"Không dò được điểm chuyển cảnh ({str(e)[:60]})")
+        cuts = []
+    strong = sum(1 for _t, sc in cuts if sc * 255.0 >= STRONG_CUT)
+    take = min(AUTO_MAX_SCENES - 1, max(want - 1, strong))
+    picked = []
+    for t, _sc in cuts:
+        if len(picked) >= take:
+            break
+        if AUTO_MIN_SEG <= t <= vlen - AUTO_MIN_SEG and all(abs(t - p) >= AUTO_MIN_SEG for p in picked):
+            picked.append(t)
+    b = sorted([0.0, *picked, vlen])
+    while len(b) - 1 < AUTO_MAX_SCENES:                              # chia đôi cảnh dài nhất nếu vẫn quá dài
+        gaps = [(b[i + 1] - b[i], i) for i in range(len(b) - 1)]
+        g, i = max(gaps)
+        if g <= AUTO_MAX_SEG:
+            break
+        b.insert(i + 1, (b[i] + b[i + 1]) / 2)
+    return b
+
+
+def _frames(src: Path, bounds: list, work: Path) -> list:
+    """[(giây, jpeg)] — 1–2 khung hình đại diện cho mỗi cảnh (thu nhỏ để gửi cho AI)."""
+    per = 2 if len(bounds) - 1 <= 24 else 1
+    out = []
+    for i in range(len(bounds) - 1):
+        d = bounds[i + 1] - bounds[i]
+        for j in range(per):
+            t = bounds[i] + d * ((j + 1) / (per + 1))
+            f = work / f"fr{i}_{j}.jpg"
+            V._ffmpeg(["-ss", f"{t:.3f}", "-i", str(src), "-frames:v", "1", "-vf", "scale='min(768,iw)':-2", "-q:v", "5", f.name], work)
+            if f.is_file():
+                out.append((i, t, f.read_bytes()))
+    return out
+
+
+def _trim_text(text: str, max_chars: int) -> str:
+    """Lời đọc dài quá thời lượng cảnh → bỏ bớt câu cuối (giữ ít nhất 1 câu)."""
+    sents = re.findall(r"[^.!?…]+[.!?…]*", text.strip())
+    while len(sents) > 1 and len("".join(sents).strip()) > max_chars * 1.2:
+        sents.pop()
+    return "".join(sents).strip() or text.strip()
+
+
+def _mmss(t: float) -> str:
+    return f"{int(t // 60):02d}:{t % 60:04.1f}"
+
+
+def auto_script(src: Path, info: dict, opts: dict, work: Path, step=lambda m: None) -> str:
+    """AI xem các khung hình của clip rồi viết lời đọc cho từng cảnh. Trả về kịch bản dạng
+    "Cảnh N [mm:ss] — tên cảnh" + lời đọc (đúng định dạng người dùng tự viết), có mốc thời gian chuyển cảnh."""
+    from . import newsagent
+    cfg = newsagent.get_config()
+    if not cfg["gemini_key"]:
+        raise VoiceoverError("Chưa nhập Gemini API key (tab Tin tức AI) — cần để AI xem clip và viết lời đọc. Hoặc tự dán kịch bản vào ô bên cạnh.")
+    step("AI đang xem clip…")
+    vlen = info["duration"]
+    bounds = auto_bounds(src, vlen)
+    n = len(bounds) - 1
+    frames = _frames(src, bounds, work)
+    if not frames:
+        raise VoiceoverError("Không lấy được hình từ clip")
+    lens = [max(40, int((bounds[i + 1] - bounds[i]) * 13)) for i in range(n)]
+    plan = "\n".join(f"- Cảnh {i + 1}: từ {_mmss(bounds[i])} đến {_mmss(bounds[i + 1])} ({bounds[i + 1] - bounds[i]:.0f} giây) — lời đọc TỐI ĐA {lens[i]} ký tự"
+                     for i in range(n))
+    tone = {"guide": "giọng hướng dẫn viên: nói người xem cần bấm/chọn/nhập gì, theo thứ tự từng bước",
+            "promo": "giọng giới thiệu sản phẩm hấp dẫn nhưng trung thực: nêu lợi ích thật thấy được trong hình, cuối clip kêu gọi dùng thử",
+            "plain": "giọng kể trung thực, mô tả điều đang diễn ra"}[opts["tone"]]
+    hint = f"\nGỢI Ý TỪ NGƯỜI DÙNG VỀ CLIP: {opts['hint']}" if opts.get("hint") else ""
+    prompt = f"""Bạn là biên tập viên viết LỜI ĐỌC lồng tiếng cho một clip (thường là quay màn hình hướng dẫn phần mềm).
+Bạn được xem các khung hình đại diện của từng cảnh (mỗi khung có chú thích "Cảnh N"). Hãy viết lời đọc tiếng Việt cho từng cảnh.{hint}
+
+DANH SÁCH CẢNH:
+{plan}
+
+YÊU CẦU:
+- {tone}.
+- Chỉ nói về những gì THẤY RÕ trong hình. Tên nút/menu/tính năng: đọc đúng chữ hiện trên màn hình. KHÔNG bịa tính năng, số liệu, tên công ty, điều luật không có trong hình.
+- Nếu trong hình có sẵn phụ đề/chữ giải thích, lấy ý đó làm nội dung chính (nói lại tự nhiên, không đọc nguyên văn từng chữ lộn xộn).
+- Câu ngắn, văn nói tự nhiên, dễ nghe. Số, ngày, tiền viết bằng chữ như người đọc. Không emoji, không markdown, không ký hiệu.
+- Cảnh đầu có lời chào/giới thiệu chủ đề clip; cảnh cuối có lời kết ngắn.
+- Mỗi cảnh KHÔNG vượt số ký tự tối đa (để đọc kịp trong thời lượng cảnh).
+Trả về JSON: {{"title": "tên clip ngắn gọn", "scenes": [{{"n": 1, "label": "tên cảnh 3-6 từ", "text": "lời đọc"}}]}} đủ {n} cảnh theo đúng thứ tự."""
+    parts, imgs = [], []
+    for i, t, jpg in frames:                                          # nối chú thích từng khung vào prompt theo thứ tự ảnh
+        parts.append(f"Ảnh {len(imgs) + 1} = Cảnh {i + 1} (giây {t:.1f})")
+        imgs.append(("image/jpeg", jpg))
+    step(f"AI đang viết lời đọc cho {n} cảnh…")
+    out = newsagent.gemini_json(prompt + "\n\nTHỨ TỰ ẢNH GỬI KÈM: " + "; ".join(parts), cfg, images=imgs, timeout=180)
+    by = {}
+    for sc in out.get("scenes") or []:
+        try:
+            by[int(sc.get("n"))] = sc
+        except (TypeError, ValueError):
+            continue
+    lines = []
+    for i in range(n):
+        sc = by.get(i + 1) or {}
+        text = _trim_text(re.sub(r"\s+", " ", str(sc.get("text", ""))).strip(), lens[i])
+        if not V.clean_tts_text(text):
+            continue
+        label = re.sub(r"[\r\n]+", " ", str(sc.get("label", "")).strip())[:60]
+        lines.append(f"Cảnh {i + 1} [{_mmss(bounds[i] if lines else 0.0)}] — {label}\n{text}")     # cảnh đầu luôn bắt đầu từ 0
+    if not lines:
+        raise VoiceoverError("AI không viết được lời đọc cho clip này — thử lại, hoặc tự dán kịch bản")
+    return "\n\n".join(lines)
+
+
 def scene_bounds(src: Path, vlen: float, scenes: list, narr: list) -> tuple:
     """Thời điểm bắt đầu từng cảnh trong clip gốc: [0, b1, ..., vlen] và cách xác định (marker / detect / prop / single)."""
     n = len(scenes)
@@ -255,7 +377,19 @@ def render(video_id: int):
         raise VoiceoverError("Clip gốc đã bị xóa — tải lại clip lên")
     opts = clean_options(v["options"])
     cfg = V.get_config()
-    parsed = parse_script(v["script"])
+    work = V.VIDEO_DIR / str(video_id)
+    shutil.rmtree(work, ignore_errors=True)
+    work.mkdir(parents=True, exist_ok=True)
+    script = v["script"] or ""
+    if not script.strip():                                           # không có kịch bản → AI tự xem clip và viết lời đọc
+        def pstep(msg):
+            db.video_update(video_id, progress=msg)
+            V._log(msg)
+        script = auto_script(src, probe(src), opts, work, pstep)
+        db.video_update(video_id, script=script)                    # lưu lại để người dùng xem / sửa rồi dựng lại
+        for f in work.iterdir():
+            f.unlink(missing_ok=True)
+    parsed = parse_script(script)
     scenes = parsed["scenes"]
     if not scenes:
         raise VoiceoverError("Kịch bản trống — nhập lời đọc vào ô kịch bản")
@@ -263,9 +397,6 @@ def render(video_id: int):
         V._log(f"Bỏ qua {len(parsed['skipped'])} dòng ghi chú/tiêu đề (không đọc): " + " | ".join(x[:40] for x in parsed["skipped"][:3]))
     if len(scenes) > 1 and not opts["sync"]:                        # không khớp theo cảnh: đọc liền một mạch
         scenes = [{"n": 1, "label": "", "time": None, "text": "\n\n".join(s["text"] for s in scenes)}]
-    work = V.VIDEO_DIR / str(video_id)
-    shutil.rmtree(work, ignore_errors=True)
-    work.mkdir(parents=True, exist_ok=True)
 
     def step(msg):
         db.video_update(video_id, progress=msg)

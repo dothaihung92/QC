@@ -1517,8 +1517,6 @@ def start_render(video_id: int):
         raise VideoError("Không có clip này")
     voiceover = v.get("kind") == "voiceover"
     if voiceover:
-        if not (v.get("script") or "").strip():
-            raise VideoError("Kịch bản lời đọc đang trống")
         if not v.get("source") or not Path(v["source"]).is_file():
             raise VideoError("Clip gốc đã bị xóa — tải lại clip lên")
     elif not v["scenes"]:

@@ -4,6 +4,7 @@ Chỉ dùng thư viện chuẩn + requests. Mặc định bài viết lại nằ
 tự đăng khi bật "auto_publish". Mọi bài đều ghi nguồn gốc ở cuối.
 """
 import html
+import base64
 import json
 import logging
 import re
@@ -283,7 +284,8 @@ NỘI DUNG NGUỒN:
 """
 
 
-def gemini_json(prompt: str, cfg: dict) -> dict:
+def gemini_json(prompt: str, cfg: dict, images: list = None, timeout: int = 90) -> dict:
+    """images: [(mime, bytes)] — ảnh gửi kèm để AI nhìn (vd khung hình của clip)."""
     if not cfg["gemini_key"]:
         raise RuntimeError("Chưa nhập Gemini API key (tab Tin tức AI)")
     last = None
@@ -292,9 +294,10 @@ def gemini_json(prompt: str, cfg: dict) -> dict:
             r = requests.post(
                 f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
                 headers={"x-goog-api-key": cfg["gemini_key"], "Content-Type": "application/json"},
-                json={"contents": [{"parts": [{"text": prompt}]}],
+                json={"contents": [{"parts": [{"text": prompt}, *({"inline_data": {"mime_type": m, "data": base64.b64encode(b).decode()}}
+                                                             for m, b in (images or []))]}],
                       "generationConfig": {"responseMimeType": "application/json", "temperature": 0.6}},
-                timeout=90)
+                timeout=timeout)
             data = r.json()
             if r.status_code >= 400:
                 raise RuntimeError(data.get("error", {}).get("message", r.text)[:300])

@@ -94,7 +94,7 @@ def test_api_upload_create_edit_publish_delete(client, src_clip, tmp_path, monke
     assert client.post("/api/voiceover", json={"token": up["token"], "script": "ab"}).status_code == 400
     v = client.post("/api/voiceover", json={"token": up["token"], "script": "Xin chào các bạn, đây là clip thử.", "title": "Clip thử",
                                             "fit": "xyz", "audio": "low", "captions": False}).json()
-    assert v["kind"] == "voiceover" and v["status"] == "done" and v["has_file"] and v["options"] == {"fit": "keep", "audio": "low", "captions": False, "caption_pos": "none", "sync": True}
+    assert v["kind"] == "voiceover" and v["status"] == "done" and v["has_file"] and v["options"] == {"fit": "keep", "audio": "low", "captions": False, "caption_pos": "none", "sync": True, "tone": "guide", "hint": ""}
     assert "source" not in v and v["source_name"].endswith(".mp4")
     assert client.get(f"/api/videos/{v['id']}/file").status_code == 200
     e = client.put(f"/api/voiceover/{v['id']}", json={"script": "Kịch bản mới được sửa.", "fit": "loop", "captions": True, "description": "mô tả"}).json()
@@ -258,3 +258,85 @@ def test_caption_position_option(src_clip, tmp_path, monkeypatch):
     vid = _make(src_clip, tmp_path, caption_pos="none", script="Một hai ba.")
     video.start_render(vid)
     assert db.video_get(vid)["status"] == "done"
+
+
+# ---------------------------------------------------------------- AI tự xem clip, không cần kịch bản
+
+@pytest.fixture
+def gemini(monkeypatch):
+    from app import newsagent
+    db.set_setting("newsagent", {"gemini_key": "k"})
+    calls = []
+
+    def fake(prompt, cfg, images=None, timeout=90):
+        calls.append({"prompt": prompt, "images": images or []})
+        n = max(int(x) for x in __import__("re").findall(r"- Cảnh (\d+):", prompt))
+        return {"title": "Clip thử", "scenes": [{"n": i, "label": f"Tên {i}", "text": f"Đây là lời đọc cho cảnh số {i}. Câu thứ hai dài hơn một chút để thử."} for i in range(1, n + 1)]}
+    monkeypatch.setattr(newsagent, "gemini_json", fake)
+    return calls
+
+
+def test_marker_times_keep_fraction():
+    p = voiceover.parse_script("Cảnh 1 [00:00.0] — A\nMột.\nCảnh 2 [01:05.5] — B\nHai.")
+    assert [s["time"] for s in p["scenes"]] == [0, 65.5]
+
+
+def test_auto_bounds_follow_the_clips_scene_cuts(three_scene_clip):
+    b = voiceover.auto_bounds(three_scene_clip, 9.0)
+    assert len(b) == 4 and abs(b[1] - 3) < 0.4 and abs(b[2] - 6) < 0.4 and b[0] == 0 and b[-1] == 9.0
+
+
+def test_auto_bounds_split_long_scenes(src_clip):
+    b = voiceover.auto_bounds(src_clip, 40.0)                                    # clip không có điểm chuyển cảnh: chia đều, mỗi cảnh ≤ 16 giây
+    assert len(b) >= 4 and all(y - x <= voiceover.AUTO_MAX_SEG + 0.01 for x, y in zip(b, b[1:]))
+
+
+def test_trim_text_drops_trailing_sentences():
+    t = "Câu một ngắn. Câu hai cũng ngắn. Câu ba rất dài " + "chữ " * 30 + "."
+    assert voiceover._trim_text(t, 40).startswith("Câu một ngắn.") and "Câu ba" not in voiceover._trim_text(t, 40)
+    assert voiceover._trim_text("Một câu duy nhất rất dài " + "chữ " * 30, 10)          # luôn giữ lại ít nhất 1 câu
+
+
+def test_empty_script_ai_watches_clip_writes_script_and_dubs_in_sync(three_scene_clip, tmp_path, gemini):
+    spoken = []
+    real = video.tts
+    video.tts = lambda text, *a, **k: spoken.append(text) or real(text, *a, **k)
+    try:
+        vid = _make(three_scene_clip, tmp_path, fit="keep", caption_pos="none", tone="promo", hint="hướng dẫn phần mềm hóa đơn", script="")
+        video.start_render(vid)
+    finally:
+        video.tts = real
+    v = db.video_get(vid)
+    assert v["status"] == "done", v["error"]
+    call = gemini[0]
+    assert len(call["images"]) == 6 and all(m == "image/jpeg" and b[:2] == b"\xff\xd8" for m, b in call["images"])      # 3 cảnh × 2 khung hình thật
+    assert "hướng dẫn phần mềm hóa đơn" in call["prompt"] and "giới thiệu sản phẩm" in call["prompt"] and "KHÔNG bịa" in call["prompt"]
+    import re
+    marks = [float(m[0]) * 60 + float(m[1]) for m in re.findall(r"Cảnh \d+ \[(\d+):([\d.]+)\]", v["script"])]
+    assert v["script"].startswith("Cảnh 1 [00:00.0] — Tên 1") and len(marks) == 3 and abs(marks[1] - 3) < 0.4 and abs(marks[2] - 6) < 0.4
+    assert len(spoken) == 3                                                          # lời đọc AI viết được đọc, mỗi cảnh một đoạn
+    assert not any("Cảnh" in t or "Tên 1" in t for t in spoken)
+    assert [_frame_color(v["path"], t, tmp_path) for t in (1.0, 4.5, 8.0)] == ["r", "g", "b"]
+
+
+def test_auto_mode_requires_gemini_key_with_clear_message(three_scene_clip, tmp_path):
+    vid = _make(three_scene_clip, tmp_path, script="")
+    with pytest.raises(voiceover.VoiceoverError, match="Gemini API key"):
+        video.start_render(vid)
+    assert db.video_get(vid)["status"] == "failed" and "Gemini" in db.video_get(vid)["error"]
+
+
+def test_api_create_without_script_is_auto(client, src_clip, gemini):
+    up = client.post("/api/voiceover/upload?filename=a.mp4", content=src_clip.read_bytes()).json()
+    v = client.post("/api/voiceover", json={"token": up["token"], "tone": "plain", "hint": "demo"}).json()
+    assert v["status"] == "done" and v["script"].startswith("Cảnh 1 [00:00.0]") and v["options"]["tone"] == "plain" and v["options"]["hint"] == "demo"
+    assert client.post("/api/voiceover", json={"token": up["token"], "script": "ab"}).status_code == 400
+    e = client.put(f"/api/voiceover/{v['id']}", json={"script": "", "tone": "promo"}).json()                          # xóa kịch bản → AI viết lại
+    assert e["script"] == "" and e["options"]["tone"] == "promo"
+    assert client.post(f"/api/videos/{v['id']}/render").json()["status"] == "done" and len(gemini) == 2
+    assert client.get("/api/voiceover/options").json()["tone"].keys() == voiceover.TONES.keys()
+
+
+def test_ui_auto_dub_on_upload():
+    html = TestClient(server.app).get("/").text
+    assert 'id="voAuto"' in html and "voCreate();" in html and "voRegen" in html

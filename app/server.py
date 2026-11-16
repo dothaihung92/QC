@@ -1270,8 +1270,10 @@ async def voiceover_upload(request: Request, filename: str = ""):
 
 class VoiceoverIn(BaseModel):
     token: str
-    script: str
+    script: str = ""                    # để trống = AI tự xem clip và viết lời đọc
     title: str = ""
+    tone: str = ""
+    hint: str = ""
     fit: str = "keep"
     audio: str = "none"
     captions: bool = True
@@ -1285,11 +1287,12 @@ def voiceover_create(body: VoiceoverIn):
     src = voiceover.upload_file(body.token)
     if not src:
         raise HTTPException(400, "Chưa có clip — chọn clip và đợi tải lên xong")
-    if len(body.script.strip()) < 5:
-        raise HTTPException(400, "Nhập kịch bản lời đọc")
+    if body.script.strip() and len(body.script.strip()) < 5:
+        raise HTTPException(400, "Kịch bản quá ngắn — nhập lời đọc, hoặc để trống cho AI tự xem clip và viết")
     d = body.model_dump()
-    if not d["caption_pos"]:
-        d.pop("caption_pos")
+    for k in ("caption_pos", "tone"):
+        if not d[k]:
+            d.pop(k)
     opts = voiceover.clean_options(d)
     vid = db.video_add(body.title.strip() or "Clip lồng tiếng", "", [], kind="voiceover", script=body.script.strip(),
                        source=str(src), options=opts)
@@ -1310,6 +1313,8 @@ class VoiceoverEdit(BaseModel):
     captions: Optional[bool] = None
     caption_pos: Optional[str] = None
     sync: Optional[bool] = None
+    tone: Optional[str] = None
+    hint: Optional[str] = None
 
 
 @admin.put("/api/voiceover/{vid}")
@@ -1324,7 +1329,7 @@ def voiceover_edit(vid: int, body: VoiceoverEdit):
         if getattr(body, k) is not None:
             fields[k] = getattr(body, k).strip() if k != "script" else getattr(body, k)
     opts = dict(v["options"])
-    for k in ("fit", "audio", "captions", "caption_pos", "sync"):
+    for k in ("fit", "audio", "captions", "caption_pos", "sync", "tone", "hint"):
         if getattr(body, k) is not None:
             opts[k] = getattr(body, k)
     if body.caption_pos is None and body.captions is not None:        # chỉ gửi captions (bản cũ)
@@ -1336,7 +1341,7 @@ def voiceover_edit(vid: int, body: VoiceoverEdit):
 
 @admin.get("/api/voiceover/options")
 def voiceover_options():
-    return {"fit": voiceover.FIT, "audio": voiceover.ORIG, "caption_pos": voiceover.CAPS}
+    return {"fit": voiceover.FIT, "audio": voiceover.ORIG, "caption_pos": voiceover.CAPS, "tone": voiceover.TONES}
 
 
 class VoiceoverParse(BaseModel):

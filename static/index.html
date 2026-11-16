@@ -735,13 +735,18 @@
   </div>
   <div class="card">
     <h2>🎙 Lồng giọng đọc vào clip có sẵn</h2>
-    <p class="muted small">Tải clip của bạn lên + dán kịch bản → phần mềm tạo <b>giọng đọc tiếng Việt</b> (giọng chọn ở "Cài đặt clip") rồi ghép vào clip,
-      tự khớp độ dài, có thể kèm <b>phụ đề tô sáng từng chữ</b>.</p>
+    <p class="muted small">Tải clip lên → <b>AI tự xem clip, viết lời đọc và lồng tiếng Việt luôn</b> (giọng chọn ở "Cài đặt clip"), không cần dán kịch bản.
+      Muốn tự viết lời đọc thì dán kịch bản vào ô bên phải. Có thể kèm <b>phụ đề tô sáng từng chữ</b>. (AI cần Gemini key — nhập ở tab 🤖 Tin tức AI.)</p>
     <div class="row2">
       <div class="col">
         <label>Clip của bạn <span class="muted small">(MP4, MOV, WEBM… tối đa 1 GB)</span></label>
         <input type="file" id="voFile" accept="video/*,.mp4,.mov,.m4v,.webm,.mkv,.avi" onchange="voPick()">
         <div id="voInfo" class="small muted" style="margin:4px 0"></div>
+        <label style="font-weight:400;background:var(--pri-weak);padding:8px 10px;border-radius:8px"><input type="checkbox" id="voAuto" style="width:auto" checked>
+          ⚡ <b>Tự động lồng tiếng ngay khi tải clip lên</b> (nếu ô kịch bản bên phải để trống — AI tự xem clip và viết lời đọc)</label>
+        <label>Giọng văn khi AI viết lời đọc</label><select id="voTone"></select>
+        <label>Gợi ý cho AI <span class="muted small">(tùy chọn: clip nói về gì, ai xem, từ cần đọc đúng...)</span></label>
+        <input id="voHintIn" placeholder="vd: hướng dẫn phần mềm quản lý hóa đơn điện tử cho kế toán">
         <label>Tên clip (tùy chọn)</label><input id="voTitle" placeholder="Clip lồng tiếng">
         <label>Khi lời đọc dài / ngắn hơn clip</label>
         <select id="voFit"></select>
@@ -752,9 +757,9 @@
         <label style="font-weight:400"><input type="checkbox" id="voSync" style="width:auto" checked> Khớp từng đoạn lời đọc với từng cảnh trong clip (kịch bản chia "Cảnh 1 — ...")</label>
       </div>
       <div class="col">
-        <label>Kịch bản lời đọc</label>
-        <textarea id="voScript" rows="11" oninput="voPreview()" placeholder="Dán hoặc viết lời đọc vào đây. Mỗi câu một ý, xuống dòng khi sang đoạn mới (phần mềm nghỉ lâu hơn ở chỗ xuống dòng).&#10;Nếu clip có nhiều cảnh: mở đầu mỗi cảnh bằng dòng riêng &quot;Cảnh 1 — tên cảnh&quot; (dòng này KHÔNG được đọc), muốn ép đúng thời điểm thì ghi &quot;Cảnh 2 [00:12] — ...&quot;.&#10;Dòng tiêu đề hoặc ghi chú trong (ngoặc) cũng không được đọc. Số, ngày tháng nên viết như người đọc (vd: ngày một tháng bảy)."></textarea>
-        <div class="btns"><button class="btn pri" id="voMake" onclick="voCreate()">🎙 Tạo giọng đọc vào clip</button></div>
+        <label>Kịch bản lời đọc <span class="muted small">— để trống = AI tự xem clip và viết</span></label>
+        <textarea id="voScript" rows="11" oninput="voPreview()" placeholder="(Để trống: AI sẽ tự xem clip, chia cảnh, viết và đọc lời thuyết minh.)&#10;Hoặc dán / viết lời đọc vào đây. Mỗi câu một ý, xuống dòng khi sang đoạn mới (phần mềm nghỉ lâu hơn ở chỗ xuống dòng).&#10;Nếu clip có nhiều cảnh: mở đầu mỗi cảnh bằng dòng riêng &quot;Cảnh 1 — tên cảnh&quot; (dòng này KHÔNG được đọc), muốn ép đúng thời điểm thì ghi &quot;Cảnh 2 [00:12] — ...&quot;.&#10;Dòng tiêu đề hoặc ghi chú trong (ngoặc) cũng không được đọc. Số, ngày tháng nên viết như người đọc (vd: ngày một tháng bảy)."></textarea>
+        <div class="btns"><button class="btn pri" id="voMake" onclick="voCreate()">🎙 Lồng tiếng cho clip</button></div>
         <div class="small" id="voPrev" style="margin:6px 0"></div>
         <p class="muted small" id="voHint"></p>
       </div>
@@ -1344,7 +1349,7 @@ let VO = null, VO_OPT = null;
 async function voInit() {
   if (!VO_OPT) VO_OPT = await api('/api/voiceover/options');
   const fill = (id, o, cur) => { $(id).innerHTML = Object.entries(o).map(([k, t]) => `<option value="${k}">${esc(t)}</option>`).join(''); if (cur) $(id).value = cur; };
-  if (!$('voFit').options.length) { fill('voFit', VO_OPT.fit); fill('voAudio', VO_OPT.audio); fill('voCapPos', VO_OPT.caption_pos); }
+  if (!$('voFit').options.length) { fill('voFit', VO_OPT.fit); fill('voAudio', VO_OPT.audio); fill('voCapPos', VO_OPT.caption_pos); fill('voTone', VO_OPT.tone); }
 }
 function voUp(file) {                                   // gửi nguyên tệp (có thanh tiến độ)
   return new Promise((ok, no) => {
@@ -1364,6 +1369,7 @@ async function voPick() {
     $('voInfo').innerHTML = `✅ Đã tải lên: <b>${esc(f.name)}</b> · ${VO.width}×${VO.height} · dài ${vdFmtSec(Math.round(VO.duration))} · ${VO.has_audio ? 'có tiếng gốc' : 'không có tiếng'}`;
     if (!$('voTitle').value) $('voTitle').value = f.name.replace(/\.[^.]+$/, '');
     voPreview();
+    if ($('voAuto').checked && !$('voScript').value.trim()) voCreate();               // chưa có kịch bản → AI tự làm luôn
   } catch (e) { $('voInfo').textContent = '⚠ ' + e.message; toast('⚠ ' + e.message); }
 }
 let voTimer = null;
@@ -1371,7 +1377,7 @@ function voPreview() {                                   // cho người dùng t
   clearTimeout(voTimer);
   voTimer = setTimeout(async () => {
     const t = $('voScript').value;
-    if (t.trim().length < 5) { $('voPrev').innerHTML = ''; return; }
+    if (t.trim().length < 5) { $('voPrev').innerHTML = VO ? '🤖 Không có kịch bản: AI sẽ tự xem clip và viết lời đọc.' : ''; return; }
     try {
       const r = await api('/api/voiceover/parse', { method: 'POST', body: { script: t } });
       let h = `📋 Nhận <b>${r.scenes.length} cảnh</b> · ước tính đọc ~${vdFmtSec(Math.round(r.seconds))}`;
@@ -1384,19 +1390,25 @@ function voPreview() {                                   // cho người dùng t
 }
 async function voCreate() {
   if (!VO) return toast('Chọn clip và đợi tải lên xong');
-  if ($('voScript').value.trim().length < 5) return toast('Nhập kịch bản lời đọc');
+  const sc = $('voScript').value.trim();
+  if (sc && sc.length < 5) return toast('Kịch bản quá ngắn — nhập lời đọc hoặc để trống cho AI tự viết');
   $('voMake').disabled = true;
   try {
     await api('/api/voiceover', { method: 'POST', body: { token: VO.token, script: $('voScript').value, title: $('voTitle').value,
-      fit: $('voFit').value, audio: $('voAudio').value, caption_pos: $('voCapPos').value, sync: $('voSync').checked } });
-    toast('🎙 Đang tạo giọng đọc và ghép vào clip — xem tiến trình ở "Clip của bạn"');
-    VO = null; $('voFile').value = ''; $('voInfo').textContent = ''; $('voScript').value = ''; $('voTitle').value = ''; $('voPrev').innerHTML = '';
+      fit: $('voFit').value, audio: $('voAudio').value, caption_pos: $('voCapPos').value, sync: $('voSync').checked,
+      tone: $('voTone').value, hint: $('voHintIn').value } });
+    toast(sc ? '🎙 Đang tạo giọng đọc và ghép vào clip — xem tiến trình ở "Clip của bạn"' : '🤖 AI đang xem clip, viết lời đọc và lồng tiếng — xem tiến trình ở "Clip của bạn"');
+    VO = null; $('voFile').value = ''; $('voInfo').textContent = ''; $('voScript').value = ''; $('voTitle').value = ''; $('voPrev').innerHTML = ''; $('voHintIn').value = '';
     vdLoadList();
   } finally { $('voMake').disabled = false; }
 }
+async function voRegen(id) {
+  if (!confirm('AI sẽ xem lại clip và viết kịch bản MỚI thay cho kịch bản hiện tại. Tiếp tục?')) return;
+  $('vos' + id).value = ''; await voRender(id);
+}
 async function voRender(id) {
   await api('/api/voiceover/' + id, { method: 'PUT', body: { title: $('vt' + id).value, script: $('vos' + id).value, fit: $('vof' + id).value,
-    audio: $('voa' + id).value, caption_pos: $('vop' + id).value, sync: $('vos2' + id).checked } });
+    audio: $('voa' + id).value, caption_pos: $('vop' + id).value, sync: $('vos2' + id).checked, tone: $('vot' + id).value, hint: $('voh' + id).value } });
   await api('/api/videos/' + id + '/render', { method: 'POST' });
   toast('🎙 Đang tạo lại giọng đọc và ghép vào clip...'); vdLoadList();
 }
@@ -1413,6 +1425,8 @@ function voCard(v) {
     <details ${v.status === 'draft' || v.status === 'failed' ? 'open' : ''}><summary class="small">Sửa kịch bản &amp; tùy chọn</summary>
       <label>Tên clip</label><input id="vt${v.id}" value="${esc(v.title)}">
       <label>Kịch bản lời đọc</label><textarea id="vos${v.id}" rows="8">${esc(v.script || '')}</textarea>
+      <label>Giọng văn khi AI viết lời đọc</label>${sel('vot', VO_OPT?.tone || {}, o.tone)}
+      <label>Gợi ý cho AI</label><input id="voh${v.id}" value="${esc(o.hint || '')}">
       <label>Khi lời đọc dài / ngắn hơn clip</label>${sel('vof', VO_OPT?.fit || {}, o.fit)}
       <label>Tiếng gốc của clip</label>${sel('voa', VO_OPT?.audio || {}, o.audio)}
       <label>Phụ đề tô sáng từng chữ</label>${sel('vop', VO_OPT?.caption_pos || {}, o.caption_pos || (o.captions === false ? 'none' : 'bottom'))}
@@ -1420,7 +1434,8 @@ function voCard(v) {
       <label>Mô tả đăng kèm (khi đăng Fanpage)</label><textarea id="vds${v.id}" rows="2" onblur="voDesc(${v.id}, this.value)">${esc(v.description || '')}</textarea>
     </details>
     <div class="btns">
-      <button class="btn pri" onclick="voRender(${v.id})" ${busy ? 'disabled' : ''}>🎙 ${v.has_file ? 'Tạo lại' : 'Tạo giọng đọc vào clip'}</button>
+      <button class="btn pri" onclick="voRender(${v.id})" ${busy ? 'disabled' : ''}>🎙 ${v.has_file ? 'Tạo lại (giữ kịch bản)' : 'Lồng tiếng cho clip'}</button>
+      <button class="btn" title="Xóa kịch bản cũ, AI xem lại clip và viết lời đọc mới" onclick="voRegen(${v.id})" ${busy ? 'disabled' : ''}>🤖 AI xem lại clip & viết kịch bản mới</button>
       ${v.has_file && !busy ? `<a class="btn" href="/api/videos/${v.id}/file?download=1">⬇ Tải về</a>
         <button class="btn" onclick="vdPublish(${v.id})">📤 Đăng lên Fanpage</button>` : ''}
       <button class="btn" onclick="vdDelete(${v.id})" ${busy ? 'disabled' : ''}>Xóa</button>
