@@ -43,17 +43,30 @@ if exist update.py if not defined QC_DA_KHOI_DONG_LAI (
   echo.
 )
 
-if not exist .venv %PY% -m venv .venv
+REM Moi truong ao .venv: KHONG dung "activate.bat" (neu thu muc bi copy / doi ten /
+REM giai nen sang cho khac thi activate tro ve duong dan cu, lenh "python" se bao
+REM "not recognized"). Luon goi thang .venv\Scripts\python.exe, va tu tao lai
+REM .venv neu no cu / hong (khong chay duoc).
+if exist .venv\Scripts\python.exe (
+  .venv\Scripts\python.exe -c "import sys" >nul 2>nul
+  if errorlevel 1 (
+    echo Thu muc .venv cu bi hong ^(co the do copy hoac doi ten thu muc^) - dang tao lai...
+    rmdir /s /q .venv
+  )
+)
+if not exist .venv\Scripts\python.exe (
+  if exist .venv rmdir /s /q .venv
+  %PY% -m venv .venv
+)
 if not exist .venv\Scripts\python.exe (
   echo Tao thu muc .venv that bai. Xoa thu muc .venv roi chay lai file nay.
   pause
   exit /b 1
 )
-call .venv\Scripts\activate.bat
 
 echo Dang cai thu vien (lan dau hoi lau, cac lan sau nhanh)...
-python -m pip install -q --upgrade pip
-python -m pip install -r requirements.txt
+.venv\Scripts\python.exe -m pip install -q --upgrade pip
+.venv\Scripts\python.exe -m pip install -r requirements.txt
 if errorlevel 1 (
   echo.
   echo ============================================================
