@@ -671,7 +671,8 @@
       <select id="vdLen"><option value="30">~30 giây</option><option value="45" selected>~45 giây</option>
         <option value="60">~60 giây</option><option value="120">~2 phút</option>
         <option value="180">~3 phút</option></select>
-      <div class="btns"><button class="btn pri" id="vdMake" onclick="vdCreate()">✨ AI viết kịch bản</button></div>
+      <div class="btns"><button class="btn pri" id="vdMake" onclick="vdCreate()">✨ AI viết kịch bản</button>
+        <button class="btn pri" id="vdMakeNews" onclick="vdCreate('news')" title="AI chỉ giữ các ý QUAN TRỌNG của bài: ảnh minh họa phía trên, chữ to nhấn mạnh phía dưới, cảnh cuối thẻ liên hệ; kèm sẵn nội dung đăng Facebook có chữ ký thương hiệu">📰 Làm clip Tin nhanh (chỉ ý quan trọng)</button></div>
       <p class="muted small" id="vdKeyHint"></p>
     </div>
     <div class="card">
@@ -698,6 +699,7 @@
         <option value="general">Phổ thông — nhịp nhanh hơn, nhiều chữ hơn</option></select>
       <label>Kiểu clip</label>
       <select id="vdLook"><option value="tech">Công nghệ (nền xanh đen, chip, cửa sổ trình duyệt, bong bóng chat) — kiểu review công cụ / repo GitHub</option>
+        <option value="news">Tin nhanh (ảnh minh họa + chữ to nhấn mạnh + thẻ liên hệ) — kiểu bản tin ngắn</option>
         <option value="doodle">Vẽ tay trên giấy (hình AI vẽ lộ dần, có bàn tay cầm bút) — cần Gemini key</option>
         <option value="explainer">Giải thích (sơ đồ, thẻ kính, phụ đề vàng) — kiểu clip công nghệ</option>
         <option value="classic">Cổ điển (khung tiêu đề + ảnh nền)</option></select>
@@ -725,6 +727,19 @@
       </div>
       <p class="muted small" style="margin:0 0 8px">Veo là công nghệ tạo video của Google Flow: cảnh nào dùng Veo sẽ có đoạn video AI 8 giây
         (có phí, trả theo giây). Để 0 nếu chưa cần. Ảnh AI và Veo dùng Gemini key đã nhập ở tab Tin tức AI.</p>
+      <details style="margin:8px 0" open><summary class="small"><b>📰 Chữ ký bài đăng &amp; thẻ liên hệ (kiểu Tin nhanh)</b></summary>
+        <p class="muted small" style="margin:6px 0">Dùng ở nội dung đăng Facebook (dưới đường kẻ ______ như bài mẫu) và ở cảnh cuối của clip Tin nhanh.</p>
+        <label>Tên thương hiệu</label><input id="vdSigName" placeholder="ĐẠI LÝ THUẾ HƯNG PHÚC">
+        <label style="font-weight:400"><input type="checkbox" id="vdSigBold" style="width:auto"> In đậm tên thương hiệu kiểu Facebook (chữ không dấu: 𝗗𝗔𝗜 𝗟𝗬 𝗧𝗛𝗨𝗘…)</label>
+        <label>Giới thiệu ngắn (1–2 câu)</label><textarea id="vdSigTag" rows="2"></textarea>
+        <div class="row2"><div><label>📍 Địa chỉ (bỏ trống = không hiện)</label><input id="vdSigAddr"></div>
+          <div><label>📞 Hotline</label><input id="vdSigPhone" placeholder="0986883137"></div></div>
+        <label>Hashtag cố định (cách nhau khoảng trắng)</label><input id="vdSigTags" placeholder="#DaiLyThueHungPhuc">
+        <label>Lời kêu gọi ở cảnh cuối <span class="muted small">(đọc to + hiện chữ cam; số hotline được đọc ngay sau)</span></label><input id="vdCta">
+        <div class="row2"><div><label>Chữ logo (khi chưa có ảnh logo)</label><input id="vdLogoText" placeholder="Hưng Phúc"></div>
+          <div><label>Ảnh logo (tùy chọn, PNG nền trong suốt đẹp nhất) <span id="vdLogoState" class="small muted"></span></label>
+            <input type="file" accept="image/*" onchange="vdLogoUp(this)"></div></div>
+      </details>
       <label>Dòng chữ cuối khung (tên Fanpage, số điện thoại)</label>
       <input id="vdBrand" placeholder="Group Kế Toán HCM • 09xx xxx xxx">
       <label>Pexels API key — ảnh minh họa miễn phí (tùy chọn) <a class="small" href="https://www.pexels.com/api/" target="_blank">(lấy key)</a>
@@ -1215,7 +1230,13 @@ async function newsReject(id) { await api('/api/news/' + id + '/reject', { metho
 async function newsDel(id) { await api('/api/news/' + id, { method: 'DELETE' }); loadNews(); }
 
 // ---------------- Tạo clip
-let VCFG = null, VIDEOS = [], VSRC = [], VPRESET = null, vdTimer = null;
+let VCFG = null, VIDEOS = [], VSRC = [], VPRESET = null, vdTimer = null, VLOGO = '';
+async function vdLogoUp(input) {
+  const f = input.files[0]; if (!f) return;
+  if (f.size > 4 * 1024 * 1024) { input.value = ''; return toast('⚠ Logo lớn hơn 4 MB'); }
+  const data = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = no; r.readAsDataURL(f); });
+  const r = await api('/api/media', { method: 'POST', body: { data } }); VLOGO = r.url; $('vdLogoState').textContent = '— đã chọn, bấm Lưu cài đặt'; input.value = '';
+}
 const VD_ST = { draft: ['Kịch bản','p-info'], rendering: ['Đang dựng','p-warn'], done: ['Đã dựng','p-ok'], failed: ['Lỗi','p-err'] };
 function vdFromNews(id) { VPRESET = 'news:' + id; openTab('video'); }
 async function loadVideo() {
@@ -1231,6 +1252,9 @@ async function loadVideo() {
   $('vdVoice').value = VCFG.voice; $('vdRate').value = VCFG.rate;
   [...$('vdVoice').options].forEach(o => { if ((o.value.startsWith('piper:') && !VCFG.piper) || (o.value.startsWith('vieneu:') && !VCFG.vieneu)) o.textContent += ' (chưa cài)'; }); $('vdFormat').value = VCFG.format;
   $('vdColor').value = VCFG.color; $('vdBrand').value = VCFG.brand; $('vdMusic').checked = VCFG.music;
+  $('vdSigName').value = VCFG.sig_name || ''; $('vdSigBold').checked = VCFG.sig_bold !== false; $('vdSigTag').value = VCFG.sig_tagline || ''; $('vdSigAddr').value = VCFG.sig_address || '';
+  $('vdSigPhone').value = VCFG.sig_phone || ''; $('vdSigTags').value = VCFG.sig_tags || ''; $('vdCta').value = VCFG.cta_text || ''; $('vdLogoText').value = VCFG.logo_text || '';
+  VLOGO = VCFG.logo || ''; $('vdLogoState').textContent = VLOGO ? '— đã chọn' : '';
   $('vdPexState').textContent = VCFG.has_pexels_key ? '— đã lưu' : '';
   $('vdMusicHint').textContent = VCFG.music_files ? `(${VCFG.music_files} bài trong ${VCFG.music_dir})`
     : `(chép file .mp3 không bản quyền vào ${VCFG.music_dir})`;
@@ -1295,16 +1319,18 @@ function vdPick() {
 async function vdSave() {
   VCFG = await api('/api/video/config', { method: 'PUT', body: { audience: $('vdAudience').value, ai_images: $('vdAiImg').checked, show_title: $('vdShowTitle').checked, look: $('vdLook').value, theme: $('vdTheme').value, story: $('vdStory').value, pen: $('vdPen').value, voice: $('vdVoice').value, tts_style: $('vdStyle').value, visual: $('vdVisual').value, veo_scenes: $('vdVeo').value, rate: $('vdRate').value,
     format: $('vdFormat').value, color: $('vdColor').value, brand: $('vdBrand').value, pexels_key: $('vdPexels').value,
-    music: $('vdMusic').checked } });
+    music: $('vdMusic').checked, sig_name: $('vdSigName').value, sig_bold: $('vdSigBold').checked, sig_tagline: $('vdSigTag').value, sig_address: $('vdSigAddr').value,
+    sig_phone: $('vdSigPhone').value, sig_tags: $('vdSigTags').value, cta_text: $('vdCta').value, logo_text: $('vdLogoText').value, logo: VLOGO } });
   $('vdPexels').value = ''; toast('✅ Đã lưu cài đặt clip'); loadVideo();
 }
-async function vdCreate() {
-  $('vdMake').disabled = true; $('vdMake').textContent = '⏳ AI đang viết kịch bản...';
+async function vdCreate(look = '') {
+  const btn = $(look === 'news' ? 'vdMakeNews' : 'vdMake'), old = btn.innerHTML;
+  $('vdMake').disabled = $('vdMakeNews').disabled = true; btn.textContent = '⏳ AI đang viết kịch bản...';
   try {
-    const r = await api('/api/videos', { method: 'POST', body: { text: $('vdText').value, seconds: +$('vdLen').value, image_url: $('vdImg').value } });
+    const r = await api('/api/videos', { method: 'POST', body: { text: $('vdText').value, seconds: +$('vdLen').value, image_url: $('vdImg').value, look } });
     toast(`✅ Đã có kịch bản${r.format_name ? ' — kiểu "' + r.format_name + '"' : ''} — xem lại bên dưới rồi bấm Dựng clip`);
     await vdLoadList();
-  } finally { $('vdMake').disabled = false; $('vdMake').textContent = '✨ AI viết kịch bản'; }
+  } finally { $('vdMake').disabled = $('vdMakeNews').disabled = false; btn.innerHTML = old; }
 }
 async function vdLoadList() {
   VIDEOS = await api('/api/videos');
@@ -1313,12 +1339,19 @@ async function vdLoadList() {
   if (VIDEOS.some(v => v.status === 'rendering') && document.getElementById('video').classList.contains('active'))
     vdTimer = setTimeout(vdLoadList, 3000);
 }
-const VD_TYPES = { visual: 'Cảnh hình minh họa', bars: 'Biểu đồ cột (lãi / lỗ)', calc: 'Bảng tính từng bước', hero: 'Mở đầu (logo + chip)', browser: 'Cửa sổ trình duyệt', doodle: 'Trang vẽ tay', hook: 'Mở đầu', stat: 'Con số nổi bật', list: 'Danh sách ý', flow: 'Sơ đồ cây (gốc + nhánh)', steps: 'Các bước nối nhau', text: 'Chỉ tiêu đề', cta: 'Kêu gọi liên hệ',
+const VD_TYPES = { news: 'Tin nhanh (ảnh + chữ nhấn mạnh)', visual: 'Cảnh hình minh họa', bars: 'Biểu đồ cột (lãi / lỗ)', calc: 'Bảng tính từng bước', hero: 'Mở đầu (logo + chip)', browser: 'Cửa sổ trình duyệt', doodle: 'Trang vẽ tay', hook: 'Mở đầu', stat: 'Con số nổi bật', list: 'Danh sách ý', flow: 'Sơ đồ cây (gốc + nhánh)', steps: 'Các bước nối nhau', text: 'Chỉ tiêu đề', cta: 'Kêu gọi liên hệ',
   compare: 'So sánh 2 cột (Trước | Sau)', quote: 'Trích dẫn lớn (văn bản)', timeline: 'Dòng thời gian (mốc | sự kiện)', checklist: 'Checklist tích dần', qa: 'Hỏi – đáp (câu hỏi, trả lời)', rank: 'Xếp hạng Top (#số)' };
 const vdWords = (t) => (t.match(/[\p{L}\p{N}]+/gu) || []).length;
 const vdEst = (scenes) => Math.round(scenes.reduce((n, s) => n + vdWords(s.narration) / 3 + 0.3, 0));
 const vdFmtSec = (n) => n >= 60 ? `${Math.floor(n / 60)} phút ${n % 60} giây` : `${n} giây`;
 function vdScene(v, s, i) {
+  if (s.type === 'news') return `<div style="border-left:3px solid #f59e0b;padding-left:10px;margin:8px 0">
+    <b class="small">Cảnh ${i + 1}</b> <button class="btn" style="padding:2px 8px" onclick="vdDelScene(${v.id},${i})">✕</button>
+    <input type="hidden" data-v="${v.id}" data-i="${i}" data-f="type" value="news">
+    <textarea data-v="${v.id}" data-i="${i}" data-f="narration" rows="2" placeholder="Lời đọc — cũng là chữ hiện trên màn hình">${esc(s.narration)}</textarea>
+    <div class="row"><div class="col" style="flex-basis:200px"><input data-v="${v.id}" data-i="${i}" data-f="keyword" value="${esc(s.keyword || '')}" placeholder="Từ khóa ảnh minh họa (tiếng Anh)"></div>
+      <div class="col"><input data-v="${v.id}" data-i="${i}" data-f="hl" value="${esc((s.hl || []).join(', '))}" placeholder="Cụm nhấn mạnh màu cam (viết đúng như lời đọc, cách nhau dấu phẩy)"></div></div>
+  </div>`;
   if (s.type === 'doodle') return `<div style="border-left:3px solid #ddd;padding-left:10px;margin:8px 0">
     <b class="small">Trang ${i + 1}</b> <button class="btn" style="padding:2px 8px" onclick="vdDelScene(${v.id},${i})">✕</button>
     <input data-v="${v.id}" data-i="${i}" data-f="tag" value="${esc(s.tag || '')}" placeholder="Nhãn nhỏ (vd VÍ DỤ THỰC TẾ)">

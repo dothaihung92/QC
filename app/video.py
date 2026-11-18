@@ -85,6 +85,16 @@ DEFAULTS = {
     "color": "#0b4f8a",               # màu thương hiệu (nền + khung tiêu đề)
     "pexels_key": "",                 # tùy chọn: ảnh minh họa miễn phí từ pexels.com
     "music": True,                    # trộn nhạc nền nếu có file trong data/music
+    # kiểu "Tin nhanh" + nội dung đăng Facebook: chữ ký thương hiệu dưới bài, thẻ liên hệ ở cảnh cuối
+    "sig_name": "ĐẠI LÝ THUẾ HƯNG PHÚC",
+    "sig_tagline": "Hỗ trợ kê khai thuế, hóa đơn điện tử và phần mềm kế toán cho doanh nghiệp.",
+    "sig_address": "",
+    "sig_phone": "0986883137",
+    "sig_tags": "#DaiLyThueHungPhuc",
+    "sig_bold": True,                 # tên thương hiệu in đậm kiểu Facebook (chữ Unicode, không dấu)
+    "cta_text": "Liên hệ ngay để được hỗ trợ phần mềm và giải đáp thắc mắc",
+    "logo": "",                       # logo (ảnh tải lên: /media/...) — trống thì dùng chữ
+    "logo_text": "Hưng Phúc",
 }
 
 _lock = threading.Lock()
@@ -136,7 +146,7 @@ def save_config(body: dict) -> dict:
         cur["audience"] = "expert"
     if cur["audience"] not in ("expert", "general"):
         cur["audience"] = DEFAULTS["audience"]
-    if cur["look"] not in ("doodle", "tech", "explainer", "classic"):
+    if cur["look"] not in ("doodle", "tech", "explainer", "classic", "news"):
         cur["look"] = DEFAULTS["look"]
     from . import formats, themes
     if cur["theme"] != "auto" and cur["theme"] not in themes.THEMES:
@@ -330,7 +340,7 @@ EXPERT_BLOCK = (
 )
 EXPERT_WPS = 2.6                 # giải trình: đọc rõ, vừa phải (từ / giây)
 WORDS_PER_SEC = 3.0                  # tốc độ đọc tiếng Việt trung bình của giọng máy (đo từ clip thật)
-SCENE_TYPES = ("hook", "stat", "list", "flow", "steps", "text", "cta", "doodle", "hero", "browser", "calc", "visual", "bars",
+SCENE_TYPES = ("news", "hook", "stat", "list", "flow", "steps", "text", "cta", "doodle", "hero", "browser", "calc", "visual", "bars",
                "compare", "quote", "timeline", "checklist", "qa", "rank")
 DOODLE_PAGES = {30: 3, 45: 4, 60: 5, 120: 8, 180: 12}   # giây → số trang của clip vẽ tay (~15 giây / trang)
 
@@ -547,12 +557,15 @@ def clean_scenes(scenes) -> list:
     return out[:30]
 
 
-def make_script(text: str, seconds: int = 45) -> dict:
+def make_script(text: str, seconds: int = 45, look: str = "") -> dict:
     text = (text or "").strip()
     if len(text) < 80:
         raise VideoError("Nội dung quá ngắn để làm clip (cần ít nhất vài câu)")
-    seconds = seconds if seconds in LENGTHS else 45
     cfg = get_config()
+    if (look or cfg["look"]) == "news":              # Tin nhanh: chỉ giữ ý quan trọng, ảnh minh họa + chữ nhấn mạnh
+        from . import newslook
+        return newslook.make_script(text, seconds, cfg)
+    seconds = seconds if seconds in LENGTHS else 45
     doodle = cfg["look"] == "doodle"
     tech = cfg["look"] == "tech"
     n = DOODLE_PAGES[seconds] if doodle else LENGTHS[seconds]
@@ -1557,6 +1570,9 @@ def _render_safe(video_id: int):
 def render(video_id: int):
     v = db.video_get(video_id)
     cfg = get_config()
+    if ((v.get("options") or {}).get("look") or cfg["look"]) == "news":
+        from . import newslook
+        return newslook.render(video_id)
     size = SIZES[cfg["format"]]
     if cfg["look"] == "doodle":                  # kiểu vẽ tay có nhiều lớp chồng: dựng 720p cho nhanh (đúng độ phân giải clip mẫu)
         size = (size[0] * 2 // 3, size[1] * 2 // 3)

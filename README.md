@@ -94,6 +94,7 @@ app/newsagent.py  # Agent tin tức: dò bài thuế/kế toán, AI viết lại
 app/video.py      # Tạo clip ngắn từ bài viết (kịch bản AI, giọng đọc, phụ đề, FFmpeg)
 static/index.html # Giao diện
 app/backlinks.py                  # Hệ thống đi backlink chất lượng (tab 🔗 Backlink)
+app/newslook.py                   # Kiểu clip Tin nhanh (ảnh minh họa + chữ nhấn mạnh + thẻ liên hệ) + nội dung đăng Facebook
 static/seo-writer.html, static/qc-bridge.js  # Công cụ viết bài SEO + nút đẩy bài sang Fanpage
 update.py         # Tự cập nhật phần mềm từ GitHub, chạy mỗi lần bấm start.bat
 start.bat / run_server.bat / start.sh  # Chạy nhanh trên Windows / Mac-Linux
@@ -187,6 +188,7 @@ Gemini viết kịch bản theo cảnh → giọng đọc tiếng Việt miễn 
 ảnh nền (ảnh của bài, ảnh miễn phí Pexels nếu có key, hoặc nền màu thương hiệu) →
 chữ lớn + phụ đề → FFmpeg ghép thành video dọc 9:16 (hoặc ngang 16:9).
 
+- **📰 Clip Tin nhanh** (tab Tạo clip → nút **📰 Làm clip Tin nhanh**): làm clip 9:16 như bản tin ngắn mẫu — AI đọc bài và **chỉ giữ ý quan trọng** (ai – việc gì – con số – mốc thời gian – việc doanh nghiệp cần làm), mỗi cảnh một câu. Nửa trên là **ảnh minh họa** (Pexels, mỗi cảnh một ảnh, nhãn "HÌNH MINH HỌA", logo góc phải), nửa dưới nền xanh với **chữ to in hoa chạy theo lời đọc**, con số tô vàng, cụm quan trọng tô cam, dải cam bên trái; **cảnh cuối tự thêm thẻ liên hệ** (tên – giới thiệu – hotline) và lời kêu gọi. Chưa có Pexels key thì khung ảnh hiện con số chính. Kèm sẵn **nội dung đăng Facebook đúng bố cục bài mẫu**: câu tiêu đề → đường kẻ ______ → tên thương hiệu in đậm → giới thiệu → 📍 địa chỉ → 📞 Hotline → hashtag (AI + hashtag cố định); bấm "Đăng lên Fanpage" / "Đăng lên nhóm FB" là đăng clip kèm nội dung đó. Sửa chữ ký, hotline, lời kêu gọi, logo ở **Cài đặt clip → Chữ ký bài đăng & thẻ liên hệ**.
 - **👥 Đăng clip lên nhóm Facebook**: clip nào dựng xong (cả clip AI dựng và clip lồng tiếng) đều có nút **Đăng lên nhóm FB** — chuyển sang tab Đăng nhóm với clip đã đính kèm (kèm nội dung mô tả), chọn nhóm rồi bấm ✨ AI viết bài & đăng (mỗi nhóm một bài khác nhau, clip tải lên cùng bài) hoặc hẹn giờ nhắc (có nút tải clip về để đăng tay). Clip thay cho ảnh đính kèm; clip lớn có thể mất vài phút mỗi nhóm.
 - **🎙 Lồng giọng đọc vào clip có sẵn** (tab Tạo clip): tải clip của bạn lên (MP4, MOV, WEBM… tối đa 1 GB) + dán kịch bản → phần mềm tạo giọng đọc tiếng Việt (giọng chọn ở Cài đặt clip: VieNeu / Gemini / Microsoft…) và ghép vào clip. Tự khớp độ dài (kéo dài bằng khung hình cuối / lặp clip / cắt theo lời đọc / co giãn tốc độ), chọn tắt hoặc giữ tiếng gốc (nhỏ làm nền), có phụ đề tô sáng từng chữ; xem, tải về, đăng Fanpage như các clip khác.
   **Không cần kịch bản:** để trống ô kịch bản (và bật "Tự động lồng tiếng ngay khi tải clip lên") thì AI (Gemini, cần key) tự xem clip — chia cảnh theo chỗ hình đổi, nhìn khung hình từng cảnh, đọc đúng tên nút/menu trên màn hình — viết lời đọc rồi lồng tiếng luôn; kịch bản AI viết được lưu lại để bạn xem/sửa, chọn giọng văn (hướng dẫn / giới thiệu / mô tả) và gợi ý nội dung; nút "AI xem lại clip & viết kịch bản mới" để làm lại.

@@ -1078,16 +1078,18 @@ class ScriptIn(BaseModel):
     text: str
     seconds: int = 45
     image_url: str = ""
+    look: str = ""                        # "news" = kiểu Tin nhanh cho riêng clip này
 
 
 @admin.post("/api/videos")
 def video_create(body: ScriptIn):
     """AI viết kịch bản từ nội dung bài → lưu thành clip nháp để sửa trước khi dựng."""
     try:
-        sc = video.make_script(body.text, body.seconds)
+        sc = video.make_script(body.text, body.seconds, body.look)
     except video.VideoError as e:
         raise HTTPException(400, str(e))
-    vid = db.video_add(sc["title"], sc["description"], sc["scenes"], body.image_url.strip())
+    vid = db.video_add(sc["title"], sc["description"], sc["scenes"], body.image_url.strip(),
+                       options={"look": "news"} if sc.get("format") == "news" else None)
     return dict(video.to_json(db.video_get(vid)), format_name=sc.get("format_name", ""))
 
 
