@@ -4,11 +4,16 @@ những cụm quan trọng (con số vàng, hành động cam) chạy đúng the
 AI chỉ chọn lọc những ý QUAN TRỌNG của bài (ai – việc gì – con số – mốc thời gian – doanh nghiệp cần làm), mỗi cảnh 1 câu ngắn.
 Kèm sẵn nội dung đăng Facebook: câu tiêu đề + đường kẻ + chữ ký thương hiệu (tên, giới thiệu, địa chỉ, hotline) + hashtag.
 """
+import html as htmllib
 import math
 import re
 import shutil
 import unicodedata
+from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import urljoin, urlparse
+
+import requests
 
 from . import aimedia, db, newsagent
 from . import video as V
@@ -198,7 +203,7 @@ def _stat_panel(w: int, h: int, text: str, cfg: dict):
     return im.convert("RGB")
 
 
-def scene_background(cfg: dict, photo, stat_text: str, dest: Path, show_label: bool):
+def scene_background(cfg: dict, photo, stat_text: str, dest: Path, label: str = LABEL):
     """Khung 720x1280: dải đầu (nhãn + logo) · ảnh minh họa · nền xanh · dải cam bên trái · logo mờ."""
     from PIL import Image, ImageDraw
     W, H = SIZE
@@ -212,9 +217,9 @@ def scene_background(cfg: dict, photo, stat_text: str, dest: Path, show_label: b
         img.paste(_cover(photo, W - sx, ph - hh), (sx, hh))
     else:
         img.paste(_stat_panel(W - sx, ph - hh, stat_text, cfg), (sx, hh))
-    if show_label:
+    if label:
         f = V._font(int(H * 0.0155), bold=True)
-        d.text((int(W * 0.06), hh // 2), LABEL, font=f, fill=(235, 240, 255), anchor="lm")
+        d.text((int(W * 0.06), hh // 2), label, font=f, fill=(235, 240, 255), anchor="lm")
     logo = _logo(cfg, int(hh * 0.62))
     if logo is not None:
         _paste(img, logo, W - logo.width - int(W * 0.05), (hh - logo.height) // 2)
@@ -380,17 +385,107 @@ def chunk_layer(chunk_words: list, colors: list, dest: Path):
     return V._save_layer(ov, dest)
 
 
+# ---------------------------------------------------------------- ảnh trong bài viết
+
+_BAD_IMG = re.compile(r"logo|icon|avatar|sprite|banner|(?<![a-z])ads?[-_/]|advert|pixel|tracking|spacer|blank|loading|placeholder|emoji|badge|button|share|social|qr|favicon", re.I)
+
+
+class _Imgs(HTMLParser):
+    def __init__(self, base: str):
+        super().__init__(convert_charrefs=True)
+        self.base, self.found, self.meta = base, [], []
+        self._art = 0
+
+    def handle_endtag(self, tag):
+        if tag == "article" and self._art:
+            self._art -= 1
+
+    def handle_starttag(self, tag, attrs):
+        a = {k: (v or "") for k, v in attrs}
+        if tag == "article":
+            self._art += 1
+        if tag == "meta" and (a.get("property") in ("og:image", "twitter:image") or a.get("name") == "twitter:image") and a.get("content"):
+            self.meta.append(urljoin(self.base, a["content"]))
+        elif tag == "img":
+            src = a.get("data-src") or a.get("data-original") or a.get("data-lazy-src") or a.get("src") or ""
+            ss = a.get("srcset") or a.get("data-srcset") or ""
+            if ss:                                                   # lấy bản lớn nhất trong srcset
+                best = max(((float(re.sub(r"[^\d.]", "", w) or 0), u) for u, _, w in
+                            (p.strip().partition(" ") for p in ss.split(",") if p.strip())), default=(0, ""))
+                src = best[1] or src
+            if not src or src.startswith("data:"):
+                return
+            try:
+                w, h = int(re.sub(r"\D", "", a.get("width", "")) or 0), int(re.sub(r"\D", "", a.get("height", "")) or 0)
+            except ValueError:
+                w = h = 0
+            if (w and w < 250) or (h and h < 150):
+                return
+            self.found.append((urljoin(self.base, src), self._art > 0, a.get("alt", "")))
+
+
+def article_images(url: str, limit: int = 12) -> list:
+    """Địa chỉ các ảnh nằm trong bài báo: ảnh đại diện (og:image) trước, rồi ảnh trong nội dung bài (bỏ logo, icon, quảng cáo...)."""
+    from . import backlinks
+    try:
+        status, final, body = backlinks.fetch_page(url)
+    except backlinks.FetchError:
+        return []
+    if status >= 400:
+        return []
+    p = _Imgs(final)
+    try:
+        p.feed(body)
+    except Exception:  # noqa: BLE001
+        pass
+    inside = [u for u, art, _alt in p.found if art]
+    rest = [u for u, art, _alt in p.found if not art]
+    out, seen = [], set()
+    for u in [*p.meta[:1], *inside, *p.meta[1:], *rest[:6]]:
+        path = urlparse(u).path.lower()
+        key = re.sub(r"[-_]?\d{2,4}x\d{2,4}", "", path)             # cùng ảnh ở nhiều kích thước → giữ 1
+        if not u.startswith("http") or path.endswith((".svg", ".gif", ".ico")) or _BAD_IMG.search(path) or key in seen:
+            continue
+        seen.add(key)
+        out.append(u)
+    return out[:limit]
+
+
+def _fetch_image(url: str, referer: str, dest: Path) -> bool:
+    """Tải ảnh (có Referer của bài — nhiều báo chặn tải trực tiếp); bỏ ảnh quá nhỏ."""
+    from PIL import Image
+    try:
+        r = requests.get(url, headers={"User-Agent": newsagent.UA, "Referer": referer or url, "Accept": "image/*"}, timeout=30, stream=True)
+        ct = (r.headers.get("Content-Type") or "").split(";")[0].lower()
+        if r.status_code >= 400 or not ct.startswith("image/") or "svg" in ct or "gif" in ct:
+            return False
+        data = b""
+        for chunk in r.iter_content(1 << 16):
+            data += chunk
+            if len(data) > 15 * 1024 * 1024:
+                return False
+        dest.write_bytes(data)
+        with Image.open(dest) as im:
+            return im.width >= 360 and im.height >= 240
+    except (requests.RequestException, OSError, ValueError):
+        return False
+
+
 # ---------------------------------------------------------------- dựng clip
 
-def _photo_for(i: int, sc: dict, cfg: dict, work: Path, gkey: str, article, seen: set, aspect: str):
-    """Ảnh minh họa cho cảnh: ảnh AI (nếu bật) → Pexels (ảnh khác nhau mỗi cảnh) → ảnh của bài → None."""
+def _photo_for(i: int, sc: dict, cfg: dict, work: Path, gkey: str, article, seen: set, aspect: str, pool: list = None):
+    """Ảnh cho cảnh. Trả về (đường dẫn ảnh | None, nhãn). Ưu tiên ảnh TRONG BÀI VIẾT (mỗi cảnh một ảnh) →
+    ảnh AI (nếu bật) → Pexels (ảnh khác nhau mỗi cảnh) → ảnh đại diện của bài → None."""
     import hashlib
+    pool = pool or []
+    if pool and (i < len(pool) or not cfg["pexels_key"]):
+        return pool[i % len(pool)]
     dest = work / f"photo{i}.img"
     kw = sc["keyword"] or sc["visual"] or sc["headline"]
     if cfg["visual"] == "ai" and gkey and kw:
         try:
             dest.write_bytes(aimedia.image(f"{kw}. Photorealistic news photo, natural lighting, no text, no logos, no watermark.", aspect, gkey))
-            return dest
+            return dest, LABEL
         except aimedia.AIError as e:
             V._log(f"Cảnh {i + 1}: ảnh AI lỗi, dùng ảnh Pexels — {str(e)[:100]}")
     for attempt in range(3):
@@ -399,8 +494,19 @@ def _photo_for(i: int, sc: dict, cfg: dict, work: Path, gkey: str, article, seen
             if h in seen and attempt < 2:
                 continue                                   # trùng ảnh cảnh trước → lấy ảnh khác
             seen.add(h)
-            return dest
-    return article
+            return dest, LABEL
+    return (article, LABEL) if article else (None, LABEL)
+
+
+def _article_pool(opts: dict, work: Path) -> list:
+    """Tải các ảnh trong bài (đã lưu ở options.images) → [(đường dẫn, nhãn nguồn)] — ảnh hỏng / quá nhỏ bị bỏ."""
+    pool, ref = [], opts.get("article_url") or ""
+    src = (urlparse(ref).hostname or "").removeprefix("www.")
+    for k, u in enumerate(opts.get("images") or []):
+        dest = work / f"art{k}.img"
+        if _fetch_image(u, ref, dest):
+            pool.append((dest, f"ẢNH: {src.upper()}" if src else "ẢNH TRONG BÀI"))
+    return pool
 
 
 def render(video_id: int):
@@ -422,6 +528,11 @@ def render(video_id: int):
         article = work / "article.img"
         if not V._download(v["image_url"], article):
             article = None
+    opts = v.get("options") or {}
+    step("Tải ảnh trong bài viết")
+    pool = _article_pool(opts, work)
+    if opts.get("images") and not pool:
+        V._log("Không tải được ảnh nào trong bài (báo chặn tải ảnh hoặc ảnh quá nhỏ) — dùng ảnh Pexels / ảnh đại diện")
     gkey = newsagent.get_config()["gemini_key"] if cfg["ai_images"] else ""
     style = V.STYLES[cfg["tts_style"]][1]
     items = [(sc, False) for sc in scenes]
@@ -444,9 +555,9 @@ def render(video_id: int):
             cta_background(cfg, cta_text or "Liên hệ ngay để được hỗ trợ", work / f"bg{i}.png")
         else:
             step(f"Cảnh {i + 1}/{total}: ảnh minh họa")
-            photo = _photo_for(i, sc, cfg, work, gkey, article, seen, "9:16")
+            photo, label = _photo_for(i, sc, cfg, work, gkey, article, seen, "9:16", pool)
             stat = (sc["hl"] or [""])[0]
-            scene_background(cfg, photo, stat, work / f"bg{i}.png", show_label=photo is not None)
+            scene_background(cfg, photo, stat, work / f"bg{i}.png", label if photo is not None else "")
             chunks = news_chunks(sc["narration"], sc["hl"], 5)
             allw = " ".join(chunks).split()
             cols = color_words(allw, sc["hl"])
@@ -475,7 +586,7 @@ def render(video_id: int):
         if p != out:
             p.unlink(missing_ok=True)
     length = sum(durations)
-    note = "" if cfg["pexels_key"] or gkey else \
+    note = "" if cfg["pexels_key"] or gkey or pool else \
         "Chưa có Pexels API key nên khung ảnh hiện con số chính thay cho ảnh minh họa. Nhập key (miễn phí) ở Cài đặt clip để có ảnh thật."
     db.video_update(video_id, status="done", path=str(out), duration=round(length, 1), progress="", error=note)
     db.log("video", f"Đã dựng clip tin nhanh #{video_id}: {v['title']} ({length:.0f}s)")

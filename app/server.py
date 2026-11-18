@@ -1079,6 +1079,7 @@ class ScriptIn(BaseModel):
     seconds: int = 45
     image_url: str = ""
     look: str = ""                        # "news" = kiểu Tin nhanh cho riêng clip này
+    article_url: str = ""                 # link bài viết gốc: lấy ảnh trong bài làm ảnh minh họa (kiểu Tin nhanh)
 
 
 @admin.post("/api/videos")
@@ -1088,8 +1089,15 @@ def video_create(body: ScriptIn):
         sc = video.make_script(body.text, body.seconds, body.look)
     except video.VideoError as e:
         raise HTTPException(400, str(e))
-    vid = db.video_add(sc["title"], sc["description"], sc["scenes"], body.image_url.strip(),
-                       options={"look": "news"} if sc.get("format") == "news" else None)
+    opts = None
+    if sc.get("format") == "news":
+        from . import newslook
+        art = body.article_url.strip()
+        imgs = newslook.article_images(art) if art.startswith(("http://", "https://")) else []
+        if body.image_url.strip() and body.image_url.strip() not in imgs:
+            imgs.insert(0, body.image_url.strip())
+        opts = {"look": "news", "images": imgs[:12], "article_url": art}
+    vid = db.video_add(sc["title"], sc["description"], sc["scenes"], body.image_url.strip(), options=opts)
     return dict(video.to_json(db.video_get(vid)), format_name=sc.get("format_name", ""))
 
 
@@ -1109,6 +1117,7 @@ class VideoEdit(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     scenes: Optional[list] = None
+    images: Optional[list[str]] = None     # ảnh dùng cho clip Tin nhanh (mỗi dòng 1 link)
 
 
 @admin.put("/api/videos/{vid}")
@@ -1119,6 +1128,9 @@ def video_edit(vid: int, body: VideoEdit):
     fields = body.model_dump(exclude_none=True)
     if "scenes" in fields:
         fields["scenes"] = video.clean_scenes(fields["scenes"])
+    if "images" in fields:
+        imgs = [u.strip() for u in fields.pop("images") if u.strip().startswith(("http://", "https://"))][:12]
+        fields["options"] = {**(v.get("options") or {}), "images": imgs}
     db.video_update(vid, **fields)
     return video.to_json(db.video_get(vid))
 

@@ -665,6 +665,8 @@
         <button class="btn" id="vdGhBtn" onclick="vdGithub()">⬇ Lấy nội dung repo</button></div>
       <label>Nội dung bài viết</label>
       <textarea id="vdText" rows="8" placeholder="Dán bài viết hoặc chọn ở ô trên"></textarea>
+      <label>Link bài viết gốc <span class="muted small">(kiểu Tin nhanh: tự lấy các ảnh trong bài làm ảnh minh họa)</span></label>
+      <input id="vdArt" placeholder="https://...">
       <label>Ảnh của bài (tùy chọn, dùng cho cảnh đầu và cuối)</label>
       <input id="vdImg" placeholder="https://...jpg">
       <label>Độ dài</label>
@@ -1262,7 +1264,7 @@ async function loadVideo() {
     : '⚠ Chưa có Gemini key — nhập ở tab <a href="#news">🤖 Tin tức AI</a> trước.';
   vdRenderTools();
   const [news, posts] = await Promise.all([api('/api/news').catch(() => []), api('/api/posts').catch(() => [])]);
-  VSRC = [...news.filter(n => n.body).map(n => ({ key: 'news:' + n.id, label: '📰 ' + n.title, text: n.title + '\n\n' + n.body, img: n.image_url })),
+  VSRC = [...news.filter(n => n.body).map(n => ({ key: 'news:' + n.id, label: '📰 ' + n.title, text: n.title + '\n\n' + n.body, img: n.image_url, url: n.url })),
           ...posts.map(p => ({ key: 'post:' + p.id, label: '📝 ' + p.message.slice(0, 70), text: p.message, img: p.image_url || '' }))];
   $('vdSource').innerHTML = '<option value="">— Tự dán nội dung —</option>' +
     VSRC.map(x => `<option value="${x.key}">${esc(x.label)}</option>`).join('');
@@ -1314,7 +1316,7 @@ async function vdInstall() {
 }
 function vdPick() {
   const x = VSRC.find(x => x.key === $('vdSource').value);
-  if (x) { $('vdText').value = x.text; $('vdImg').value = x.img || ''; }
+  if (x) { $('vdText').value = x.text; $('vdImg').value = x.img || ''; $('vdArt').value = x.url || ''; }
 }
 async function vdSave() {
   VCFG = await api('/api/video/config', { method: 'PUT', body: { audience: $('vdAudience').value, ai_images: $('vdAiImg').checked, show_title: $('vdShowTitle').checked, look: $('vdLook').value, theme: $('vdTheme').value, story: $('vdStory').value, pen: $('vdPen').value, voice: $('vdVoice').value, tts_style: $('vdStyle').value, visual: $('vdVisual').value, veo_scenes: $('vdVeo').value, rate: $('vdRate').value,
@@ -1327,7 +1329,7 @@ async function vdCreate(look = '') {
   const btn = $(look === 'news' ? 'vdMakeNews' : 'vdMake'), old = btn.innerHTML;
   $('vdMake').disabled = $('vdMakeNews').disabled = true; btn.textContent = '⏳ AI đang viết kịch bản...';
   try {
-    const r = await api('/api/videos', { method: 'POST', body: { text: $('vdText').value, seconds: +$('vdLen').value, image_url: $('vdImg').value, look } });
+    const r = await api('/api/videos', { method: 'POST', body: { text: $('vdText').value, seconds: +$('vdLen').value, image_url: $('vdImg').value, article_url: $('vdArt').value.trim(), look } });
     toast(`✅ Đã có kịch bản${r.format_name ? ' — kiểu "' + r.format_name + '"' : ''} — xem lại bên dưới rồi bấm Dựng clip`);
     await vdLoadList();
   } finally { $('vdMake').disabled = $('vdMakeNews').disabled = false; btn.innerHTML = old; }
@@ -1496,6 +1498,9 @@ function vdRenderList() {
       <details ${v.status === 'draft' ? 'open' : ''}><summary class="small">Sửa kịch bản (${v.scenes.length} cảnh)</summary>
         <label>Tiêu đề</label><input id="vt${v.id}" value="${esc(v.title)}">
         <label>Mô tả đăng kèm</label><textarea id="vds${v.id}" rows="3">${esc(v.description)}</textarea>
+        ${(v.options || {}).look === 'news' ? `<label>Ảnh trong bài dùng cho clip <span class="muted small">(mỗi dòng 1 link; ảnh đầu → cảnh đầu. Hết ảnh thì dùng ảnh Pexels hoặc lặp lại)</span></label>
+          <textarea id="vdi${v.id}" rows="3" placeholder="Dán link ảnh trong bài, hoặc để trống">${esc(((v.options || {}).images || []).join('\n'))}</textarea>
+          <div class="muted small">${((v.options || {}).images || []).length ? 'Đã tìm thấy ' + (v.options.images || []).length + ' ảnh trong bài.' : 'Chưa có ảnh trong bài — dán link bài gốc ở trên khi tạo kịch bản, hoặc dán link ảnh vào ô này.'}</div>` : ''}
         ${v.scenes.map((s, i) => vdScene(v, s, i)).join('')}
         <button class="btn" onclick="vdAddScene(${v.id})">+ Thêm cảnh</button>
       </details>
@@ -1519,7 +1524,9 @@ function vdCollect(id) {
     else if (f === 'hl') sc[f] = el.value.split(',').map(x => x.trim()).filter(Boolean);
     else if (f === 'panels') sc[f] = el.value.split('\n').map(x => x.trim()).filter(Boolean).map(l => { const [a, ...b] = l.split('|'); return { label: a.trim(), visual: b.join('|').trim() }; });
     else sc[f] = el.value; });
-  return { title: $('vt' + id).value, description: $('vds' + id).value, scenes };
+  const out = { title: $('vt' + id).value, description: $('vds' + id).value, scenes };
+  if ($('vdi' + id)) out.images = $('vdi' + id).value.split('\n').map(x => x.trim()).filter(Boolean);
+  return out;
 }
 async function vdSaveOne(id) { return api('/api/videos/' + id, { method: 'PUT', body: vdCollect(id) }); }
 async function vdAddScene(id) {

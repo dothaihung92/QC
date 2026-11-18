@@ -53,7 +53,7 @@ def test_news_script_keeps_key_points_and_builds_facebook_caption(client, monkey
     seen = []
     monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: seen.append(p) or AI)
     v = client.post("/api/videos", json={"text": ARTICLE, "seconds": 30, "look": "news"}).json()
-    assert v["options"] == {"look": "news"} and len(v["scenes"]) == 3 and all(s["type"] == "news" for s in v["scenes"])
+    assert v["options"] == {"look": "news", "images": [], "article_url": ""} and len(v["scenes"]) == 3 and all(s["type"] == "news" for s in v["scenes"])
     assert v["scenes"][0]["hl"] == ["từ chối hoàn", "10.000 tỷ đồng"] and v["scenes"][0]["keyword"] == "tax office"
     assert "CHỈ GHI NHỮNG NỘI DUNG QUAN TRỌNG" in seen[0] and "TRUNG THỰC" in seen[0] and "đúng 7 cảnh" in seen[0] and "không dùng dấu /" in seen[0]
     d = v["description"]
@@ -132,3 +132,86 @@ def test_news_clip_without_photos_shows_stat_panel_and_explains(client, monkeypa
 def test_ui_has_news_look_controls():
     html = TestClient(server.app).get("/").text
     assert "vdCreate('news')" in html and 'value="news"' in html and 'id="vdSigName"' in html and "function vdLogoUp" in html
+
+
+ARTICLE_HTML = """<html><head><meta property="og:image" content="https://cdn.baochi.vn/cover.jpg"></head><body>
+<header><img src="/img/logo.png"></header>
+<article>
+  <img src="https://cdn.baochi.vn/a1-800x600.jpg" width="800" height="600" alt="Họp quốc hội">
+  <img data-src="/uploads/a2.jpg" alt="Cơ quan thuế">
+  <img src="https://cdn.baochi.vn/a1-400x300.jpg">
+  <img src="/uploads/icon-share.png"><img src="x.svg"><img src="data:image/gif;base64,AAA">
+  <img srcset="/u/small.jpg 300w, /u/big.jpg 1200w" src="/u/small.jpg">
+  <img src="/tiny.jpg" width="40" height="40">
+</article>
+<aside><img src="https://ads.example.com/ads/banner1.jpg"><img src="/sidebar/other.jpg"></aside></body></html>"""
+
+
+def test_article_images_picks_content_photos_and_skips_junk(monkeypatch):
+    from app import backlinks
+    monkeypatch.setattr(backlinks, "fetch_page", lambda url, **k: (200, "https://baochi.vn/bai-1", ARTICLE_HTML))
+    imgs = newslook.article_images("https://baochi.vn/bai-1")
+    assert imgs[0] == "https://cdn.baochi.vn/cover.jpg"                                          # ảnh đại diện trước
+    assert imgs[1:4] == ["https://cdn.baochi.vn/a1-800x600.jpg", "https://baochi.vn/uploads/a2.jpg", "https://baochi.vn/u/big.jpg"]
+    assert not any("logo" in u or "icon" in u or "banner" in u or u.endswith(".svg") or "tiny" in u or "a1-400x300" in u for u in imgs)      # bỏ logo, icon, quảng cáo, ảnh nhỏ, bản trùng
+    monkeypatch.setattr(backlinks, "fetch_page", lambda url, **k: (404, url, ""))
+    assert newslook.article_images("https://baochi.vn/x") == []
+    assert newslook.article_images("http://127.0.0.1/x") == []                                     # địa chỉ nội bộ bị chặn
+
+
+def test_news_clip_stores_article_images_and_allows_editing(client, monkeypatch):
+    monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: AI)
+    monkeypatch.setattr(newslook, "article_images", lambda url, limit=12: ["https://cdn.baochi.vn/1.jpg", "https://cdn.baochi.vn/2.jpg"] if url else [])
+    v = client.post("/api/videos", json={"text": ARTICLE, "seconds": 30, "look": "news", "article_url": "https://baochi.vn/bai-1", "image_url": "https://x.vn/cover.jpg"}).json()
+    assert v["options"] == {"look": "news", "images": ["https://x.vn/cover.jpg", "https://cdn.baochi.vn/1.jpg", "https://cdn.baochi.vn/2.jpg"], "article_url": "https://baochi.vn/bai-1"}
+    e = client.put(f"/api/videos/{v['id']}", json={"images": ["https://a.vn/1.jpg", "", "ftp://bad", "https://a.vn/2.jpg"]}).json()
+    assert e["options"]["images"] == ["https://a.vn/1.jpg", "https://a.vn/2.jpg"] and e["options"]["look"] == "news" and e["options"]["article_url"] == "https://baochi.vn/bai-1"
+
+
+@pytest.mark.skipif(not HAS_TOOLS, reason="cần pillow + imageio-ffmpeg")
+def test_news_clip_uses_article_photos_first_then_pexels(client, monkeypatch, tmp_path):
+    from PIL import Image
+    _fake_tts(monkeypatch)
+    monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: AI)
+    monkeypatch.setattr(newslook, "article_images", lambda url, limit=12: ["https://cdn.baochi.vn/1.jpg", "https://cdn.baochi.vn/bad.jpg"])
+    video.save_config({"pexels_key": "k"})
+    fetched, pex_calls = [], []
+
+    def fetch(url, referer, dest):
+        fetched.append((url, referer))
+        if "bad" in url:
+            return False                                                                      # ảnh hỏng/nhỏ bị bỏ
+        Image.new("RGB", (900, 1400), (200, 40, 40)).save(dest, "JPEG")
+        return True
+    monkeypatch.setattr(newslook, "_fetch_image", fetch)
+
+    def pex(kw, key, vertical, dest):
+        pex_calls.append(kw)
+        Image.new("RGB", (900, 1400), (40, 160, 60)).save(dest, "JPEG")
+        return True
+    monkeypatch.setattr(video, "pexels_photo", pex)
+    v = client.post("/api/videos", json={"text": ARTICLE, "seconds": 30, "look": "news", "article_url": "https://baochi.vn/bai-1"}).json()
+    client.post(f"/api/videos/{v['id']}/render")
+    d = db.video_get(v["id"])
+    assert d["status"] == "done", d["error"]
+    assert fetched[0] == ("https://cdn.baochi.vn/1.jpg", "https://baochi.vn/bai-1")           # tải kèm Referer của bài
+    a, b = _frame(d["path"], 0.8, tmp_path), _frame(d["path"], 5.0, tmp_path)
+    assert a.getpixel((360, 300))[0] > 150 and a.getpixel((360, 300))[1] < 90                  # cảnh 1: ảnh trong bài (đỏ)
+    assert pex_calls and b.getpixel((360, 300))[1] > 120 and b.getpixel((360, 300))[0] < 90    # hết ảnh trong bài → Pexels (xanh lá)
+
+
+@pytest.mark.skipif(not HAS_TOOLS, reason="cần pillow + imageio-ffmpeg")
+def test_news_clip_cycles_article_photos_without_pexels_and_credits_source(client, monkeypatch, tmp_path):
+    from PIL import Image
+    _fake_tts(monkeypatch)
+    monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: AI)
+    monkeypatch.setattr(newslook, "article_images", lambda url, limit=12: ["https://cdn.baochi.vn/1.jpg"])
+    monkeypatch.setattr(newslook, "_fetch_image", lambda url, ref, dest: Image.new("RGB", (900, 1400), (200, 40, 40)).save(dest, "JPEG") or True)
+    seen_labels = []
+    real = newslook.scene_background
+    monkeypatch.setattr(newslook, "scene_background", lambda cfg, photo, stat, dest, label="": seen_labels.append(label) or real(cfg, photo, stat, dest, label))
+    v = client.post("/api/videos", json={"text": ARTICLE, "seconds": 30, "look": "news", "article_url": "https://www.baochi.vn/bai-1"}).json()
+    client.post(f"/api/videos/{v['id']}/render")
+    d = db.video_get(v["id"])
+    assert d["status"] == "done" and d["error"] == ""                                       # có ảnh trong bài → không cần Pexels, không báo thiếu
+    assert seen_labels == ["ẢNH: BAOCHI.VN"] * 3                                            # ghi nguồn ảnh; 1 ảnh được dùng lại cho cả 3 cảnh
