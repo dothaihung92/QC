@@ -421,3 +421,18 @@ def test_other_goals_keep_the_old_sharing_style(client, monkeypatch):
     monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: seen.append(p) or {"posts": [{"n": 0, "text": "Bạn có biết không? Thuế GTGT giảm 2% từ ngày một tháng bảy, doanh nghiệp cần cập nhật hóa đơn."}]})
     client.post("/api/group-jobs/ai", json={"message": "Thuế GTGT giảm 2% từ ngày một tháng bảy, doanh nghiệp cần cập nhật thuế suất trên hóa đơn.", "goal": "share", "group_ids": [a]})
     assert "GIỚI THIỆU SẢN PHẨM" not in seen[0] and "Bạn có biết không?" in client.get("/api/group-jobs").json()[0]["groups"][0]["text"]
+
+
+def test_no_link_mode_for_groups_that_ban_links(client, monkeypatch):
+    a, b = _groups(client, ("A", "111", 3000), ("B", "222", 2000))
+    newsagent.save_config({"gemini_key": "k"})
+    seen = []
+    monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: seen.append(p) or {"posts": [{"n": k, "text": GOOD.format(k="." * k, m=["✅", "🔹"][k]).replace("Zalo 0986 883 137 để dùng thử", "Nhắn Zalo 0986 883 137 để nhận bản dùng thử")} for k in range(2)]})
+    r = client.post("/api/group-jobs/ai", json={"message": SAMPLE, "link": "https://drive.google.com/file/d/1/view", "link_mode": "none", "goal": "contact", "group_ids": [a, b]})
+    assert r.status_code == 200
+    p = seen[0]
+    assert "MỜI NHẮN ZALO / INBOX ĐỂ NHẬN BẢN DÙNG THỬ" in p and "KHÔNG chèn đường link" in p and "LINK BÊN DƯỚI" not in p and "BÌNH LUẬN" not in p.replace("bình luận 'QUAN TÂM'", "")
+    job = client.get("/api/group-jobs").json()[0]
+    assert job["link"] == "" and all("http" not in g["text"] for g in job["groups"])                 # link Drive bị bỏ hẳn, bài không có link
+    r = client.post("/api/group-jobs", json={"message": "Nội dung", "link": "https://x.vn/a", "link_mode": "none", "group_ids": [a]})
+    assert client.get("/api/group-jobs").json()[0]["link"] == ""

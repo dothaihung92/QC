@@ -21,13 +21,17 @@ GOALS = {
               "Mỗi bài nêu 1-2 lợi ích cụ thể (tiết kiệm thời gian, bớt sai sót, làm được việc gì…) lấy từ nội dung gốc, rồi kêu gọi HÀNH ĐỘNG rõ ràng: "
               "tải về dùng thử (ưu tiên nói dùng thử / miễn phí nếu nội dung gốc có nói). Mỗi bài một lời kêu gọi khác nhau. "
               "Không phóng đại, không hứa hẹn điều nội dung gốc không có, không viết như quảng cáo spam."),
+    "contact": ("MỜI NHẮN ZALO / INBOX ĐỂ NHẬN BẢN DÙNG THỬ (BÀI KHÔNG CÓ LINK)",
+                "Nhóm không cho đăng link nên bài TUYỆT ĐỐI không có đường link hay tên tập tin tải về. Nêu lợi ích / tính năng cụ thể lấy từ nội dung gốc, rồi mời "
+                "nhắn Zalo / inbox hoặc bình luận 'QUAN TÂM' để nhận bản dùng thử và hướng dẫn. Giữ NGUYÊN số điện thoại / Zalo trong nội dung gốc; mỗi bài một lời mời khác nhau; "
+                "không phóng đại, không hứa điều nội dung gốc không có."),
     "service": ("GIỚI THIỆU DỊCH VỤ VÀ MỜI LIÊN HỆ TƯ VẤN",
                 "Nêu điểm mạnh của dịch vụ từ nội dung gốc và mời liên hệ tư vấn; mỗi bài một lời mời khác nhau; không phóng đại."),
     "share": ("CHIA SẺ KIẾN THỨC, THU HÚT TRAO ĐỔI", "Giọng chia sẻ hữu ích, kết bằng câu mời trao đổi."),
 }
 SIMILAR = 0.72
 SIMILAR_PRODUCT = 0.88               # bài giới thiệu tính năng cùng nói về một danh sách tính năng nên giống nhau hơn bài chia sẻ
-PRODUCT_GOALS = ("trial", "service")
+PRODUCT_GOALS = ("trial", "service", "contact")
 # Mỗi nhóm một bộ biểu tượng + kiểu tiêu đề khác nhau (đảm bảo bài không y hệt dù cùng danh sách tính năng)
 BULLETS = ["✅", "🔹", "▪️", "➡️", "✔️", "📌", "⭐"]
 BENEFIT = ["⏱", "💡", "🚀", "⚡", "🎯"]

@@ -1494,7 +1494,7 @@ def _job_video(video_id: int) -> int:
 class GroupJobIn(BaseModel):
     message: str
     link: str = ""
-    link_mode: str = "post"               # post = gắn link vào cuối bài đăng · comment = bình luận link dưới bài
+    link_mode: str = "post"               # post = gắn link vào cuối bài đăng · comment = bình luận link dưới bài · none = không đăng link (nhóm cấm link)
     images: list[str] = []
     video_id: int = 0                     # clip đính kèm (thay cho ảnh)
     scheduled_at: Optional[int] = None    # None = đăng ngay (nhắc luôn)
@@ -1523,7 +1523,7 @@ def add_group_job(body: GroupJobIn):
         raise HTTPException(400, "Chọn ít nhất 1 group")
     if body.auto and not body.accept_risk:
         raise HTTPException(400, RISK_MSG)
-    jid = db.add_group_job(body.message.strip(), body.link.strip(), body.scheduled_at or db.now(), ids, auto=body.auto,
+    jid = db.add_group_job(body.message.strip(), "" if body.link_mode == "none" else body.link.strip(), body.scheduled_at or db.now(), ids, auto=body.auto,
                            images=_job_images(body.images), link_mode=body.link_mode, video=_job_video(body.video_id))
     return {"id": jid}
 
@@ -1561,9 +1561,9 @@ def group_job_ai(body: AiJobIn):
     video_id = _job_video(body.video_id)
     first_line = next((l.strip() for l in text.splitlines() if l.strip()), text)[:90]
     variants = groupwriter.make_variants({"title": first_line, "content": text, "description": text[:400],
-                                          "url": body.link.strip(), "mode": "text", "link_mode": body.link_mode, "goal": body.goal},
+                                          "url": "" if body.link_mode == "none" else body.link.strip(), "mode": "text", "link_mode": body.link_mode, "goal": body.goal},
                                          groups, key)
-    jid = db.add_group_job(variants.get(groups[0]["id"]) or text, body.link.strip(), body.scheduled_at or db.now(),
+    jid = db.add_group_job(variants.get(groups[0]["id"]) or text, "" if body.link_mode == "none" else body.link.strip(), body.scheduled_at or db.now(),
                            [g["id"] for g in groups], variants=variants, title=first_line, source="ai",
                            images=_job_images(body.images), link_mode=body.link_mode, video=video_id)
     db.log("group_job", f"AI viết bài đăng nhóm '{first_line[:50]}' → {len(groups)} nhóm")
