@@ -343,3 +343,81 @@ def test_clip_can_be_posted_to_groups(client, monkeypatch, tmp_path):
 def test_ui_clip_cards_have_post_to_groups_button():
     html = TestClient(server.app).get("/").text
     assert html.count("vdToGroups(${v.id})") == 2 and 'id="gjVideo"' in html and "video_id: GJ_VIDEO" in html
+
+
+SAMPLE = """Phần mềm Quản lý Hoá đơn điện tử – Đa công ty làm thay bạn:
+
+✅ Tải hoá đơn hàng loạt (mua vào, bán ra, cả hoá đơn máy tính tiền) trực tiếp từ hệ thống thuế
+✅ Tự động xử lý captcha, bạn không phải ngồi nhập
+✅ Nhiều công ty cùng lúc, không cần chờ từng công ty
+✅ Chỉ tải file chưa có, file đã tải thì chỉ kiểm tra lại cho nhanh
+✅ Tự xuất Excel tổng hợp: bảng kê mua vào, bán ra, chi tiết từng mặt hàng, kèm sheet đối chiếu khớp số
+✅ Tự lên số liệu tờ khai thuế GTGT (01/GTGT) và xuất XML nhập vào HTKK
+
+⏱ Việc cả buổi giờ gọn trong vài phút. Kế toán dịch vụ có hàng chục khách hàng càng nên dùng.
+
+📩 Inbox hoặc Zalo 0986 883 137 để được dùng thử và tư vấn.
+
+#ketoan #hoadondientu #tokhaiVAT #ketoandichvu #phanmemketoan"""
+
+GOOD = ("Phần mềm quản lý hóa đơn điện tử đa công ty{k}:\n{m} Tải hóa đơn mua vào, bán ra hàng loạt từ hệ thống thuế\n{m} Tự xử lý captcha\n"
+        "{m} Làm nhiều công ty cùng lúc\n{m} Xuất Excel tổng hợp, có sheet đối chiếu số liệu\n{m} Lên số liệu tờ khai 01/GTGT, xuất XML nhập HTKK\n"
+        "⏱ Việc cả buổi còn vài phút.\n📩 Zalo 0986 883 137 để dùng thử.\n#ketoan #phanmemketoan")
+
+
+def test_group_posts_read_like_a_person_listing_features_not_like_ai(client, monkeypatch):
+    a, b, c = _groups(client, ("A", "111", 3000), ("B", "222", 2000), ("C", "333", 1000))
+    newsagent.save_config({"gemini_key": "k"})
+    prompts = []
+
+    def fake(prompt, cfg):
+        prompts.append(prompt)
+        marks = ["✅", "🔹", "▪️"]
+        variants = [GOOD.format(k="", m=marks[0]),
+                    "Phần mềm quản lý hóa đơn điện tử cho kế toán dịch vụ, làm được những việc này:\n🔹 Xuất Excel tổng hợp kèm sheet đối chiếu\n🔹 Chạy nhiều công ty một lúc\n🔹 Tự giải captcha khi tải\n"
+                    "🔹 Tải hóa đơn đầu vào, đầu ra, kể cả hóa đơn máy tính tiền\n💡 Tiết kiệm cả buổi mỗi kỳ.\n📞 Zalo 0986 883 137\n#hoadondientu #ketoandichvu",
+                    "Phần mềm quản lý hóa đơn điện tử đa công ty\n▪️ Chỉ tải file mới, file cũ chỉ kiểm tra lại\n▪️ Tự điền tờ khai 01/GTGT, xuất XML sang HTKK\n▪️ Tải hàng loạt, không nhập captcha\n"
+                    "🚀 Gọn trong vài phút.\n👉 Inbox/Zalo 0986 883 137\n#tokhaiVAT #phanmemketoan #ketoan"]
+        return {"posts": [{"n": k, "text": variants[k]} for k in range(3)]}
+    monkeypatch.setattr(newsagent, "gemini_json", fake)
+    r = client.post("/api/group-jobs/ai", json={"message": SAMPLE, "link": "https://drive.google.com/file/d/1/view", "group_ids": [a, b, c]})
+    assert r.status_code == 200
+    p = prompts[0]
+    assert "GIỚI THIỆU SẢN PHẨM" in p and "MỖI DÒNG MỘT TÍNH NĂNG" in p and "CẤM: câu hỏi mở bài" in p and "đau đầu" in p      # định dạng giới thiệu tính năng, cấm giọng AI
+    assert "biểu tượng đầu dòng tính năng: ✅" in p and "biểu tượng đầu dòng tính năng: 🔹" in p and "LINK BÊN DƯỚI" in p and "BÌNH LUẬN" not in p
+    assert "0986 883 137" in p                                                                                           # nội dung gốc (có số liên hệ) được đưa cho AI
+    job = client.get("/api/group-jobs").json()[0]
+    texts = [g["text"] for g in job["groups"]]
+    assert all(t.splitlines()[0].startswith("Phần mềm quản lý hóa đơn") and "0986 883 137" in t for t in texts) and len(set(texts)) == 3
+
+
+def test_ai_sounding_posts_are_rejected_and_sample_layout_is_kept(client, monkeypatch):
+    a, b = _groups(client, ("A", "111", 3000), ("B", "222", 2000))
+    newsagent.save_config({"gemini_key": "k"})
+    ai_like = ("Anh chị em kế toán dịch vụ có đang đau đầu với việc tải hóa đơn, nhập liệu thủ công cho hàng chục khách hàng mỗi tháng không?\n\n"
+               "Mình mới tìm được phần mềm tự động tải hóa đơn trực tiếp từ hệ thống thuế. Hãy trải nghiệm ngay hôm nay nhé, điều này hoàn toàn có thể!")
+    monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: {"posts": [{"n": k, "text": ai_like + " " * k + "x" * k} for k in range(2)]})
+    assert client.post("/api/group-jobs/ai", json={"message": SAMPLE, "group_ids": [a, b]}).status_code == 200
+    texts = [g["text"] for g in client.get("/api/group-jobs").json()[0]["groups"]]
+    assert not any("đau đầu" in t or "Hãy trải nghiệm" in t for t in texts)                    # giọng AI bị loại, dùng lại bố cục của bài mẫu
+    assert texts[0].startswith("Phần mềm Quản lý Hoá đơn điện tử") and texts[0].count("\n✅ ") == 6 and "Zalo 0986 883 137" in texts[0]
+    assert texts[1].count("\n🔹 ") == 6 and "✅" not in texts[1] and texts[0] != texts[1]         # mỗi nhóm một biểu tượng đầu dòng
+
+
+def test_contact_number_is_restored_when_ai_drops_it(client, monkeypatch):
+    a, = _groups(client, ("A", "111", 3000))
+    newsagent.save_config({"gemini_key": "k"})
+    no_phone = GOOD.format(k="", m="✅").replace("📩 Zalo 0986 883 137 để dùng thử.", "📩 Liên hệ để dùng thử.")
+    monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: {"posts": [{"n": 0, "text": no_phone}]})
+    client.post("/api/group-jobs/ai", json={"message": SAMPLE, "group_ids": [a]})
+    t = client.get("/api/group-jobs").json()[0]["groups"][0]["text"]
+    assert t.rstrip().endswith("Liên hệ: 0986 883 137") and "#phanmemketoan" in t.split("\n")[-2]
+
+
+def test_other_goals_keep_the_old_sharing_style(client, monkeypatch):
+    a, = _groups(client, ("A", "111", 3000))
+    newsagent.save_config({"gemini_key": "k"})
+    seen = []
+    monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: seen.append(p) or {"posts": [{"n": 0, "text": "Bạn có biết không? Thuế GTGT giảm 2% từ ngày một tháng bảy, doanh nghiệp cần cập nhật hóa đơn."}]})
+    client.post("/api/group-jobs/ai", json={"message": "Thuế GTGT giảm 2% từ ngày một tháng bảy, doanh nghiệp cần cập nhật thuế suất trên hóa đơn.", "goal": "share", "group_ids": [a]})
+    assert "GIỚI THIỆU SẢN PHẨM" not in seen[0] and "Bạn có biết không?" in client.get("/api/group-jobs").json()[0]["groups"][0]["text"]

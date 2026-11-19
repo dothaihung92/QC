@@ -26,9 +26,49 @@ GOALS = {
     "share": ("CHIA SẺ KIẾN THỨC, THU HÚT TRAO ĐỔI", "Giọng chia sẻ hữu ích, kết bằng câu mời trao đổi."),
 }
 SIMILAR = 0.72
+SIMILAR_PRODUCT = 0.88               # bài giới thiệu tính năng cùng nói về một danh sách tính năng nên giống nhau hơn bài chia sẻ
+PRODUCT_GOALS = ("trial", "service")
+# Mỗi nhóm một bộ biểu tượng + kiểu tiêu đề khác nhau (đảm bảo bài không y hệt dù cùng danh sách tính năng)
+BULLETS = ["✅", "🔹", "▪️", "➡️", "✔️", "📌", "⭐"]
+BENEFIT = ["⏱", "💡", "🚀", "⚡", "🎯"]
+CONTACT = ["📩", "📞", "💬", "👉", "☎️"]
+TITLES = ["Tên sản phẩm + giá trị chính của nó, kết thúc bằng dấu hai chấm",
+          "Mở bằng 'Giới thiệu' + tên sản phẩm, rồi nói nó làm được gì cho kế toán dịch vụ",
+          "Tên sản phẩm viết IN HOA, xuống dòng một câu mô tả ngắn",
+          "Một câu khẳng định sản phẩm giúp được việc gì (KHÔNG phải câu hỏi), có tên sản phẩm",
+          "Tên sản phẩm + 'có những tính năng sau:' (hoặc 'làm được những việc này:'), KHÔNG dùng dấu hỏi"]
+BAD_PHRASES = re.compile(r"đau đầu|(bạn|anh chị( em)?|mọi người) có đang|bạn đã (bao giờ|từng)|hoàn toàn có thể|hãy trải nghiệm|"
+                         r"giải pháp (tối ưu|hoàn hảo|toàn diện|đột phá)|cuộc cách mạng|mình (mới )?tìm được|mình đang dùng|"
+                         r"không còn (phải )?(lo|đau)|bước tiến|tối ưu hóa quy trình|nâng tầm", re.I)
 MAX_CHARS = 520                      # bài đăng nhóm ngắn gọn: đọc lướt là nắm ý chính
 LINK_NOTE = ["Link bài viết đầy đủ em để ở bình luận nhé.", "Chi tiết mình để link ở bình luận ạ.", "Link bài đầy đủ ở phần bình luận.",
              "Anh chị xem chi tiết ở link bình luận nhé.", "Bài viết chi tiết em gắn ở bình luận."]
+
+
+def too_ai(text: str) -> bool:
+    """Dấu hiệu 'giọng AI / quảng cáo sáo rỗng': mở bằng câu hỏi tu từ, 'đau đầu', 'hãy trải nghiệm ngay', bịa trải nghiệm cá nhân..."""
+    first = next((l.strip() for l in str(text).split("\n") if l.strip()), "")
+    return bool(BAD_PHRASES.search(text)) or first.endswith("?")
+
+
+_BUL = re.compile(r"^\s*(?:✅|✔️|✔|🔹|▪️|▪|➡️|➡|📌|⭐|•|-|\*|👉|🔸|☑️)\s+")
+
+
+def _swap_bullets(text: str, k: int) -> str:
+    """Nội dung gốc đã là danh sách tính năng: giữ nguyên, chỉ đổi biểu tượng đầu dòng theo từng nhóm."""
+    mark = BULLETS[k % len(BULLETS)]
+    return "\n".join((_BUL.sub(mark + " ", l, count=1) if _BUL.match(l) else l) for l in str(text).split("\n"))
+
+
+def _phones(text: str) -> list:
+    return [m.group(0).strip() for m in re.finditer(r"(?<!\d)0\d(?:[\s.]?\d){8,9}(?!\d)", text or "")]
+
+
+def _ensure_contact(text: str, source: str, k: int) -> str:
+    """Số điện thoại / Zalo trong nội dung gốc phải còn nguyên trong bài (AI hay bỏ hoặc viết sai)."""
+    digits = re.sub(r"\D", "", text)
+    miss = [p for p in _phones(source) if re.sub(r"\D", "", p) not in digits]
+    return text if not miss else text.rstrip() + f"\n{CONTACT[k % len(CONTACT)]} Liên hệ: {miss[0]}"
 
 
 def _plain(html_text: str) -> str:
@@ -78,6 +118,9 @@ def _fallback(article: dict, groups: list) -> dict:
     desc = _plain(article.get("description") or article.get("content", ""))
     lim = 420 if text_mode else 200
     desc = (desc[:lim].rsplit(" ", 1)[0] + "…") if len(desc) > lim else desc
+    raw = str(article.get("content", ""))
+    if text_mode and sum(1 for l in raw.split("\n") if _BUL.match(l)) >= 2:       # đã là danh sách tính năng: giữ nguyên bố cục
+        return {g["id"]: _swap_bullets(_clean(raw, article.get("url", "")), k) for k, g in enumerate(groups)}
     if text_mode:                                       # nội dung do người dùng viết: giữ nguyên ý, chỉ đổi câu mở đầu / kết
         if article.get("goal") == "trial" and article.get("link_mode") == "post":
             ctas = ["Tải về dùng thử ngay tại link bên dưới nhé!", "Bấm link bên dưới để tải và dùng thử miễn phí.",
@@ -108,6 +151,8 @@ def make_variants(article: dict, groups: list, gemini_key: str = "", model: str 
     has_link = bool(article.get("url"))
     link_in_post = has_link and article.get("link_mode") == "post"
     goal = GOALS.get(article.get("goal", ""))
+    product = text_mode and article.get("goal") in PRODUCT_GOALS          # giới thiệu phần mềm / dịch vụ: viết như người giới thiệu tính năng
+    sim_limit = SIMILAR_PRODUCT if product else SIMILAR
 
     def ask(targets, avoid=None):
         lines = "\n".join(f'{k}. Nhóm "{g["name"]}" — cách viết: {STYLES[(g.get("_k", k)) % len(STYLES)]}'
@@ -126,6 +171,32 @@ def make_variants(article: dict, groups: list, gemini_key: str = "", model: str 
         else:
             ending = '- KHÔNG chèn đường link. Dòng cuối là một câu mời trao đổi / bình luận, mỗi bài nói một cách khác nhau.\n'
         goal_line = (f'- MỤC TIÊU CỦA BÀI: {goal[0]}. {goal[1]}\n' if goal else '')
+        if product:
+            rows = "\n".join(f'{k}. Nhóm "{g["name"]}" — biểu tượng đầu dòng tính năng: {BULLETS[g.get("_k", k) % len(BULLETS)]} · biểu tượng dòng lợi ích: '
+                              f'{BENEFIT[g.get("_k", k) % len(BENEFIT)]} · biểu tượng dòng liên hệ: {CONTACT[g.get("_k", k) % len(CONTACT)]} · '
+                              f'dòng tiêu đề: {TITLES[g.get("_k", k) % len(TITLES)]}' for k, g in enumerate(targets))
+            tail = ('Dòng liên hệ: GIỮ NGUYÊN số điện thoại / Zalo / cách liên hệ như trong nội dung gốc (không đổi số, không bỏ). '
+                    + ('Thêm 1 dòng ngắn mời tải / dùng thử ở LINK BÊN DƯỚI (mỗi bài nói một cách), KHÔNG tự viết đường link.\n' if link_in_post else
+                       'Thêm 1 dòng ngắn mời xem chi tiết ở BÌNH LUẬN (mỗi bài nói một cách), KHÔNG tự viết đường link.\n' if has_link else
+                       'KHÔNG chèn đường link.\n'))
+            prompt = (f'Bạn là người trong đơn vị làm phần mềm kế toán, đang đăng bài GIỚI THIỆU SẢN PHẨM trong các nhóm Facebook của kế toán – thuế. '
+                      'Viết như người thật đăng bài: thẳng, gọn, kể rõ phần mềm LÀM ĐƯỢC những gì — không văn mẫu, không giọng quảng cáo, không giọng AI.\n\n' + source +
+                      f'Viết {len(targets)} bài đăng, MỖI NHÓM MỘT BÀI theo cấu hình được giao:\n{rows}\n\n'
+                      'CẤU TRÚC MỖI BÀI (xuống dòng rõ ràng như bài mẫu):\n'
+                      '1) Dòng tiêu đề theo kiểu được giao (tên sản phẩm + giá trị chính; có thể kết bằng dấu ":").\n'
+                      '2) 4–6 dòng tính năng, MỖI DÒNG MỘT TÍNH NĂNG, bắt đầu bằng biểu tượng được giao, ngắn (6–16 từ), động từ ở đầu (Tải, Tự động, Xuất, Đối chiếu...). '
+                      'Lấy từ nội dung gốc, diễn đạt lại nhẹ cho khác nhau giữa các nhóm; chọn tính năng và SẮP XẾP THỨ TỰ khác các nhóm còn lại.\n'
+                      '3) 1 dòng lợi ích (tiết kiệm thời gian / công sức) với biểu tượng được giao — chỉ nêu nếu nội dung gốc có ý đó.\n'
+                      '4) ' + tail +
+                      '5) 3–5 hashtag cuối bài (khác nhau giữa các nhóm).\n\n'
+                      'QUY TẮC:\n' + goal_line +
+                      '- Chỉ dùng tính năng và thông tin có trong nội dung gốc. KHÔNG bịa tính năng, số liệu, khách hàng, giá, ưu đãi.\n'
+                      '- CẤM: câu hỏi mở bài, "anh chị em có đang…", "đau đầu", "hoàn toàn có thể", "giải pháp tối ưu / hoàn hảo", "hãy trải nghiệm ngay", '
+                      '"mình mới tìm được / mình đang dùng" (đừng bịa trải nghiệm cá nhân), các từ sáo rỗng như "đột phá", "nâng tầm", "cuộc cách mạng".\n'
+                      '- Mỗi bài tối đa 2 biểu tượng cảm xúc ngoài các biểu tượng đầu dòng được giao. Không chào hỏi dài dòng.\n'
+                      + (f'- TRÁNH viết giống các bài đã có: {" || ".join(_plain(a)[:200] for a in avoid)}\n' if avoid else '')
+                      + 'Chỉ trả về JSON {"posts":[{"n":0,"text":"..."}]}')
+            return _collect(prompt, targets, 1200)
         prompt = (f'Bạn là kế toán viên đang chia sẻ bài viết trong các nhóm Facebook về kế toán – thuế.\n' + source +
                   f'Viết {len(targets)} bài đăng nhóm, MỖI NHÓM MỘT BÀI theo cách viết được giao:\n{lines}\n\n'
                   'Yêu cầu cho từng bài:\n' + goal_line + length +
@@ -135,6 +206,9 @@ def make_variants(article: dict, groups: list, gemini_key: str = "", model: str 
                   + ending
                   + (f'- TRÁNH viết giống các bài đã có: {" || ".join(_plain(a)[:200] for a in avoid)}\n' if avoid else '')
                   + 'Chỉ trả về JSON {"posts":[{"n":0,"text":"..."}]}')
+        return _collect(prompt, targets, 900 if text_mode else MAX_CHARS)
+
+    def _collect(prompt, targets, limit):
         out = newsagent.gemini_json(prompt, cfg)
         res = {}
         for p in (out.get("posts") or []):
@@ -142,7 +216,11 @@ def make_variants(article: dict, groups: list, gemini_key: str = "", model: str 
                 n = int(p.get("n"))
             except (TypeError, ValueError):
                 continue
-            t = _shorten(_clean(p.get("text", ""), article.get("url", "")), 900 if text_mode else MAX_CHARS)
+            t = _shorten(_clean(p.get("text", ""), article.get("url", "")), limit)
+            if product and t:
+                if too_ai(t):
+                    continue                                   # giọng AI / quảng cáo sáo rỗng → viết lại
+                t = _ensure_contact(t, article.get("content", ""), targets[n].get("_k", n) if 0 <= n < len(targets) else 0)
             if 0 <= n < len(targets) and len(t) > 60:
                 res[targets[n]["id"]] = t
         return res
@@ -157,7 +235,7 @@ def make_variants(article: dict, groups: list, gemini_key: str = "", model: str 
     redo, kept = [], []
     for g in groups:
         t = res.get(g["id"])
-        if not t or any(similarity(t, o) > SIMILAR for o in kept):
+        if not t or any(similarity(t, o) > sim_limit for o in kept):
             redo.append(g)
         else:
             kept.append(t)
@@ -171,7 +249,7 @@ def make_variants(article: dict, groups: list, gemini_key: str = "", model: str 
         fb = _fallback(article, redo)
         for g in redo:
             t = more.get(g["id"])
-            res[g["id"]] = t if t and all(similarity(t, o) <= SIMILAR for o in kept) else fb[g["id"]]
+            res[g["id"]] = t if t and all(similarity(t, o) <= sim_limit for o in kept) else fb[g["id"]]
             kept.append(res[g["id"]])
     for g in groups:
         g.pop("_k", None)
