@@ -642,11 +642,20 @@ def _download(url: str, dest: Path, kind: str = "image") -> bool:
         return False
 
 
+pexels_last = {"err": ""}              # lý do Pexels không trả ảnh lần gần nhất (key sai, hết lượt, mất mạng...)
+
+
 def _pexels(path: str, key: str, params: dict) -> list:
     try:
         r = requests.get(f"https://api.pexels.com/{path}", headers={"Authorization": key}, timeout=20, params=params)
-        return r.json().get("videos" if "videos" in path else "photos", []) if r.ok else []
-    except (requests.RequestException, ValueError):
+        if not r.ok:
+            pexels_last["err"] = {401: "key Pexels không đúng (401)", 403: "key Pexels bị từ chối (403)", 429: "Pexels báo hết lượt tải (429), thử lại sau"}.get(
+                r.status_code, f"Pexels trả mã {r.status_code}")
+            return []
+        pexels_last["err"] = ""
+        return r.json().get("videos" if "videos" in path else "photos", [])
+    except (requests.RequestException, ValueError) as e:
+        pexels_last["err"] = f"không kết nối được Pexels ({type(e).__name__})"
         return []
 
 
@@ -900,27 +909,46 @@ FONT_DIRS = [Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts",
              Path("/Library/Fonts"), Path("/System/Library/Fonts/Supplemental")]
 FONTS_BOLD = ["arialbd.ttf", "segoeuib.ttf", "Arial Bold.ttf", "DejaVuSans-Bold.ttf", "LiberationSans-Bold.ttf"]
 FONTS_REG = ["arial.ttf", "segoeui.ttf", "Arial.ttf", "DejaVuSans.ttf", "LiberationSans-Regular.ttf"]
-FONTS_BLACK = ["ariblk.ttf", "seguibl.ttf", "Arial Black.ttf"] + FONTS_BOLD
+# Arial Black KHÔNG có đủ chữ tiếng Việt (Ư, Ợ, Ệ, Ủ... hiện ô vuông) nên xếp sau; _font còn tự kiểm tra từng font có đủ dấu tiếng Việt không
+FONTS_BLACK = ["seguibl.ttf", "segoeuib.ttf", "arialbd.ttf", "tahomabd.ttf", "ariblk.ttf", "Arial Black.ttf"] + FONTS_BOLD
 HIGHLIGHT = (255, 214, 64)           # màu vàng làm nổi số liệu trong phụ đề
 TRANSITION = 0.5                     # giây chuyển cảnh
 TRANSITIONS = ["slideleft", "fade", "smoothup", "circleopen", "wipeleft", "slideup", "smoothleft", "radial"]
 _font_cache = {}
 
 
+VI_PROBE = "ƯưƠơỰỢỆỄỚỨỒẦẤẮẶỊỴỦỞ"
+
+
+def has_vietnamese(font) -> bool:
+    """Font có đủ chữ tiếng Việt có dấu không? (ký tự thiếu glyph sẽ vẽ ra ô vuông giống hệt ký tự không tồn tại)"""
+    try:
+        ref = bytes(font.getmask("\ue000"))
+        return all(bytes(font.getmask(c)) != ref for c in VI_PROBE)
+    except Exception:  # noqa: BLE001 — font lạ không kiểm tra được thì coi như dùng được
+        return True
+
+
 def _font(size: int, bold=False, black=False):
     names = FONTS_BLACK if black else FONTS_BOLD if bold else FONTS_REG
-    key = (size, tuple(names))
+    key = (size, tuple(names), tuple(str(d) for d in FONT_DIRS))
     if key not in _font_cache:
         from PIL import ImageFont
-        font = None
+        font = first = None
         for name in names:
             for d in FONT_DIRS:
                 if (d / name).exists():
-                    font = ImageFont.truetype(str(d / name), size)
-                    break
+                    try:
+                        f = ImageFont.truetype(str(d / name), size)
+                    except OSError:
+                        continue
+                    first = first or f
+                    if has_vietnamese(f):
+                        font = f
+                        break
             if font:
                 break
-        _font_cache[key] = font or ImageFont.load_default(size)
+        _font_cache[key] = font or first or ImageFont.load_default(size)
     return _font_cache[key]
 
 

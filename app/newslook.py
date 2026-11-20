@@ -174,10 +174,20 @@ def _paste(img, layer, x, y, alpha: float = 1.0):
     img.paste(layer, (int(x), int(y)), layer)
 
 
-def _cover(path: Path, w: int, h: int):
+# Khi phải dùng lại một ảnh cho nhiều cảnh: mỗi lần cắt một chỗ khác (toàn ảnh / phóng to trái / phóng to phải / cận giữa) để nhìn khác nhau
+CROPS = [(1.0, 0.5, 0.4), (1.45, 0.2, 0.3), (1.45, 0.8, 0.35), (1.9, 0.5, 0.5), (1.45, 0.5, 0.75), (1.7, 0.15, 0.6), (1.7, 0.85, 0.6)]
+
+
+def _cover(path: Path, w: int, h: int, variant: int = 0):
     from PIL import Image, ImageOps
     im = Image.open(path)
     im = ImageOps.exif_transpose(im).convert("RGB")
+    zoom, cx, cy = CROPS[variant % len(CROPS)]
+    if zoom > 1.0:                                           # cắt một vùng rồi phóng ra khung
+        cw, ch = im.width / zoom, im.height / zoom
+        x0 = min(max(0, im.width * cx - cw / 2), im.width - cw)
+        y0 = min(max(0, im.height * cy - ch / 2), im.height - ch)
+        im = im.crop((int(x0), int(y0), int(x0 + cw), int(y0 + ch)))
     return ImageOps.fit(im, (w, h), Image.LANCZOS, centering=(0.5, 0.4))
 
 
@@ -203,7 +213,7 @@ def _stat_panel(w: int, h: int, text: str, cfg: dict):
     return im.convert("RGB")
 
 
-def scene_background(cfg: dict, photo, stat_text: str, dest: Path, label: str = LABEL):
+def scene_background(cfg: dict, photo, stat_text: str, dest: Path, label: str = LABEL, variant: int = 0):
     """Khung 720x1280: dải đầu (nhãn + logo) · ảnh minh họa · nền xanh · dải cam bên trái · logo mờ."""
     from PIL import Image, ImageDraw
     W, H = SIZE
@@ -214,7 +224,7 @@ def scene_background(cfg: dict, photo, stat_text: str, dest: Path, label: str = 
     img.paste(bar, (0, 0))
     d = ImageDraw.Draw(img)
     if photo is not None:
-        img.paste(_cover(photo, W - sx, ph - hh), (sx, hh))
+        img.paste(_cover(photo, W - sx, ph - hh, variant), (sx, hh))
     else:
         img.paste(_stat_panel(W - sx, ph - hh, stat_text, cfg), (sx, hh))
     if label:
@@ -395,15 +405,34 @@ class _Imgs(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.base, self.found, self.meta = base, [], []
         self._art = 0
+        self._ld = False
+        self._ldtxt = ""
+
+    def handle_data(self, data):
+        if self._ld:
+            self._ldtxt += data
 
     def handle_endtag(self, tag):
         if tag == "article" and self._art:
             self._art -= 1
+        elif tag == "script" and self._ld:                       # JSON-LD: nhiều báo khai báo toàn bộ ảnh bài ở đây
+            self._ld = False
+            for u in re.findall(r'https?://[^"\s\\]+?\.(?:jpe?g|png|webp)(?:\?[^"\s\\]*)?', self._ldtxt.replace("\\/", "/"), re.I):
+                self.meta.append(u)
+            self._ldtxt = ""
 
     def handle_starttag(self, tag, attrs):
         a = {k: (v or "") for k, v in attrs}
         if tag == "article":
             self._art += 1
+        if tag == "script" and "ld+json" in a.get("type", ""):
+            self._ld, self._ldtxt = True, ""
+        elif tag == "source" and a.get("srcset"):                # <picture><source srcset=...>
+            best = max(((float(re.sub(r"[^\d.]", "", w) or 0), u) for u, _, w in (q.strip().partition(" ") for q in a["srcset"].split(",") if q.strip())), default=(0, ""))
+            if best[1] and not best[1].startswith("data:"):
+                self.found.append((urljoin(self.base, best[1]), self._art > 0, ""))
+        elif tag == "a" and re.search(r"\.(?:jpe?g|png|webp)(?:\?|$)", a.get("href", ""), re.I):   # liên kết phóng to ảnh
+            self.found.append((urljoin(self.base, a["href"]), self._art > 0, ""))
         if tag == "meta" and (a.get("property") in ("og:image", "twitter:image") or a.get("name") == "twitter:image") and a.get("content"):
             self.meta.append(urljoin(self.base, a["content"]))
         elif tag == "img":
@@ -473,29 +502,64 @@ def _fetch_image(url: str, referer: str, dest: Path) -> bool:
 
 # ---------------------------------------------------------------- dựng clip
 
-def _photo_for(i: int, sc: dict, cfg: dict, work: Path, gkey: str, article, seen: set, aspect: str, pool: list = None):
-    """Ảnh cho cảnh. Trả về (đường dẫn ảnh | None, nhãn). Ưu tiên ảnh TRONG BÀI VIẾT (mỗi cảnh một ảnh) →
-    ảnh AI (nếu bật) → Pexels (ảnh khác nhau mỗi cảnh) → ảnh đại diện của bài → None."""
-    import hashlib
-    pool = pool or []
-    if pool and (i < len(pool) or not cfg["pexels_key"]):
-        return pool[i % len(pool)]
-    dest = work / f"photo{i}.img"
-    kw = sc["keyword"] or sc["visual"] or sc["headline"]
-    if cfg["visual"] == "ai" and gkey and kw:
-        try:
-            dest.write_bytes(aimedia.image(f"{kw}. Photorealistic news photo, natural lighting, no text, no logos, no watermark.", aspect, gkey))
-            return dest, LABEL
-        except aimedia.AIError as e:
-            V._log(f"Cảnh {i + 1}: ảnh AI lỗi, dùng ảnh Pexels — {str(e)[:100]}")
-    for attempt in range(3):
-        if V.pexels_photo(kw if attempt == 0 else f"{kw} business office", cfg["pexels_key"], True, dest):
-            h = hashlib.md5(dest.read_bytes()).hexdigest()
-            if h in seen and attempt < 2:
-                continue                                   # trùng ảnh cảnh trước → lấy ảnh khác
-            seen.add(h)
-            return dest, LABEL
-    return (article, LABEL) if article else (None, LABEL)
+GENERIC_KW = ["tax office accounting", "business meeting", "calculator money documents", "invoice paperwork desk", "company building city",
+              "laptop spreadsheet finance", "handshake partnership", "government building", "office team working", "coins savings growth",
+              "businessman signing contract", "financial report charts"]
+
+
+class Photos:
+    """Kho ảnh của clip: mọi cảnh đều phải có ảnh. Thứ tự: ảnh trong bài → ảnh AI (nếu bật) → Pexels (nhiều từ khóa, ảnh khác nhau)
+    → dùng lại ảnh đã có nhưng CẮT Ở CHỖ KHÁC → ảnh đại diện của bài → (cuối cùng) ô con số."""
+
+    def __init__(self, cfg: dict, work: Path, gkey: str, article, pool: list):
+        self.cfg, self.work, self.gkey, self.article = cfg, work, gkey, article
+        self.pool, self.gallery, self.seen, self.uses = list(pool), list(pool), set(), {}
+        self.pexels_ok = self.pexels_fail = 0
+
+    def _reuse(self, i: int):
+        if not self.gallery:
+            return None
+        path, label = self.gallery[i % len(self.gallery)]
+        n = self.uses.get(str(path), 0)
+        self.uses[str(path)] = n + 1
+        return path, label, n % len(CROPS)
+
+    def get(self, i: int, sc: dict, aspect: str = "9:16"):
+        """(đường dẫn ảnh | None, nhãn, kiểu cắt)"""
+        import hashlib
+        if i < len(self.pool):                                           # mỗi cảnh một ảnh trong bài, theo thứ tự
+            path, label = self.pool[i]
+            self.uses[str(path)] = self.uses.get(str(path), 0) + 1
+            return path, label, 0
+        dest = self.work / f"photo{i}.img"
+        kw = sc.get("keyword") or sc.get("visual") or sc.get("headline") or ""
+        if self.cfg["visual"] == "ai" and self.gkey and kw:
+            try:
+                dest.write_bytes(aimedia.image(f"{kw}. Photorealistic news photo, natural lighting, no text, no logos, no watermark.", aspect, self.gkey))
+                self.gallery.append((dest, LABEL))
+                return dest, LABEL, 0
+            except aimedia.AIError as e:
+                V._log(f"Cảnh {i + 1}: ảnh AI lỗi, dùng ảnh Pexels — {str(e)[:100]}")
+        if self.cfg["pexels_key"]:
+            tries = [kw, f"{kw} business", GENERIC_KW[i % len(GENERIC_KW)], GENERIC_KW[(i + 5) % len(GENERIC_KW)]]
+            for k, q in enumerate(x for x in tries if x):
+                if V.pexels_photo(q, self.cfg["pexels_key"], True, dest):
+                    h = hashlib.md5(dest.read_bytes()).hexdigest()
+                    if h in self.seen:
+                        continue                                         # trùng ảnh đã dùng → thử từ khóa khác
+                    self.seen.add(h)
+                    keep = self.work / f"pex{i}.img"
+                    dest.replace(keep)
+                    self.gallery.append((keep, LABEL))
+                    self.pexels_ok += 1
+                    return keep, LABEL, 0
+                if V.pexels_last["err"]:
+                    break                                                # key sai / hết lượt: không thử tiếp từ khóa khác
+            self.pexels_fail += 1
+        r = self._reuse(i)
+        if r:
+            return r
+        return (self.article, LABEL, 0) if self.article else (None, LABEL, 0)
 
 
 def _article_pool(opts: dict, work: Path) -> list:
@@ -541,7 +605,8 @@ def render(video_id: int):
     if cta_text or phone:                                         # cảnh cuối tự thêm: thẻ liên hệ + lời kêu gọi
         spoken = (cta_text.rstrip(". ") + ". " if cta_text else "") + (f"Liên hệ số điện thoại {phone}." if phone else "")
         items.append(({"narration": spoken.strip(), "type": "cta", "hl": [], "keyword": "", "visual": "", "headline": ""}, True))
-    durations, seen, total = [], set(), len(items)
+    photos = Photos(cfg, work, gkey, article, pool)
+    durations, total = [], len(items)
     for i, (sc, is_cta) in enumerate(items):
         step(f"Cảnh {i + 1}/{total}: giọng đọc")
         used = V.tts(sc["narration"], cfg["voice"], cfg["rate"], work / f"voice{i}.mp3", style)
@@ -555,9 +620,9 @@ def render(video_id: int):
             cta_background(cfg, cta_text or "Liên hệ ngay để được hỗ trợ", work / f"bg{i}.png")
         else:
             step(f"Cảnh {i + 1}/{total}: ảnh minh họa")
-            photo, label = _photo_for(i, sc, cfg, work, gkey, article, seen, "9:16", pool)
+            photo, label, variant = photos.get(i, sc)
             stat = (sc["hl"] or [""])[0]
-            scene_background(cfg, photo, stat, work / f"bg{i}.png", label if photo is not None else "")
+            scene_background(cfg, photo, stat, work / f"bg{i}.png", label if photo is not None else "", variant)
             chunks = news_chunks(sc["narration"], sc["hl"], 5)
             allw = " ".join(chunks).split()
             cols = color_words(allw, sc["hl"])
@@ -586,8 +651,14 @@ def render(video_id: int):
         if p != out:
             p.unlink(missing_ok=True)
     length = sum(durations)
-    note = "" if cfg["pexels_key"] or gkey or pool else \
-        "Chưa có Pexels API key nên khung ảnh hiện con số chính thay cho ảnh minh họa. Nhập key (miễn phí) ở Cài đặt clip để có ảnh thật."
+    notes = []
+    if not (cfg["pexels_key"] or gkey or pool):
+        notes.append("Chưa có Pexels API key nên khung ảnh hiện con số chính thay cho ảnh minh họa. Nhập key (miễn phí) ở Cài đặt clip để có ảnh thật.")
+    elif photos.pexels_fail:
+        why = V.pexels_last["err"] or "không tìm được ảnh phù hợp"
+        notes.append(f"{photos.pexels_fail} cảnh không lấy được ảnh Pexels ({why}) — đã dùng lại ảnh khác của bài (cắt chỗ khác)."
+                     if photos.gallery else f"{photos.pexels_fail} cảnh không lấy được ảnh Pexels ({why}) nên hiện ô con số.")
+    note = " ".join(notes)
     db.video_update(video_id, status="done", path=str(out), duration=round(length, 1), progress="", error=note)
     db.log("video", f"Đã dựng clip tin nhanh #{video_id}: {v['title']} ({length:.0f}s)")
     V._log("✅ Xong clip")

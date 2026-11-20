@@ -209,9 +209,98 @@ def test_news_clip_cycles_article_photos_without_pexels_and_credits_source(clien
     monkeypatch.setattr(newslook, "_fetch_image", lambda url, ref, dest: Image.new("RGB", (900, 1400), (200, 40, 40)).save(dest, "JPEG") or True)
     seen_labels = []
     real = newslook.scene_background
-    monkeypatch.setattr(newslook, "scene_background", lambda cfg, photo, stat, dest, label="": seen_labels.append(label) or real(cfg, photo, stat, dest, label))
+    monkeypatch.setattr(newslook, "scene_background", lambda cfg, photo, stat, dest, label="", variant=0: seen_labels.append(label) or real(cfg, photo, stat, dest, label, variant))
     v = client.post("/api/videos", json={"text": ARTICLE, "seconds": 30, "look": "news", "article_url": "https://www.baochi.vn/bai-1"}).json()
     client.post(f"/api/videos/{v['id']}/render")
     d = db.video_get(v["id"])
     assert d["status"] == "done" and d["error"] == ""                                       # có ảnh trong bài → không cần Pexels, không báo thiếu
     assert seen_labels == ["ẢNH: BAOCHI.VN"] * 3                                            # ghi nguồn ảnh; 1 ảnh được dùng lại cho cả 3 cảnh
+
+
+def _fonts_dir(name):
+    import glob
+    hits = glob.glob(f"/usr/share/fonts/**/{name}", recursive=True)
+    return __import__("pathlib").Path(hits[0]).parent if hits else None
+
+
+def test_font_without_vietnamese_glyphs_is_skipped():
+    """Arial Black trên Windows thiếu chữ Việt (Ư, Ợ, Ệ... thành ô vuông): font thiếu bị bỏ qua, chọn font kế tiếp đủ dấu."""
+    from PIL import ImageFont
+    no_vi, with_vi = _fonts_dir("Caladea-Bold.ttf"), _fonts_dir("DejaVuSans-Bold.ttf")
+    if not no_vi or not with_vi:
+        pytest.skip("máy không có font thử")
+    assert not video.has_vietnamese(ImageFont.truetype(str(no_vi / "Caladea-Bold.ttf"), 40))
+    assert video.has_vietnamese(ImageFont.truetype(str(with_vi / "DejaVuSans-Bold.ttf"), 40))
+    fm = pytest.MonkeyPatch()
+    try:
+        fm.setattr(video, "FONT_DIRS", [no_vi, with_vi])
+        fm.setattr(video, "FONTS_BLACK", ["Caladea-Bold.ttf", "DejaVuSans-Bold.ttf"])
+        f = video._font(41, black=True)
+        assert video.has_vietnamese(f) and "DejaVu" in f.getname()[0]
+    finally:
+        fm.undo()
+    assert "seguibl.ttf" == video.FONTS_BLACK[0] and video.FONTS_BLACK.index("ariblk.ttf") > video.FONTS_BLACK.index("arialbd.ttf")
+
+
+def test_every_scene_gets_a_photo_until_the_end(monkeypatch, tmp_path):
+    """Chỉ có 2 ảnh trong bài và Pexels lỗi → các cảnh sau dùng lại ảnh bài nhưng cắt chỗ khác, không bao giờ để trống."""
+    from PIL import Image
+    pool = []
+    for k in range(2):
+        f = tmp_path / f"art{k}.img"
+        im = Image.new("RGB", (900, 600), (30 * k, 90, 200))
+        for x in range(0, 900, 30):
+            for y in range(0, 600, 30):
+                im.paste(((x * 7) % 255, (y * 5) % 255, (x + y) % 255), (x, y, x + 30, y + 30))               # ảnh có hoa văn → các kiểu cắt khác nhau mới nhìn ra
+        im.save(f, "JPEG")
+        pool.append((f, "ẢNH: BAOCHI.VN"))
+    monkeypatch.setattr(video, "pexels_photo", lambda *a: video.pexels_last.update(err="key Pexels không đúng (401)") or False)
+    ph = newslook.Photos({**video.DEFAULTS, "pexels_key": "k"}, tmp_path, "", None, pool)
+    got = [ph.get(i, {"keyword": "tax"}) for i in range(8)]
+    assert all(p is not None for p, _l, _v in got) and [p for p, _l, _v in got[:2]] == [pool[0][0], pool[1][0]]
+    reused = [(str(p), v) for p, _l, v in got[2:]]
+    assert len(set(reused)) == len(reused)                                                   # cùng ảnh nhưng mỗi lần một kiểu cắt khác
+    assert ph.pexels_fail == 6
+    cover = [newslook._cover(pool[0][0], 300, 300, v).tobytes() for v in range(4)]
+    assert len(set(cover)) == 4                                                              # 4 kiểu cắt cho 4 hình khác nhau
+
+
+def test_pexels_tries_other_keywords_and_skips_duplicates(monkeypatch, tmp_path):
+    from PIL import Image
+    tried, imgs = [], iter([(200, 40, 40), (200, 40, 40), (40, 160, 60)])         # lần 2 trùng ảnh lần 1 → thử từ khóa khác
+
+    def pex(q, key, vertical, dest):
+        tried.append(q)
+        if len(tried) == 1 and q == "x-first":
+            return False
+        Image.new("RGB", (900, 1400), next(imgs)).save(dest, "JPEG")
+        return True
+    monkeypatch.setattr(video, "pexels_photo", pex)
+    video.pexels_last["err"] = ""
+    ph = newslook.Photos({**video.DEFAULTS, "pexels_key": "k"}, tmp_path, "", None, [])
+    a = ph.get(0, {"keyword": "tax office"})
+    b = ph.get(1, {"keyword": "tax office"})
+    assert a[0] != b[0] and ph.pexels_ok == 2 and tried[0] == "tax office" and tried[1] == "tax office" and tried[2] == "tax office business"
+    assert Image.open(a[0]).getpixel((5, 5)) != Image.open(b[0]).getpixel((5, 5))
+
+
+def test_article_images_reads_picture_links_and_json_ld(monkeypatch):
+    from app import backlinks
+    html = """<html><head><script type="application/ld+json">{"@type":"NewsArticle","image":["https://cdn.x.vn/ld1.jpg","https://cdn.x.vn/ld2.jpg"]}</script></head><body>
+    <article><picture><source srcset="/p/pic-1200.webp 1200w, /p/pic-400.webp 400w"><img src="/p/fallback.jpg" width="50" height="50"></picture>
+    <a href="/full/zoom.jpg"><img src="/thumb/z.jpg" width="100" height="80"></a></article></body></html>"""
+    monkeypatch.setattr(backlinks, "fetch_page", lambda url, **k: (200, "https://x.vn/b", html))
+    imgs = newslook.article_images("https://x.vn/b")
+    assert "https://cdn.x.vn/ld1.jpg" in imgs and "https://cdn.x.vn/ld2.jpg" in imgs and "https://x.vn/p/pic-1200.webp" in imgs and "https://x.vn/full/zoom.jpg" in imgs
+
+
+@pytest.mark.skipif(not HAS_TOOLS, reason="cần pillow + imageio-ffmpeg")
+def test_clip_note_explains_pexels_failure(client, monkeypatch, tmp_path):
+    _fake_tts(monkeypatch)
+    monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: AI)
+    video.save_config({"pexels_key": "sai"})
+    monkeypatch.setattr(video, "pexels_photo", lambda *a: video.pexels_last.update(err="key Pexels không đúng (401)") or False)
+    v = client.post("/api/videos", json={"text": ARTICLE, "seconds": 30, "look": "news"}).json()
+    client.post(f"/api/videos/{v['id']}/render")
+    d = db.video_get(v["id"])
+    assert d["status"] == "done" and "401" in d["error"] and "Pexels" in d["error"]
