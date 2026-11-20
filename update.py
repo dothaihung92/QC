@@ -54,6 +54,7 @@ FILES = [
     "app/doodle_icons.py",
     "app/techlook.py",
     "app/newslook.py",
+    "app/imgsearch.py",
     "app/themes.py",
     "app/formats.py",
     "app/voiceover.py",

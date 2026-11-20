@@ -3,7 +3,9 @@ import importlib.util
 import pytest
 from fastapi.testclient import TestClient
 
-from app import db, newsagent, newslook, server, video
+from app import db, imgsearch as _imgsearch, newsagent, newslook, server, video
+
+REAL_SEARCH = _imgsearch.search
 
 HAS_TOOLS = all(importlib.util.find_spec(m) for m in ("PIL", "imageio_ffmpeg")) and not video.missing_tools()
 
@@ -15,6 +17,13 @@ AI = {"title": "Hoàn thuế bị từ chối", "headline": "10 tháng đầu n�
                  {"narration": "Nhiều hồ sơ bị trả vì thiếu hóa đơn đầu vào hợp lệ.", "keyword": "invoice", "hl": ["hóa đơn đầu vào"]},
                  {"narration": "Hồ sơ đầy đủ thì giải quyết từ 50 ngày xuống khoảng 40 ngày.", "keyword": "calendar", "hl": ["50 ngày", "40 ngày"]},
                  {"narration": ""}, "rác"]}
+
+
+@pytest.fixture(autouse=True)
+def no_web_search(monkeypatch):
+    """Test không được gọi mạng thật: mặc định tìm ảnh trên web không ra gì (test riêng bên dưới thay bằng kết quả giả)."""
+    from app import imgsearch
+    monkeypatch.setattr(imgsearch, "search", lambda q, cfg=None, n=10: [])
 
 
 @pytest.fixture
@@ -213,7 +222,7 @@ def test_news_clip_cycles_article_photos_without_pexels_and_credits_source(clien
     v = client.post("/api/videos", json={"text": ARTICLE, "seconds": 30, "look": "news", "article_url": "https://www.baochi.vn/bai-1"}).json()
     client.post(f"/api/videos/{v['id']}/render")
     d = db.video_get(v["id"])
-    assert d["status"] == "done" and d["error"] == ""                                       # có ảnh trong bài → không cần Pexels, không báo thiếu
+    assert d["status"] == "done" and "Chưa có Pexels" not in d["error"]                     # có ảnh trong bài → không báo thiếu key
     assert seen_labels == ["ẢNH: BAOCHI.VN"] * 3                                            # ghi nguồn ảnh; 1 ảnh được dùng lại cho cả 3 cảnh
 
 
@@ -304,3 +313,129 @@ def test_clip_note_explains_pexels_failure(client, monkeypatch, tmp_path):
     client.post(f"/api/videos/{v['id']}/render")
     d = db.video_get(v["id"])
     assert d["status"] == "done" and "401" in d["error"] and "Pexels" in d["error"]
+
+
+# ---------------------------------------------------------------- tìm ảnh trên web (Google / Bing)
+
+class _Resp:
+    def __init__(self, text="", js=None, status=200):
+        self.text, self._js, self.status_code, self.headers = text, js, status, {"content-type": "application/json"}
+
+    def json(self):
+        return self._js
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(self.status_code)
+
+
+BING_HTML = ('<a class="iusc" style="x" m="{&quot;murl&quot;:&quot;https://baochi.vn/a/hoan-thue.jpg&quot;,&quot;purl&quot;:&quot;https://baochi.vn/b1&quot;,&quot;t&quot;:&quot;Hoàn thuế&quot;}"></a>'
+             '<a class="iusc" m="{&quot;murl&quot;:&quot;https://www.shutterstock.com/x.jpg&quot;,&quot;purl&quot;:&quot;https://shutterstock.com/p&quot;}"></a>'
+             '<a class="iusc" m="{&quot;murl&quot;:&quot;https://cdn.vn/logo-cong-ty.png&quot;,&quot;purl&quot;:&quot;https://cdn.vn/p&quot;}"></a>'
+             '<a class="iusc" m="{&quot;murl&quot;:&quot;https://tapchi.vn/2/ke-toan.jpg&quot;,&quot;purl&quot;:&quot;https://tapchi.vn/b2&quot;}"></a>')
+
+
+def test_image_search_parses_bing_filters_stock_and_prefers_google_when_configured(monkeypatch):
+    from app import imgsearch
+    monkeypatch.setattr(imgsearch, "search", REAL_SEARCH)
+    calls = []
+
+    def get(url, **k):
+        calls.append(url)
+        if "googleapis" in url:
+            return _Resp(js={"items": [{"link": "https://gov.vn/g1.jpg", "title": "G", "image": {"contextLink": "https://gov.vn/p", "width": 1200, "height": 800}},
+                                       {"link": "https://gov.vn/small.jpg", "image": {"width": 200, "height": 100}}]})
+        return _Resp(text=BING_HTML)
+    monkeypatch.setattr(imgsearch.requests, "get", get)
+    bing = imgsearch.search("hoàn thuế", {}, 10)
+    assert [c["url"] for c in bing] == ["https://baochi.vn/a/hoan-thue.jpg", "https://tapchi.vn/2/ke-toan.jpg"]            # bỏ ảnh ngân hàng ảnh + logo
+    assert bing[0]["page"] == "https://baochi.vn/b1" and all("bing.com" in u for u in calls)
+    calls.clear()
+    g = imgsearch.search("hoàn thuế", {"google_cse_key": "k", "google_cse_cx": "c"}, 10)
+    assert [c["url"] for c in g] == ["https://gov.vn/g1.jpg"] and "googleapis.com" in calls[0] and len(calls) == 1          # có key → dùng Google, bỏ ảnh nhỏ
+
+
+def test_image_search_falls_back_when_a_source_fails(monkeypatch):
+    from app import imgsearch
+    monkeypatch.setattr(imgsearch, "search", REAL_SEARCH)
+
+    def get(url, **k):
+        if "googleapis" in url:
+            return _Resp(js={"error": {"message": "quota"}}, status=429)
+        if "bing.com" in url:
+            return _Resp(text="<html>captcha</html>")
+        if "i.js" in url:
+            return _Resp(js={"results": [{"image": "https://tinnhanh.vn/x.jpg", "url": "https://tinnhanh.vn/b", "title": "T", "width": 900, "height": 600}]})
+        return _Resp(text='<script>vqd="4-123456"</script>')
+    monkeypatch.setattr(imgsearch.requests, "get", get)
+    res = imgsearch.search("thuế", {"google_cse_key": "k", "google_cse_cx": "c"}, 5)
+    assert [c["url"] for c in res] == ["https://tinnhanh.vn/x.jpg"] and res[0]["src"] == "ddg"                           # Google lỗi → Bing trống → DuckDuckGo
+    monkeypatch.setattr(imgsearch.requests, "get", lambda *a, **k: (_ for _ in ()).throw(imgsearch.requests.ConnectionError("x")))
+    assert imgsearch.search("thuế", {}, 5) == []
+
+
+def test_scene_query_and_image_fingerprints(tmp_path):
+    from PIL import Image, ImageDraw
+    from app import imgsearch
+    assert imgsearch.scene_query({"query": "cơ quan thuế hoàn thuế", "narration": "x"}) == "cơ quan thuế hoàn thuế"
+    q = imgsearch.scene_query({"narration": "Nhiều hồ sơ bị trả vì thiếu hóa đơn đầu vào hợp lệ 2026."}, "Hoàn thuế bị từ chối")
+    assert "hóa" in q and "2026" not in q and "và" not in q.split()
+    a, b, c = tmp_path / "a.jpg", tmp_path / "b.jpg", tmp_path / "c.jpg"
+    im = Image.new("RGB", (800, 600), (20, 20, 20))
+    ImageDraw.Draw(im).rectangle((0, 0, 400, 600), fill=(240, 240, 240))
+    im.save(a, "JPEG")
+    im.resize((400, 300)).save(b, "JPEG", quality=40)                                       # cùng ảnh, nhỏ hơn, nén lại
+    im2 = Image.new("RGB", (800, 600), (240, 240, 240))
+    ImageDraw.Draw(im2).rectangle((0, 0, 800, 300), fill=(20, 20, 20))
+    im2.save(c, "JPEG")
+    assert imgsearch.similar(imgsearch.ahash(a), imgsearch.ahash(b)) and not imgsearch.similar(imgsearch.ahash(a), imgsearch.ahash(c))
+
+
+def test_web_photos_are_on_topic_but_different_from_article_photos(monkeypatch, tmp_path):
+    from PIL import Image, ImageDraw
+    from app import imgsearch
+    art = tmp_path / "art.img"
+    im = Image.new("RGB", (900, 600), (20, 20, 20))
+    ImageDraw.Draw(im).rectangle((0, 0, 450, 600), fill=(240, 240, 240))
+    im.save(art, "JPEG")
+    other = Image.new("RGB", (900, 600), (240, 240, 240))
+    ImageDraw.Draw(other).rectangle((0, 0, 900, 300), fill=(30, 60, 160))
+    queries = []
+    monkeypatch.setattr(imgsearch, "search", lambda q, cfg=None, n=10: queries.append(q) or [
+        {"url": "https://x.vn/dup.jpg", "page": "https://www.baochi.vn/b1", "title": "", "w": 0, "h": 0},
+        {"url": "https://x.vn/new1.jpg", "page": "https://www.baochi.vn/b1", "title": "", "w": 0, "h": 0},
+        {"url": "https://x.vn/new2.jpg", "page": "https://tapchi.vn/b2", "title": "", "w": 0, "h": 0}])
+
+    def fetch(url, ref, dest, min_w=360, min_h=240):
+        (im if "dup" in url else other if "new1" in url else other.transpose(Image.FLIP_TOP_BOTTOM)).save(dest, "JPEG")
+        return True
+    monkeypatch.setattr(newslook, "_fetch_image", fetch)
+    ph = newslook.Photos({**video.DEFAULTS, "web_images": True}, tmp_path, "", None, [(art, "ẢNH: BAOCHI.VN")], "Hoàn thuế")
+    got = [ph.get(i, {"query": "cơ quan thuế hoàn thuế", "narration": "n"}) for i in range(3)]
+    assert got[0][0] == art                                                                  # cảnh 1: ảnh trong bài
+    assert got[1][0].name.startswith("web1") and got[1][1] == "ẢNH: BAOCHI.VN"             # cảnh 2: ảnh web, bỏ ảnh trùng ảnh bài (dup)
+    assert got[2][0].name.startswith("web2") and got[2][1] == "ẢNH: TAPCHI.VN" and got[2][0] != got[1][0]     # cảnh 3: ảnh web khác nữa
+    assert ph.web_ok == 2 and queries[0] == "cơ quan thuế hoàn thuế" and len(queries) == 1       # cùng cụm tìm → tìm 1 lần dùng lại kết quả
+
+
+def test_find_images_endpoint_adds_one_web_photo_per_missing_scene(client, monkeypatch):
+    from app import imgsearch
+    monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: AI)
+    monkeypatch.setattr(newslook, "article_images", lambda url, limit=12: ["https://cdn.baochi.vn/1.jpg"])
+    v = client.post("/api/videos", json={"text": ARTICLE, "seconds": 30, "look": "news", "article_url": "https://baochi.vn/b"}).json()
+    seen = []
+    monkeypatch.setattr(imgsearch, "search", lambda q, cfg=None, n=10: seen.append(q) or [{"url": f"https://w.vn/{len(seen)}a.jpg"}, {"url": f"https://w.vn/{len(seen)}b.jpg"}])
+    r = client.post(f"/api/videos/{v['id']}/find-images").json()
+    assert r["added"] == 2 and r["scenes"] == 3 and r["images"] == ["https://cdn.baochi.vn/1.jpg", "https://w.vn/1a.jpg", "https://w.vn/2a.jpg"]
+    assert len(seen) == 2 and client.post(f"/api/videos/9999/find-images").status_code == 404
+    again = client.post(f"/api/videos/{v['id']}/find-images").json()
+    assert again["added"] == 0 and len(again["images"]) == 3                                  # đủ ảnh cho mọi cảnh → không tìm thêm
+
+
+def test_config_hides_google_key_and_ui_has_web_image_controls(client):
+    c = client.put("/api/video/config", json={"google_cse_key": "AIza", "google_cse_cx": "abc", "web_images": False}).json()
+    assert c["has_google_key"] and "google_cse_key" not in c and c["google_cse_cx"] == "abc" and c["web_images"] is False
+    client.put("/api/video/config", json={"google_cse_key": ""})
+    assert video.get_config()["google_cse_key"] == "AIza"
+    html = client.get("/").text
+    assert 'id="vdWebImg"' in html and 'id="vdGKey"' in html and "function vdFindImages" in html

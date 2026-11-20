@@ -15,7 +15,7 @@ from urllib.parse import urljoin, urlparse
 
 import requests
 
-from . import aimedia, db, newsagent
+from . import aimedia, db, imgsearch, newsagent
 from . import video as V
 
 SIZE = (720, 1280)                     # dựng 720p dọc cho nhanh, đúng độ phân giải clip mẫu
@@ -34,13 +34,14 @@ QUY TẮC:
 - TRUNG THỰC: giữ nguyên số tiền, tỷ lệ, ngày tháng, số hiệu văn bản, tên cơ quan/người như bài gốc. Không thêm số liệu, không thêm điều bài không nói.
 - Con số / số tiền / tỷ lệ viết bằng chữ số như bài gốc (vd "10.000 tỷ đồng", "30%", "50 ngày") để hiện nổi bật trên màn hình; ngày tháng viết "ngày 12 tháng 11" (không dùng dấu /).
 - "keyword": từ khóa TIẾNG ANH 2–4 từ để tìm ảnh minh họa (văn phòng thuế, tiền, hóa đơn, họp quốc hội, doanh nghiệp...), ảnh không chứa chữ; mỗi cảnh một từ khóa KHÁC nhau.
+- "query": cụm TÌM ẢNH bằng TIẾNG VIỆT 3–6 từ cho đúng ý của cảnh (vd "cơ quan thuế hoàn thuế", "hóa đơn điện tử", "kế toán làm việc văn phòng"), không chứa con số hay tên riêng quá hiếm; mỗi cảnh một cụm KHÁC nhau.
 - "hl": 1–3 cụm từ viết NGUYÊN VĂN như trong "narration" cần nhấn mạnh trên màn hình (con số, hành động chính, vd "từ chối hoàn", "10.000 tỷ đồng").
 - "headline": 1–2 câu (tối đa 40 từ) tóm tắt tin để làm dòng đầu bài đăng Facebook, có con số chính, trung thực, không emoji, không giật tít sai sự thật.
 - "hashtags": 3–4 hashtag không dấu viết liền dạng CamelCase (vd #HoanThue #HoaDonDauVao).
 - Không tự thêm cảnh giới thiệu công ty hay kêu gọi liên hệ (phần mềm tự thêm cảnh cuối).
 {brand}
 Trả về JSON: {{"title": "tiêu đề ngắn của clip", "headline": "...", "hashtags": ["#..."],
- "scenes": [{{"narration": "...", "keyword": "english stock photo keywords", "hl": ["cụm nhấn mạnh"]}}]}}
+ "scenes": [{{"narration": "...", "keyword": "english stock photo keywords", "query": "cụm tìm ảnh tiếng Việt", "hl": ["cụm nhấn mạnh"]}}]}}
 
 BÀI VIẾT:
 {text}
@@ -480,10 +481,12 @@ def article_images(url: str, limit: int = 12) -> list:
     return out[:limit]
 
 
-def _fetch_image(url: str, referer: str, dest: Path) -> bool:
-    """Tải ảnh (có Referer của bài — nhiều báo chặn tải trực tiếp); bỏ ảnh quá nhỏ."""
+def _fetch_image(url: str, referer: str, dest: Path, min_w: int = 360, min_h: int = 240) -> bool:
+    """Tải ảnh (có Referer của bài — nhiều báo chặn tải trực tiếp); bỏ ảnh quá nhỏ và địa chỉ nội bộ."""
     from PIL import Image
+    from . import backlinks
     try:
+        backlinks._public_host(urlparse(url).hostname or "")
         r = requests.get(url, headers={"User-Agent": newsagent.UA, "Referer": referer or url, "Accept": "image/*"}, timeout=30, stream=True)
         ct = (r.headers.get("Content-Type") or "").split(";")[0].lower()
         if r.status_code >= 400 or not ct.startswith("image/") or "svg" in ct or "gif" in ct:
@@ -495,8 +498,8 @@ def _fetch_image(url: str, referer: str, dest: Path) -> bool:
                 return False
         dest.write_bytes(data)
         with Image.open(dest) as im:
-            return im.width >= 360 and im.height >= 240
-    except (requests.RequestException, OSError, ValueError):
+            return im.width >= min_w and im.height >= min_h
+    except (requests.RequestException, OSError, ValueError, backlinks.FetchError):
         return False
 
 
@@ -511,10 +514,43 @@ class Photos:
     """Kho ảnh của clip: mọi cảnh đều phải có ảnh. Thứ tự: ảnh trong bài → ảnh AI (nếu bật) → Pexels (nhiều từ khóa, ảnh khác nhau)
     → dùng lại ảnh đã có nhưng CẮT Ở CHỖ KHÁC → ảnh đại diện của bài → (cuối cùng) ô con số."""
 
-    def __init__(self, cfg: dict, work: Path, gkey: str, article, pool: list):
-        self.cfg, self.work, self.gkey, self.article = cfg, work, gkey, article
+    def __init__(self, cfg: dict, work: Path, gkey: str, article, pool: list, title: str = ""):
+        self.cfg, self.work, self.gkey, self.article, self.title = cfg, work, gkey, article, title
         self.pool, self.gallery, self.seen, self.uses = list(pool), list(pool), set(), {}
-        self.pexels_ok = self.pexels_fail = 0
+        self.pexels_ok = self.pexels_fail = self.web_ok = self.web_fail = 0
+        self.web_cache, self.web_used, self.hashes = {}, set(), []
+        for path, _label in pool:                                         # dấu vân ảnh trong bài: ảnh tìm trên web phải KHÁC những ảnh này
+            try:
+                self.hashes.append(imgsearch.ahash(path))
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _web(self, i: int, sc: dict):
+        """Tìm ảnh trên web (Google / Bing) cùng chủ đề cảnh, khác mọi ảnh đã dùng. Trả (đường dẫn, nhãn) hoặc None."""
+        q = imgsearch.scene_query(sc, self.title)
+        if not q:
+            return None
+        if q not in self.web_cache:
+            self.web_cache[q] = imgsearch.search(q, self.cfg, 10)
+        tries = 0
+        for c in self.web_cache[q]:
+            if c["url"] in self.web_used or tries >= 6:
+                continue
+            tries += 1
+            dest = self.work / f"web{i}_{tries}.img"
+            if not _fetch_image(c["url"], c.get("page", ""), dest, 480, 300):
+                continue
+            try:
+                h = imgsearch.ahash(dest)
+            except Exception:  # noqa: BLE001
+                continue
+            if any(imgsearch.similar(h, o) for o in self.hashes):
+                continue                                                  # giống ảnh đã có → lấy ảnh khác
+            self.hashes.append(h)
+            self.web_used.add(c["url"])
+            host = (urlparse(c.get("page") or c["url"]).hostname or "").removeprefix("www.")
+            return dest, (f"ẢNH: {host.upper()}" if host else "ẢNH TRÊN WEB")
+        return None
 
     def _reuse(self, i: int):
         if not self.gallery:
@@ -531,6 +567,13 @@ class Photos:
             path, label = self.pool[i]
             self.uses[str(path)] = self.uses.get(str(path), 0) + 1
             return path, label, 0
+        if self.cfg.get("web_images", True):
+            got = self._web(i, sc)
+            if got:
+                self.gallery.append(got)
+                self.web_ok += 1
+                return got[0], got[1], 0
+            self.web_fail += 1
         dest = self.work / f"photo{i}.img"
         kw = sc.get("keyword") or sc.get("visual") or sc.get("headline") or ""
         if self.cfg["visual"] == "ai" and self.gkey and kw:
@@ -550,6 +593,10 @@ class Photos:
                     self.seen.add(h)
                     keep = self.work / f"pex{i}.img"
                     dest.replace(keep)
+                    try:
+                        self.hashes.append(imgsearch.ahash(keep))
+                    except Exception:  # noqa: BLE001
+                        pass
                     self.gallery.append((keep, LABEL))
                     self.pexels_ok += 1
                     return keep, LABEL, 0
@@ -605,7 +652,7 @@ def render(video_id: int):
     if cta_text or phone:                                         # cảnh cuối tự thêm: thẻ liên hệ + lời kêu gọi
         spoken = (cta_text.rstrip(". ") + ". " if cta_text else "") + (f"Liên hệ số điện thoại {phone}." if phone else "")
         items.append(({"narration": spoken.strip(), "type": "cta", "hl": [], "keyword": "", "visual": "", "headline": ""}, True))
-    photos = Photos(cfg, work, gkey, article, pool)
+    photos = Photos(cfg, work, gkey, article, pool, v["title"])
     durations, total = [], len(items)
     for i, (sc, is_cta) in enumerate(items):
         step(f"Cảnh {i + 1}/{total}: giọng đọc")
@@ -652,7 +699,9 @@ def render(video_id: int):
             p.unlink(missing_ok=True)
     length = sum(durations)
     notes = []
-    if not (cfg["pexels_key"] or gkey or pool):
+    if photos.web_fail and not photos.web_ok and not photos.pexels_ok:
+        notes.append("Không tìm được ảnh trên web (Google/Bing có thể đang chặn truy cập tự động) — nhập Google API key + cx ở Cài đặt clip để tìm bằng Google chính thức, hoặc dùng Pexels.")
+    if not (cfg["pexels_key"] or gkey or pool or photos.web_ok):
         notes.append("Chưa có Pexels API key nên khung ảnh hiện con số chính thay cho ảnh minh họa. Nhập key (miễn phí) ở Cài đặt clip để có ảnh thật.")
     elif photos.pexels_fail:
         why = V.pexels_last["err"] or "không tìm được ảnh phù hợp"

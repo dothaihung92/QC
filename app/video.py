@@ -84,6 +84,9 @@ DEFAULTS = {
     "brand": "",                      # dòng chữ nhỏ cuối khung: tên Fanpage / số điện thoại
     "color": "#0b4f8a",               # màu thương hiệu (nền + khung tiêu đề)
     "pexels_key": "",                 # tùy chọn: ảnh minh họa miễn phí từ pexels.com
+    "web_images": True,               # kiểu Tin nhanh: tự tìm thêm ảnh trên web (Google / Bing) cùng chủ đề, khác ảnh trong bài
+    "google_cse_key": "",             # tùy chọn: Google API key (Custom Search) để tìm ảnh bằng Google chính thức
+    "google_cse_cx": "",              # ID công cụ tìm kiếm (cx) của Programmable Search Engine
     "music": True,                    # trộn nhạc nền nếu có file trong data/music
     # kiểu "Tin nhanh" + nội dung đăng Facebook: chữ ký thương hiệu dưới bài, thẻ liên hệ ở cảnh cuối
     "sig_name": "ĐẠI LÝ THUẾ HƯNG PHÚC",
@@ -125,7 +128,7 @@ def save_config(body: dict) -> dict:
         if k not in body:
             continue
         v = body[k]
-        if k == "pexels_key" and not str(v or "").strip():
+        if k in ("pexels_key", "google_cse_key") and not str(v or "").strip():
             continue                                  # để trống = giữ key cũ
         if isinstance(default, bool):
             v = bool(v)
@@ -172,6 +175,7 @@ def missing_tools() -> list:
 def public_config() -> dict:
     cfg = get_config()
     cfg["has_pexels_key"] = bool(cfg.pop("pexels_key"))
+    cfg["has_google_key"] = bool(cfg.pop("google_cse_key"))
     cfg["voices"] = VOICES
     cfg["styles"] = {k: v[0] for k, v in STYLES.items()}
     cfg["veo_cost"] = round(aimedia.VEO_SECONDS * aimedia.VEO_PRICE_PER_SEC, 2)
@@ -552,7 +556,7 @@ def clean_scenes(scenes) -> list:
                     "narration": narration[:900],
                     "big": str(s.get("big", "")).strip()[:16],
                     "items": items,
-                    "keyword": str(s.get("keyword", "")).strip()[:60],
+                    "keyword": str(s.get("keyword", "")).strip()[:60], "query": str(s.get("query", "")).strip()[:90],
                     "visual": str(s.get("visual", "")).strip()[:300]})
     return out[:30]
 

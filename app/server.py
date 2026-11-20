@@ -1101,6 +1101,35 @@ def video_create(body: ScriptIn):
     return dict(video.to_json(db.video_get(vid)), format_name=sc.get("format_name", ""))
 
 
+@admin.post("/api/videos/{vid}/find-images")
+async def video_find_images(vid: int):
+    """Tìm ảnh trên web (Google / Bing) cho các cảnh chưa có ảnh: mỗi cảnh một ảnh cùng chủ đề, thêm vào danh sách ảnh của clip để xem / sửa."""
+    from . import imgsearch
+    v = _video_or_404(vid)
+    if v["status"] == "rendering":
+        raise HTTPException(409, "Clip đang dựng, đợi xong rồi tìm ảnh")
+    scenes = video.clean_scenes(v["scenes"])
+    opts = dict(v.get("options") or {})
+    imgs = list(opts.get("images") or [])
+    cfg = video.get_config()
+
+    def work():
+        added = 0
+        for i in range(len(imgs), len(scenes)):
+            q = imgsearch.scene_query(scenes[i], v["title"])
+            hit = next((c for c in imgsearch.search(q, cfg, 8) if c["url"] not in imgs), None) if q else None
+            if not hit:
+                break
+            imgs.append(hit["url"])
+            added += 1
+        return added
+    from starlette.concurrency import run_in_threadpool as rt
+    added = await rt(work)
+    opts["images"] = imgs[:30]
+    db.video_update(vid, options=opts)
+    return {"added": added, "images": opts["images"], "scenes": len(scenes)}
+
+
 @admin.get("/api/videos")
 def video_list():
     return [video.to_json(v) for v in db.video_list()]

@@ -744,6 +744,11 @@
       </details>
       <label>Dòng chữ cuối khung (tên Fanpage, số điện thoại)</label>
       <input id="vdBrand" placeholder="Group Kế Toán HCM • 09xx xxx xxx">
+      <label style="font-weight:400"><input type="checkbox" id="vdWebImg" style="width:auto"> 🔍 Kiểu Tin nhanh: <b>tự tìm thêm ảnh trên web</b> cùng chủ đề từng cảnh, <b>khác ảnh trong bài</b> (Google nếu có key bên dưới, không thì Bing)</label>
+      <div class="row2"><div><label>Google API key <span class="small muted">(tùy chọn — tìm ảnh bằng Google chính thức)</span> <span id="vdGState" class="small muted"></span></label>
+          <input id="vdGKey" type="password" placeholder="để trống = giữ key cũ"></div>
+        <div><label>Search engine ID (cx) <a class="small" href="https://programmablesearchengine.google.com/controlpanel/create" target="_blank">(tạo miễn phí, bật "Tìm kiếm hình ảnh")</a></label>
+          <input id="vdGCx" placeholder="vd 0123456789abcdef:xyz"></div></div>
       <label>Pexels API key — ảnh minh họa miễn phí (tùy chọn) <a class="small" href="https://www.pexels.com/api/" target="_blank">(lấy key)</a>
         <span id="vdPexState" class="small muted"></span></label>
       <input id="vdPexels" type="password" placeholder="để trống = giữ key cũ / dùng nền màu">
@@ -1258,6 +1263,7 @@ async function loadVideo() {
   $('vdSigPhone').value = VCFG.sig_phone || ''; $('vdSigTags').value = VCFG.sig_tags || ''; $('vdCta').value = VCFG.cta_text || ''; $('vdLogoText').value = VCFG.logo_text || '';
   VLOGO = VCFG.logo || ''; $('vdLogoState').textContent = VLOGO ? '— đã chọn' : '';
   $('vdPexState').textContent = VCFG.has_pexels_key ? '— đã lưu' : '';
+  $('vdWebImg').checked = VCFG.web_images !== false; $('vdGCx').value = VCFG.google_cse_cx || ''; $('vdGState').textContent = VCFG.has_google_key ? '— đã lưu' : '';
   $('vdMusicHint').textContent = VCFG.music_files ? `(${VCFG.music_files} bài trong ${VCFG.music_dir})`
     : `(chép file .mp3 không bản quyền vào ${VCFG.music_dir})`;
   $('vdKeyHint').innerHTML = VCFG.has_gemini_key ? 'Dùng Gemini key đã lưu ở tab Tin tức AI.'
@@ -1320,10 +1326,10 @@ function vdPick() {
 }
 async function vdSave() {
   VCFG = await api('/api/video/config', { method: 'PUT', body: { audience: $('vdAudience').value, ai_images: $('vdAiImg').checked, show_title: $('vdShowTitle').checked, look: $('vdLook').value, theme: $('vdTheme').value, story: $('vdStory').value, pen: $('vdPen').value, voice: $('vdVoice').value, tts_style: $('vdStyle').value, visual: $('vdVisual').value, veo_scenes: $('vdVeo').value, rate: $('vdRate').value,
-    format: $('vdFormat').value, color: $('vdColor').value, brand: $('vdBrand').value, pexels_key: $('vdPexels').value,
+    format: $('vdFormat').value, color: $('vdColor').value, brand: $('vdBrand').value, pexels_key: $('vdPexels').value, web_images: $('vdWebImg').checked, google_cse_key: $('vdGKey').value, google_cse_cx: $('vdGCx').value,
     music: $('vdMusic').checked, sig_name: $('vdSigName').value, sig_bold: $('vdSigBold').checked, sig_tagline: $('vdSigTag').value, sig_address: $('vdSigAddr').value,
     sig_phone: $('vdSigPhone').value, sig_tags: $('vdSigTags').value, cta_text: $('vdCta').value, logo_text: $('vdLogoText').value, logo: VLOGO } });
-  $('vdPexels').value = ''; toast('✅ Đã lưu cài đặt clip'); loadVideo();
+  $('vdPexels').value = ''; $('vdGKey').value = ''; toast('✅ Đã lưu cài đặt clip'); loadVideo();
 }
 async function vdCreate(look = '') {
   const btn = $(look === 'news' ? 'vdMakeNews' : 'vdMake'), old = btn.innerHTML;
@@ -1500,7 +1506,8 @@ function vdRenderList() {
         <label>Mô tả đăng kèm</label><textarea id="vds${v.id}" rows="3">${esc(v.description)}</textarea>
         ${(v.options || {}).look === 'news' ? `<label>Ảnh trong bài dùng cho clip <span class="muted small">(mỗi dòng 1 link; ảnh đầu → cảnh đầu. Hết ảnh thì dùng ảnh Pexels hoặc lặp lại)</span></label>
           <textarea id="vdi${v.id}" rows="3" placeholder="Dán link ảnh trong bài, hoặc để trống">${esc(((v.options || {}).images || []).join('\n'))}</textarea>
-          <div class="muted small">${((v.options || {}).images || []).length ? 'Đã tìm thấy ' + (v.options.images || []).length + ' ảnh trong bài.' : 'Chưa có ảnh trong bài — dán link bài gốc ở trên khi tạo kịch bản, hoặc dán link ảnh vào ô này.'}</div>` : ''}
+          <div class="muted small">${((v.options || {}).images || []).length ? 'Đã có ' + (v.options.images || []).length + ' ảnh (' + v.scenes.length + ' cảnh). Cảnh nào chưa có ảnh sẽ tự tìm trên web khi dựng.' : 'Chưa có ảnh — dán link bài gốc ở trên khi tạo kịch bản, bấm tìm trên web, hoặc dán link ảnh vào ô này.'}</div>
+          <button class="btn" style="margin-top:4px" onclick="vdFindImages(${v.id}, this)" title="Tìm ảnh cùng chủ đề trên Google / Bing cho các cảnh chưa có ảnh rồi thêm vào danh sách trên">🔍 Tìm ảnh trên web cho các cảnh còn thiếu</button>` : ''}
         ${v.scenes.map((s, i) => vdScene(v, s, i)).join('')}
         <button class="btn" onclick="vdAddScene(${v.id})">+ Thêm cảnh</button>
       </details>
@@ -1529,6 +1536,15 @@ function vdCollect(id) {
   return out;
 }
 async function vdSaveOne(id) { return api('/api/videos/' + id, { method: 'PUT', body: vdCollect(id) }); }
+async function vdFindImages(id, btn) {
+  await vdSaveOne(id);                                              // lưu danh sách ảnh đang sửa trước
+  btn.disabled = true; btn.textContent = '⏳ Đang tìm ảnh trên web...';
+  try {
+    const r = await api('/api/videos/' + id + '/find-images', { method: 'POST' });
+    toast(r.added ? `🔍 Đã thêm ${r.added} ảnh tìm trên web (${r.images.length}/${r.scenes} cảnh) — xem lại danh sách rồi Dựng lại` : 'Không tìm thêm được ảnh (Google/Bing có thể chặn truy cập tự động — nhập Google API key ở Cài đặt clip)');
+    await vdLoadList();
+  } finally { btn.disabled = false; }
+}
 async function vdAddScene(id) {
   const b = vdCollect(id); b.scenes.push({ type: 'list', headline: '', narration: 'Lời đọc cảnh mới', big: '', items: [], keyword: '', visual: '' });
   await api('/api/videos/' + id, { method: 'PUT', body: b }); vdLoadList();
