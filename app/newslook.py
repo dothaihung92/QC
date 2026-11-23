@@ -180,7 +180,9 @@ CROPS = [(1.0, 0.5, 0.4), (1.45, 0.2, 0.3), (1.45, 0.8, 0.35), (1.9, 0.5, 0.5), 
 
 
 def _cover(path: Path, w: int, h: int, variant: int = 0):
-    from PIL import Image, ImageOps
+    """Ảnh vào khung: cùng tỉ lệ thì cắt vừa khung; lệch nhiều (poster 16:9, ảnh dọc) thì đặt NGUYÊN ảnh lên nền mờ — không cắt mất chữ / đầu người.
+    variant > 0 (dùng lại ảnh cho cảnh khác): cắt phóng to ở chỗ khác."""
+    from PIL import Image, ImageFilter, ImageOps
     im = Image.open(path)
     im = ImageOps.exif_transpose(im).convert("RGB")
     zoom, cx, cy = CROPS[variant % len(CROPS)]
@@ -189,7 +191,14 @@ def _cover(path: Path, w: int, h: int, variant: int = 0):
         x0 = min(max(0, im.width * cx - cw / 2), im.width - cw)
         y0 = min(max(0, im.height * cy - ch / 2), im.height - ch)
         im = im.crop((int(x0), int(y0), int(x0 + cw), int(y0 + ch)))
-    return ImageOps.fit(im, (w, h), Image.LANCZOS, centering=(0.5, 0.4))
+        return ImageOps.fit(im, (w, h), Image.LANCZOS, centering=(0.5, 0.4))
+    if abs((im.width / im.height) / (w / h) - 1) <= 0.28:
+        return ImageOps.fit(im, (w, h), Image.LANCZOS, centering=(0.5, 0.4))
+    bg = ImageOps.fit(im, (w, h), Image.BILINEAR).filter(ImageFilter.GaussianBlur(18))
+    bg = Image.blend(bg, Image.new("RGB", (w, h), (8, 20, 60)), 0.35)
+    fg = ImageOps.contain(im, (w, h), Image.LANCZOS)
+    bg.paste(fg, ((w - fg.width) // 2, (h - fg.height) // 2))
+    return bg
 
 
 def _stat_panel(w: int, h: int, text: str, cfg: dict):
@@ -230,6 +239,9 @@ def scene_background(cfg: dict, photo, stat_text: str, dest: Path, label: str = 
         img.paste(_stat_panel(W - sx, ph - hh, stat_text, cfg), (sx, hh))
     if label:
         f = V._font(int(H * 0.0155), bold=True)
+        room = W * 0.5 - int(W * 0.06)                                   # chỉ dùng nửa trái dải đầu — không đè lên logo bên phải
+        while d.textlength(label, font=f) > room and len(label) > 8:
+            label = label[:-2].rstrip(" .") + "…" if not label.endswith("…") else label[:-2] + "…"
         d.text((int(W * 0.06), hh // 2), label, font=f, fill=(235, 240, 255), anchor="lm")
     logo = _logo(cfg, int(hh * 0.62))
     if logo is not None:
@@ -334,6 +346,40 @@ def color_words(words: list, hl: list) -> list:
     return cols
 
 
+DANGLERS = {"và", "của", "là", "cho", "để", "các", "những", "một", "từ", "về", "với", "trong", "ở", "tại", "đã", "sẽ", "bị", "được", "do", "như", "theo",
+            "khi", "nếu", "thì", "mà", "vì", "nên", "cũng", "rất", "đang", "hơn", "tới", "đến", "cả", "mỗi", "này", "đó", "trên", "dưới", "bằng", "qua", "sau", "trước"}
+COMPOUNDS = [("bảo", "hiểm"), ("hóa", "đơn"), ("doanh", "nghiệp"), ("thu", "nhập"), ("cơ", "quan"), ("giá", "trị"), ("tỷ", "đồng"), ("triệu", "đồng"),
+             ("hoàn", "thuế"), ("kế", "toán"), ("quản", "lý"), ("điện", "tử"), ("cá", "nhân"), ("chính", "sách"), ("chính", "phủ"), ("nghị", "định"),
+             ("thông", "tư"), ("xã", "hội"), ("kinh", "doanh"), ("hộ", "kinh"), ("tờ", "khai"), ("kê", "khai"), ("nộp", "thuế"), ("tiền", "thuế"),
+             ("tài", "chính"), ("ngân", "hàng"), ("thành", "lập"), ("lao", "động"), ("tiền", "lương"), ("hợp", "đồng"), ("pháp", "luật"), ("quy", "định"),
+             ("nhà", "nước"), ("bộ", "trưởng"), ("thủ", "tướng"), ("tổng", "cục"), ("cục", "thuế"), ("thuế", "suất"), ("mã", "số"), ("số", "thuế"), ("đơn", "điện"), ("lý", "thuế"), ("khai", "thuế"), ("hiểm", "xã")]
+UNITS = {"ty", "trieu", "nghin", "dong", "%", "usd", "vnd", "ngay", "thang", "nam", "phan", "lan", "nguoi"}
+
+
+_NCOMP = {(_norm(a), _norm(b)) for a, b in COMPOUNDS}
+_NDANG = {_norm(x) for x in DANGLERS}
+
+
+def _tidy_bounds(bounds: list, toks: list) -> list:
+    """Dời ranh giới giữa các màn hình chữ khỏi chỗ cắt dở: không để cụm kết thúc bằng từ nối ("và", "của"...) hay cắt đôi từ ghép ("bảo | hiểm", "hóa đơn | điện tử")."""
+    n = len(toks)
+
+    def bad(c):
+        return (toks[c - 1], toks[c]) in _NCOMP or toks[c - 1] in _NDANG or (re.search(r"\d", toks[c - 1]) and toks[c] in UNITS)
+
+    out = []
+    for b in bounds:
+        prev = out[-1] if out else 0
+        for c in (b, b + 1, b - 1, b + 2, b - 2, b + 3):
+            if prev < c < n and not bad(c) and c - prev <= 7:
+                out.append(c)
+                break
+        else:
+            if prev < b < n:
+                out.append(b)
+    return out
+
+
 def news_chunks(narration: str, hl: list, max_words: int = 5) -> list:
     """Cụm chữ hiện lần lượt theo lời đọc; không để cụm nhấn mạnh (vd "từ chối hoàn") bị cắt đôi giữa hai màn hình chữ."""
     chunks = V.caption_chunks(narration, max_words)
@@ -343,7 +389,8 @@ def news_chunks(narration: str, hl: list, max_words: int = 5) -> list:
     for c in chunks[:-1]:
         acc += len(c.split())
         bounds.append(acc)
-    for ph in hl or []:
+    bounds = _tidy_bounds(sorted({b for b in bounds if 0 < b < len(words)}), toks)
+    for ph in hl or []:                                                     # cụm nhấn mạnh của AI: luôn nằm gọn trong một màn hình chữ
         p = [x for x in (_norm(re.sub(r"[^\w%./]", "", x)) for x in ph.split()) if x]
         for i in range(len(toks) - len(p) + 1):
             if p and toks[i:i + len(p)] == p:
@@ -510,6 +557,26 @@ GENERIC_KW = ["tax office accounting", "business meeting", "calculator money doc
               "businessman signing contract", "financial report charts"]
 
 
+BAD_TITLE = re.compile(r"\bqr\b|mã vạch|poster|banner|clipart|vector|cartoon|hoạt hình|sticker|meme|wallpaper|hình nền|\blogo\b|\bicon\b|infographic|sơ đồ|bản vẽ|\bcad\b|"
+                       r"screenshot|chụp màn hình|đăng ký tham dự|quét mã", re.I)
+
+
+def heuristic_ok(path: Path) -> bool:
+    """Loại ảnh chắc chắn không dùng được: quá nhỏ, quá dẹt / quá dài, mã QR (đen–trắng), bản vẽ nền đen, trang văn bản trắng."""
+    from PIL import Image
+    try:
+        with Image.open(path) as im:
+            w, h = im.size
+            if w < 480 or h < 300 or not (0.45 <= w / h <= 2.4):
+                return False
+            px = list(im.convert("L").resize((128, 128), Image.NEAREST).getdata())          # lấy mẫu điểm ảnh (không trộn xám) để thấy rõ đen/trắng
+        n = len(px)
+        black, white = sum(1 for v in px if v < 45) / n, sum(1 for v in px if v > 215) / n
+        return not ((black > 0.12 and white > 0.12 and black + white > 0.88) or black > 0.93 or white > 0.95)
+    except Exception:  # noqa: BLE001
+        return False
+
+
 class Photos:
     """Kho ảnh của clip: mọi cảnh đều phải có ảnh. Thứ tự: ảnh trong bài → ảnh AI (nếu bật) → Pexels (nhiều từ khóa, ảnh khác nhau)
     → dùng lại ảnh đã có nhưng CẮT Ở CHỖ KHÁC → ảnh đại diện của bài → (cuối cùng) ô con số."""
@@ -519,11 +586,113 @@ class Photos:
         self.pool, self.gallery, self.seen, self.uses = list(pool), list(pool), set(), {}
         self.pexels_ok = self.pexels_fail = self.web_ok = self.web_fail = 0
         self.web_cache, self.web_used, self.hashes = {}, set(), []
+        self.prepared, self.assigned, self.bad = False, {}, set()
         for path, _label in pool:                                         # dấu vân ảnh trong bài: ảnh tìm trên web phải KHÁC những ảnh này
             try:
                 self.hashes.append(imgsearch.ahash(path))
             except Exception:  # noqa: BLE001
                 pass
+
+    def prepare(self, scenes: list, vkey: str = ""):
+        """Chọn ảnh cho TOÀN BỘ clip một lần: gom ảnh trong bài + ảnh tìm trên web cho từng cảnh (bỏ QR, poster, hoạt hình, bản vẽ, ảnh trùng),
+        rồi nhờ AI (Gemini xem ảnh) chọn ảnh hợp nhất với lời đọc từng cảnh — mỗi ảnh dùng một lần, không hợp thì để trống (Pexels / dùng lại sau)."""
+        from concurrent.futures import ThreadPoolExecutor
+        self.prepared, self.assigned, self.bad = True, {}, set()
+        cands = [{"path": p, "label": lab, "src": "article", "scene": -1} for p, lab in self.pool]
+        if self.cfg.get("web_images", True):
+            jobs = []
+            for i, sc in enumerate(scenes):
+                if i < len(self.pool) and not vkey:
+                    continue                                              # đã có ảnh trong bài cho cảnh này, không cần AI chọn
+                q = imgsearch.scene_query(sc, self.title)
+                if q and q not in self.web_cache:
+                    self.web_cache[q] = imgsearch.search(q, self.cfg, 6)
+                for k, c in enumerate((self.web_cache.get(q) or [])[:4]):
+                    if not BAD_TITLE.search(c.get("title", "") or ""):
+                        jobs.append((i, k, c))
+            jobs = jobs[:36]
+
+            def get(job):
+                i, k, c = job
+                dest = self.work / f"w{i}_{k}.img"
+                if not _fetch_image(c["url"], c.get("page", ""), dest, 480, 300) or not heuristic_ok(dest):
+                    return None
+                try:
+                    h = imgsearch.ahash(dest)
+                except Exception:  # noqa: BLE001
+                    return None
+                host = (urlparse(c.get("page") or c["url"]).hostname or "").removeprefix("www.")
+                return {"path": dest, "label": f"ẢNH: {host.upper()}" if host else "ẢNH TRÊN WEB", "src": "web", "scene": i, "hash": h, "url": c["url"]}
+            with ThreadPoolExecutor(6) as ex:
+                for r in ex.map(get, jobs):
+                    if r and not any(imgsearch.similar(r["hash"], o["hash"], 7) for o in cands if o.get("hash") is not None):
+                        cands.append(r)
+        for c in cands:
+            if "hash" not in c:
+                try:
+                    c["hash"] = imgsearch.ahash(c["path"])
+                except Exception:  # noqa: BLE001
+                    c["hash"] = None
+        ai = self._curate(scenes, cands, vkey) if (vkey and cands) else None
+        if ai:
+            assign, bad = ai
+        else:                                                              # không có AI: ảnh trong bài theo thứ tự, rồi ảnh web tìm cho đúng cảnh đó
+            assign, bad, used = {}, set(), set()
+            for i in range(len(scenes)):
+                pick = next((k for k, c in enumerate(cands) if k not in used and ((c["src"] == "article" and k == i) or (c["src"] == "web" and c["scene"] == i))), None)
+                if pick is not None:
+                    assign[i] = pick
+                    used.add(pick)
+        for i, k in assign.items():
+            self.assigned[i] = (cands[k]["path"], cands[k]["label"])
+        self.bad = {str(cands[k]["path"]) for k in bad if 0 <= k < len(cands)}
+        self.gallery = [(c["path"], c["label"]) for c in cands if str(c["path"]) not in self.bad]
+        self.web_ok = sum(1 for k in assign.values() if cands[k]["src"] == "web")
+        self.web_fail = len(scenes) - len(assign) if self.cfg.get("web_images", True) else 0
+        self.hashes = [c["hash"] for c in cands if c["hash"] is not None]
+
+    def _curate(self, scenes: list, cands: list, vkey: str):
+        """Gemini xem ảnh ứng viên → ({cảnh: số thứ tự ảnh}, {số thứ tự ảnh loại bỏ}); lỗi / trả lời lạ → None (dùng cách chọn đơn giản)."""
+        from io import BytesIO
+        from PIL import Image
+        thumbs = []
+        for c in cands[:40]:
+            try:
+                with Image.open(c["path"]) as im:
+                    im = im.convert("RGB")
+                    im.thumbnail((384, 384))
+                    buf = BytesIO()
+                    im.save(buf, "JPEG", quality=70)
+                    thumbs.append(("image/jpeg", buf.getvalue()))
+            except Exception:  # noqa: BLE001
+                thumbs.append(("image/jpeg", b""))
+        listing = "\n".join(f"- Ảnh {k + 1}: {'ảnh trong bài báo' if c['src'] == 'article' else 'tìm trên web cho cảnh ' + str(c['scene'] + 1)} ({c['label'].replace('ẢNH: ', '')})"
+                            for k, c in enumerate(cands[:40]))
+        scn = "\n".join(f"- Cảnh {i + 1}: {sc.get('narration', '')}" for i, sc in enumerate(scenes))
+        prompt = (f'Bạn chọn ẢNH MINH HỌA cho clip tin ngắn về: "{self.title}".\nCÁC CẢNH (lời đọc):\n{scn}\n\nẢNH ỨNG VIÊN (gửi kèm theo đúng thứ tự):\n{listing}\n\n'
+                  'YÊU CẦU:\n- Chọn cho MỖI CẢNH một ảnh hợp nhất với nội dung cảnh: ảnh chụp thật, rõ, liên quan chủ đề thuế / kế toán / doanh nghiệp / bảo hiểm / hóa đơn / '
+                  'quan chức phát biểu / văn phòng / giao dịch / tiền...\n- Mỗi ảnh chỉ dùng TỐI ĐA MỘT lần. Cảnh nào không có ảnh phù hợp thì để null — đừng chọn bừa.\n'
+                  '- Ưu tiên ảnh đa dạng (không chọn nhiều ảnh gần giống nhau) và ảnh trong bài báo khi nó hợp với cảnh.\n'
+                  '- Đưa vào "bad" mọi ảnh KHÔNG DÙNG ĐƯỢC: mã QR, poster / banner / ảnh bìa nhiều chữ, logo, biểu tượng, hoạt hình / clipart / tranh vẽ, bản vẽ kỹ thuật / CAD, '
+                  'ảnh chụp màn hình, ảnh mờ / vỡ, ảnh KHÔNG LIÊN QUAN chủ đề (sản phẩm, điện thoại, thú cưng, thể thao...).\n'
+                  'Trả về JSON: {"scenes": [{"n": 1, "image": 3}], "bad": [2, 5]} (image = số thứ tự ảnh bắt đầu từ 1, hoặc null).')
+        try:
+            out = newsagent.gemini_json(prompt, newsagent.get_config(), images=thumbs, timeout=180)
+        except Exception as e:  # noqa: BLE001
+            V._log(f"AI chọn ảnh lỗi, dùng cách chọn đơn giản — {str(e)[:100]}")
+            return None
+        bad = {int(x) - 1 for x in (out.get("bad") or []) if str(x).lstrip("-").isdigit() and 1 <= int(x) <= len(thumbs)}
+        assign, used = {}, set()
+        for it in out.get("scenes") or []:
+            try:
+                n, k = int(it.get("n")) - 1, it.get("image")
+                k = int(k) - 1 if k is not None else None
+            except (TypeError, ValueError):
+                continue
+            if k is not None and 0 <= n < len(scenes) and 0 <= k < len(cands) and k not in used and k not in bad and n not in assign:
+                assign[n] = k
+                used.add(k)
+        return (assign, bad) if out.get("scenes") is not None else None
 
     def _web(self, i: int, sc: dict):
         """Tìm ảnh trên web (Google / Bing) cùng chủ đề cảnh, khác mọi ảnh đã dùng. Trả (đường dẫn, nhãn) hoặc None."""
@@ -563,11 +732,15 @@ class Photos:
     def get(self, i: int, sc: dict, aspect: str = "9:16"):
         """(đường dẫn ảnh | None, nhãn, kiểu cắt)"""
         import hashlib
-        if i < len(self.pool):                                           # mỗi cảnh một ảnh trong bài, theo thứ tự
+        if self.prepared and i in self.assigned:                         # ảnh đã được chọn riêng cho cảnh này (AI / theo cảnh)
+            path, label = self.assigned[i]
+            self.uses[str(path)] = self.uses.get(str(path), 0) + 1
+            return path, label, 0
+        if not self.prepared and i < len(self.pool):                     # mỗi cảnh một ảnh trong bài, theo thứ tự
             path, label = self.pool[i]
             self.uses[str(path)] = self.uses.get(str(path), 0) + 1
             return path, label, 0
-        if self.cfg.get("web_images", True):
+        if self.cfg.get("web_images", True) and not self.prepared:
             got = self._web(i, sc)
             if got:
                 self.gallery.append(got)
@@ -613,9 +786,18 @@ def _article_pool(opts: dict, work: Path) -> list:
     """Tải các ảnh trong bài (đã lưu ở options.images) → [(đường dẫn, nhãn nguồn)] — ảnh hỏng / quá nhỏ bị bỏ."""
     pool, ref = [], opts.get("article_url") or ""
     src = (urlparse(ref).hostname or "").removeprefix("www.")
+    hashes = []
     for k, u in enumerate(opts.get("images") or []):
         dest = work / f"art{k}.img"
         if _fetch_image(u, ref, dest):
+            try:
+                h = imgsearch.ahash(dest)
+            except Exception:  # noqa: BLE001
+                h = None
+            if h is not None and any(imgsearch.similar(h, o, 6) for o in hashes):
+                continue                                                   # cùng một ảnh (bản khác kích thước) → chỉ giữ 1
+            if h is not None:
+                hashes.append(h)
             pool.append((dest, f"ẢNH: {src.upper()}" if src else "ẢNH TRONG BÀI"))
     return pool
 
@@ -653,6 +835,9 @@ def render(video_id: int):
         spoken = (cta_text.rstrip(". ") + ". " if cta_text else "") + (f"Liên hệ số điện thoại {phone}." if phone else "")
         items.append(({"narration": spoken.strip(), "type": "cta", "hl": [], "keyword": "", "visual": "", "headline": ""}, True))
     photos = Photos(cfg, work, gkey, article, pool, v["title"])
+    if (cfg.get("web_images", True) or pool) and scenes:
+        step("AI chọn ảnh cho từng cảnh")
+        photos.prepare(scenes, newsagent.get_config().get("gemini_key", ""))
     durations, total = [], len(items)
     for i, (sc, is_cta) in enumerate(items):
         step(f"Cảnh {i + 1}/{total}: giọng đọc")

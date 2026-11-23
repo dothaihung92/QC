@@ -439,3 +439,128 @@ def test_config_hides_google_key_and_ui_has_web_image_controls(client):
     assert video.get_config()["google_cse_key"] == "AIza"
     html = client.get("/").text
     assert 'id="vdWebImg"' in html and 'id="vdGKey"' in html and "function vdFindImages" in html
+
+
+# ---------------------------------------------------------------- ảnh không loạn: lọc ảnh rác, AI chọn ảnh hợp cảnh, không cắt chữ
+
+def _img(path, kind, size=(900, 600)):
+    from PIL import Image, ImageDraw
+    im = Image.new("RGB", size, (90, 120, 160))
+    d = ImageDraw.Draw(im)
+    if kind == "qr":                                           # đen–trắng như mã QR
+        im = Image.new("RGB", size, (255, 255, 255))
+        d = ImageDraw.Draw(im)
+        for x in range(0, size[0], 40):
+            for y in range(0, size[1], 40):
+                if (x // 40 * 7 + y // 40 * 3) % 2:
+                    d.rectangle((x, y, x + 39, y + 39), fill=(0, 0, 0))
+    elif kind == "photo":
+        for x in range(0, size[0], 25):
+            for y in range(0, size[1], 25):
+                d.rectangle((x, y, x + 25, y + 25), fill=((x * 3) % 200 + 30, (y * 2) % 180 + 40, (x + y) % 160 + 60))
+    elif kind == "photo2":
+        for x in range(0, size[0], 50):
+            for y in range(0, size[1], 50):
+                d.rectangle((x, y, x + 50, y + 50), fill=((y * 3) % 200 + 20, (x * 5) % 150 + 60, (x * y) % 140 + 80))
+    elif kind == "photo3":
+        for x in range(0, size[0], 60):
+            for y in range(0, size[1], 60):
+                d.ellipse((x, y, x + 60, y + 60), fill=((x + y * 2) % 220 + 20, (x * 2) % 140 + 90, (y * 3) % 170 + 40))
+    im.save(path, "JPEG")
+
+
+def test_heuristics_reject_qr_tiny_and_extreme_shapes(tmp_path):
+    for name, kind, size, ok in (("p", "photo", (900, 600), True), ("q", "qr", (900, 600), False), ("t", "photo", (300, 200), False),
+                                 ("w", "photo", (2400, 600), False), ("tall", "photo", (400, 1200), False)):
+        f = tmp_path / f"{name}.jpg"
+        _img(f, kind, size)
+        assert newslook.heuristic_ok(f) is ok, name
+    assert newslook.BAD_TITLE.search("Quét mã QR đăng ký tham dự") and newslook.BAD_TITLE.search("Poster hội thảo") and not newslook.BAD_TITLE.search("Cục Thuế TP.HCM hỗ trợ doanh nghiệp")
+
+
+def test_wide_poster_is_shown_whole_on_blurred_background_not_cropped(tmp_path):
+    """Poster 16:9 có chữ ở hai bên: nếu cắt cho vừa khung sẽ mất chữ ("THÁO GỠ VƯỚN…"). Phải đặt nguyên ảnh lên nền mờ."""
+    from PIL import Image, ImageDraw
+    f = tmp_path / "poster.jpg"
+    im = Image.new("RGB", (1600, 600), (20, 40, 120))
+    ImageDraw.Draw(im).rectangle((0, 250, 60, 350), fill=(255, 255, 0))                  # chữ sát mép trái
+    ImageDraw.Draw(im).rectangle((1540, 250, 1600, 350), fill=(255, 0, 0))               # và mép phải
+    im.save(f, "JPEG")
+    out = newslook._cover(f, 704, 493)
+    assert out.size == (704, 493)
+    row = [out.getpixel((x, 246)) for x in range(704)]
+    assert any(p[0] > 200 and p[1] > 200 and p[2] < 90 for p in row) and any(p[0] > 200 and p[1] < 80 for p in row)      # cả hai mép vẫn còn
+    sq = tmp_path / "sq.jpg"
+    Image.new("RGB", (800, 560), (200, 30, 30)).save(sq, "JPEG")
+    assert newslook._cover(sq, 704, 493).getpixel((2, 2))[0] > 150                                              # ảnh gần đúng tỉ lệ: cắt vừa khung như cũ
+
+
+def test_chunks_do_not_end_on_connectors_or_split_compounds():
+    chunks = newslook.news_chunks('tọa đàm "tháo gỡ vướng mắc về thuế và bảo hiểm xã hội" diễn ra', [])
+    assert all(not c.split()[-1].lower().strip('",.') in ("và", "về", "của", "bảo") for c in chunks) and not any(c.lower().endswith(" bảo") for c in chunks)
+    assert any("bảo hiểm xã hội" in c.lower() for c in chunks)
+    c2 = newslook.news_chunks("Doanh nghiệp cần kê khai thuế, hóa đơn điện tử đúng quy định.", [])
+    assert any("hóa đơn điện tử" in c for c in c2) and " ".join(c2).split() == "Doanh nghiệp cần kê khai thuế, hóa đơn điện tử đúng quy định.".split()
+
+
+def test_label_is_shortened_so_it_never_runs_into_the_logo(tmp_path):
+    from PIL import Image
+    dest = tmp_path / "bg.png"
+    cfg = {**video.DEFAULTS, "logo_text": "", "sig_name": ""}                                    # bỏ logo để chỉ còn nhãn
+    newslook.scene_background(cfg, None, "10.000 TỶ", dest, "ẢNH: THOIBAOTAICHINHVIETNAM.VN VA NHIEU HON NUA", 0)
+    im = Image.open(dest).convert("RGB")
+    assert any(min(im.getpixel((x, y))) > 200 for x in range(40, 200) for y in range(30, 76))      # nhãn có hiện
+    assert not any(min(im.getpixel((x, y))) > 200 for x in range(366, 720) for y in range(30, 76))   # nhưng không tràn quá nửa dải đầu (chừa chỗ cho logo)
+
+
+def test_article_pool_drops_the_same_poster_at_different_sizes(monkeypatch, tmp_path):
+    from PIL import Image
+    big, small, other = tmp_path / "big.jpg", tmp_path / "small.jpg", tmp_path / "other.jpg"
+    _img(big, "photo")
+    Image.open(big).resize((500, 333)).save(small, "JPEG", quality=50)
+    _img(other, "photo2")
+    srcs = {"https://x.vn/a.jpg": big, "https://x.vn/a-500.jpg": small, "https://x.vn/b.jpg": other}
+    monkeypatch.setattr(newslook, "_fetch_image", lambda u, ref, dest, *a, **k: dest.write_bytes(srcs[u].read_bytes()) or True)
+    pool = newslook._article_pool({"images": list(srcs), "article_url": "https://x.vn/bai"}, tmp_path)
+    assert len(pool) == 2                                                                       # bản nhỏ cùng ảnh bị loại
+
+
+def _web_setup(monkeypatch, tmp_path, gemini):
+    srcs = {"https://s.vn/qr.jpg": "qr", "https://s.vn/p1.jpg": "photo", "https://s.vn/p2.jpg": "photo2", "https://s.vn/p3.jpg": "photo3"}
+    monkeypatch.setattr(_imgsearch, "search", lambda q, cfg=None, n=10: [{"url": u, "page": "https://www.baochi.vn/x", "title": "Cục thuế"} for u in srcs])
+
+    def fetch(u, ref, dest, min_w=360, min_h=240):
+        _img(dest, srcs[u])
+        return True
+    monkeypatch.setattr(newslook, "_fetch_image", fetch)
+    monkeypatch.setattr(newsagent, "gemini_json", gemini)
+
+
+def test_ai_picks_a_fitting_photo_per_scene_and_rejects_junk(monkeypatch, tmp_path):
+    seen = {}
+
+    def gem(prompt, cfg, images=None, timeout=90):
+        seen["n"], seen["prompt"] = len(images), prompt
+        return {"scenes": [{"n": 1, "image": 2}, {"n": 2, "image": 3}, {"n": 3, "image": 2}], "bad": [1]}               # cảnh 3 chọn trùng ảnh 2 → bị bỏ; ảnh 1 bị loại
+    _web_setup(monkeypatch, tmp_path, gem)
+    scenes = [{"narration": f"Cảnh số {k} nói về hoàn thuế", "query": "hoàn thuế"} for k in range(3)]
+    ph = newslook.Photos({**video.DEFAULTS, "web_images": True}, tmp_path, "", None, [], "Hoàn thuế")
+    ph.prepare(scenes, "gemini-key")
+    assert seen["n"] == 3 and "mã QR" in seen["prompt"] and "TỐI ĐA MỘT lần" in seen["prompt"]
+    got = [ph.get(i, scenes[i]) for i in range(3)]
+    assert got[0][0].name != got[1][0].name and got[0][1] == "ẢNH: BAOCHI.VN"
+    assert ph.assigned.keys() == {0, 1} and ph.web_ok == 2 and ph.web_fail == 1
+    assert all(newslook.heuristic_ok(p) for p, _l, _v in got)                                       # ảnh QR không bao giờ được dùng (bị lọc từ đầu)
+    assert len(ph.bad) == 1 and not any(str(p) in ph.bad for p, _l in ph.gallery)                  # ảnh AI loại không còn trong kho dùng lại
+
+
+def test_without_ai_or_when_ai_fails_junk_is_still_filtered(monkeypatch, tmp_path):
+    def boom(prompt, cfg, images=None, timeout=90):
+        raise RuntimeError("hết lượt")
+    _web_setup(monkeypatch, tmp_path, boom)
+    scenes = [{"narration": "Hoàn thuế bị từ chối", "query": "hoàn thuế"}, {"narration": "Hóa đơn đầu vào", "query": "hóa đơn"}]
+    for key in ("gemini-key", ""):
+        ph = newslook.Photos({**video.DEFAULTS, "web_images": True}, tmp_path, "", None, [], "Hoàn thuế")
+        ph.prepare(scenes, key)
+        got = [ph.get(i, scenes[i]) for i in range(2)]
+        assert all(p is not None and newslook.heuristic_ok(p) for p, _l, _v in got) and got[0][0] != got[1][0]
