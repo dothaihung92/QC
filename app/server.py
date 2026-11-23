@@ -1096,7 +1096,7 @@ def video_create(body: ScriptIn):
         imgs = newslook.article_images(art) if art.startswith(("http://", "https://")) else []
         if body.image_url.strip() and body.image_url.strip() not in imgs:
             imgs.insert(0, body.image_url.strip())
-        opts = {"look": "news", "images": imgs[:12], "article_url": art}
+        opts = {"look": "news", "images": imgs[:12], "article_url": art, "topic": sc.get("topic") or []}
     vid = db.video_add(sc["title"], sc["description"], sc["scenes"], body.image_url.strip(), options=opts)
     return dict(video.to_json(db.video_get(vid)), format_name=sc.get("format_name", ""))
 
@@ -1116,8 +1116,8 @@ async def video_find_images(vid: int):
     def work():
         added = 0
         for i in range(len(imgs), len(scenes)):
-            q = imgsearch.scene_query(scenes[i], v["title"])
-            hit = next((c for c in imgsearch.search(q, cfg, 8) if c["url"] not in imgs), None) if q else None
+            q = imgsearch.scene_query(scenes[i], v["title"], opts.get("topic") or None)
+            hit = next((c for c in imgsearch.search(q, cfg, 8) if c["url"] not in imgs and imgsearch.relevant_meta(c, opts.get("topic") or imgsearch.topic_from_title(v["title"]))), None) if q else None
             if not hit:
                 break
             imgs.append(hit["url"])

@@ -11,7 +11,7 @@ HAS_TOOLS = all(importlib.util.find_spec(m) for m in ("PIL", "imageio_ffmpeg")) 
 
 ARTICLE = ("10 tháng đầu năm 2026, cơ quan thuế từ chối hoàn hơn 10.000 tỷ đồng vì hồ sơ thiếu. Bộ trưởng Tài chính cho biết "
            "doanh nghiệp cần rà soát hóa đơn đầu vào trước khi xin hoàn. Thời gian giải quyết giảm từ 50 ngày xuống 40 ngày. ") * 2
-AI = {"title": "Hoàn thuế bị từ chối", "headline": "10 tháng đầu năm 2026, cơ quan thuế từ chối hoàn hơn 10.000 tỷ đồng vì hồ sơ thiếu: doanh nghiệp nên rà soát hóa đơn trước khi xin hoàn",
+AI = {"title": "Hoàn thuế bị từ chối", "topic_terms": ["thuế", "bảo hiểm xã hội", "doanh nghiệp"], "headline": "10 tháng đầu năm 2026, cơ quan thuế từ chối hoàn hơn 10.000 tỷ đồng vì hồ sơ thiếu: doanh nghiệp nên rà soát hóa đơn trước khi xin hoàn",
       "hashtags": ["#HoanThue", "hoadondauvao"],
       "scenes": [{"narration": "10 tháng đầu năm nay, cơ quan thuế đã từ chối hoàn hơn 10.000 tỷ đồng tiền thuế.", "keyword": "tax office", "hl": ["từ chối hoàn", "10.000 tỷ đồng"]},
                  {"narration": "Nhiều hồ sơ bị trả vì thiếu hóa đơn đầu vào hợp lệ.", "keyword": "invoice", "hl": ["hóa đơn đầu vào"]},
@@ -62,7 +62,7 @@ def test_news_script_keeps_key_points_and_builds_facebook_caption(client, monkey
     seen = []
     monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: seen.append(p) or AI)
     v = client.post("/api/videos", json={"text": ARTICLE, "seconds": 30, "look": "news"}).json()
-    assert v["options"] == {"look": "news", "images": [], "article_url": ""} and len(v["scenes"]) == 3 and all(s["type"] == "news" for s in v["scenes"])
+    assert v["options"] == {"look": "news", "images": [], "article_url": "", "topic": ["thuế", "bảo hiểm xã hội", "doanh nghiệp"]} and len(v["scenes"]) == 3 and all(s["type"] == "news" for s in v["scenes"])
     assert v["scenes"][0]["hl"] == ["từ chối hoàn", "10.000 tỷ đồng"] and v["scenes"][0]["keyword"] == "tax office"
     assert "CHỈ GHI NHỮNG NỘI DUNG QUAN TRỌNG" in seen[0] and "TRUNG THỰC" in seen[0] and "đúng 7 cảnh" in seen[0] and "không dùng dấu /" in seen[0]
     d = v["description"]
@@ -172,7 +172,8 @@ def test_news_clip_stores_article_images_and_allows_editing(client, monkeypatch)
     monkeypatch.setattr(newsagent, "gemini_json", lambda p, cfg: AI)
     monkeypatch.setattr(newslook, "article_images", lambda url, limit=12: ["https://cdn.baochi.vn/1.jpg", "https://cdn.baochi.vn/2.jpg"] if url else [])
     v = client.post("/api/videos", json={"text": ARTICLE, "seconds": 30, "look": "news", "article_url": "https://baochi.vn/bai-1", "image_url": "https://x.vn/cover.jpg"}).json()
-    assert v["options"] == {"look": "news", "images": ["https://x.vn/cover.jpg", "https://cdn.baochi.vn/1.jpg", "https://cdn.baochi.vn/2.jpg"], "article_url": "https://baochi.vn/bai-1"}
+    assert v["options"] == {"look": "news", "images": ["https://x.vn/cover.jpg", "https://cdn.baochi.vn/1.jpg", "https://cdn.baochi.vn/2.jpg"], "article_url": "https://baochi.vn/bai-1",
+                            "topic": ["thuế", "bảo hiểm xã hội", "doanh nghiệp"]}
     e = client.put(f"/api/videos/{v['id']}", json={"images": ["https://a.vn/1.jpg", "", "ftp://bad", "https://a.vn/2.jpg"]}).json()
     assert e["options"]["images"] == ["https://a.vn/1.jpg", "https://a.vn/2.jpg"] and e["options"]["look"] == "news" and e["options"]["article_url"] == "https://baochi.vn/bai-1"
 
@@ -402,9 +403,9 @@ def test_web_photos_are_on_topic_but_different_from_article_photos(monkeypatch, 
     ImageDraw.Draw(other).rectangle((0, 0, 900, 300), fill=(30, 60, 160))
     queries = []
     monkeypatch.setattr(imgsearch, "search", lambda q, cfg=None, n=10: queries.append(q) or [
-        {"url": "https://x.vn/dup.jpg", "page": "https://www.baochi.vn/b1", "title": "", "w": 0, "h": 0},
-        {"url": "https://x.vn/new1.jpg", "page": "https://www.baochi.vn/b1", "title": "", "w": 0, "h": 0},
-        {"url": "https://x.vn/new2.jpg", "page": "https://tapchi.vn/b2", "title": "", "w": 0, "h": 0}])
+        {"url": "https://x.vn/dup.jpg", "page": "https://www.baochi.vn/b1", "title": "Hoàn thuế giá trị gia tăng", "w": 0, "h": 0},
+        {"url": "https://x.vn/new1.jpg", "page": "https://www.baochi.vn/b1", "title": "Cục thuế hoàn thuế cho doanh nghiệp", "w": 0, "h": 0},
+        {"url": "https://x.vn/new2.jpg", "page": "https://tapchi.vn/b2", "title": "Thủ tục hoàn thuế", "w": 0, "h": 0}])
 
     def fetch(url, ref, dest, min_w=360, min_h=240):
         (im if "dup" in url else other if "new1" in url else other.transpose(Image.FLIP_TOP_BOTTOM)).save(dest, "JPEG")
@@ -424,7 +425,7 @@ def test_find_images_endpoint_adds_one_web_photo_per_missing_scene(client, monke
     monkeypatch.setattr(newslook, "article_images", lambda url, limit=12: ["https://cdn.baochi.vn/1.jpg"])
     v = client.post("/api/videos", json={"text": ARTICLE, "seconds": 30, "look": "news", "article_url": "https://baochi.vn/b"}).json()
     seen = []
-    monkeypatch.setattr(imgsearch, "search", lambda q, cfg=None, n=10: seen.append(q) or [{"url": f"https://w.vn/{len(seen)}a.jpg"}, {"url": f"https://w.vn/{len(seen)}b.jpg"}])
+    monkeypatch.setattr(imgsearch, "search", lambda q, cfg=None, n=10: seen.append(q) or [{"url": f"https://w.vn/{len(seen)}a.jpg", "title": "Hoàn thuế"}, {"url": f"https://w.vn/{len(seen)}b.jpg", "title": "Hoàn thuế"}])
     r = client.post(f"/api/videos/{v['id']}/find-images").json()
     assert r["added"] == 2 and r["scenes"] == 3 and r["images"] == ["https://cdn.baochi.vn/1.jpg", "https://w.vn/1a.jpg", "https://w.vn/2a.jpg"]
     assert len(seen) == 2 and client.post(f"/api/videos/9999/find-images").status_code == 404
@@ -564,3 +565,64 @@ def test_without_ai_or_when_ai_fails_junk_is_still_filtered(monkeypatch, tmp_pat
         ph.prepare(scenes, key)
         got = [ph.get(i, scenes[i]) for i in range(2)]
         assert all(p is not None and newslook.heuristic_ok(p) for p, _l, _v in got) and got[0][0] != got[1][0]
+
+
+# ---------------------------------------------------------------- ảnh phải KHỚP nội dung bài
+
+def test_queries_are_anchored_to_the_article_topic_and_results_are_gated_by_title():
+    from app import imgsearch
+    topic = ["thuế", "bảo hiểm xã hội"]
+    assert imgsearch.anchor_query("chi phí vận hành", topic) == "thuế chi phí vận hành"                  # thiếu từ khóa chủ đề → gắn vào (không ra bàn phím, sách...)
+    assert imgsearch.anchor_query("sổ bảo hiểm xã hội", topic) == "sổ bảo hiểm xã hội"
+    assert imgsearch.scene_query({"query": "hóa đơn điện tử"}, "Hoàn thuế", ["thuế"]) == "thuế hóa đơn điện tử"
+    assert "thuế" in imgsearch.scene_query({"narration": "Chi phí vận hành tăng nhẹ."}, "Hoàn thuế bị từ chối")
+    ok = lambda title, page="https://a.vn/x": imgsearch.relevant_meta({"title": title, "page": page, "url": "https://cdn.a.vn/i.jpg"}, topic)       # noqa: E731
+    assert ok("Sổ BẢO HIỂM XÃ HỘI mới") and ok("Hướng dẫn kê khai thuế") and ok("", "https://a.vn/tin/bao-hiem-xa-hoi-2024")
+    assert not ok("Bàn phím cơ Corsair K70") and not ok("Bàn phím không dây", "https://maytinhbaoloc.vn/ban-phim") and not ok("Lãnh tụ Iran phát biểu")
+
+
+def test_web_photos_with_unrelated_titles_are_never_used_even_without_ai(monkeypatch, tmp_path):
+    """Lỗi thực tế: tìm "chi phí vận hành" ra bàn phím, sách, lãnh tụ Iran, Bitcoin. Không có AI vẫn phải chặn theo tiêu đề kết quả."""
+    srcs = {"https://s.vn/kb.jpg": "photo", "https://s.vn/book.jpg": "photo2", "https://s.vn/bhxh.jpg": "photo3"}
+    titles = {"https://s.vn/kb.jpg": "Bàn phím cơ giá rẻ", "https://s.vn/book.jpg": "Chồng sách mở", "https://s.vn/bhxh.jpg": "Sổ bảo hiểm xã hội và thuế"}
+    monkeypatch.setattr(_imgsearch, "search", lambda q, cfg=None, n=10: [{"url": u, "page": "https://www.luatvietnam.vn/p", "title": titles[u]} for u in srcs])
+    monkeypatch.setattr(newslook, "_fetch_image", lambda u, ref, dest, min_w=360, min_h=240: _img(dest, srcs[u]) or True)
+    scenes = [{"narration": "Chi phí vận hành tăng", "query": "chi phí vận hành"}]
+    ph = newslook.Photos({**video.DEFAULTS, "web_images": True}, tmp_path, "", None, [], "Thuế và bảo hiểm xã hội", ["thuế", "bảo hiểm xã hội"])
+    ph.prepare(scenes, "")
+    assert ph.assigned[0][0].name.endswith(".img") and len(ph.gallery) == 1                 # chỉ ảnh có tiêu đề khớp chủ đề được giữ
+    assert not any("kb" in str(p) for p, _ in ph.gallery)
+
+
+def test_ai_low_score_pick_is_dropped_and_ai_failure_is_reported(monkeypatch, tmp_path, client):
+    seen = {}
+
+    def gem(prompt, cfg, images=None, timeout=90):
+        seen["p"] = prompt
+        return {"scenes": [{"n": 1, "image": 1, "score": 4}, {"n": 2, "image": 2, "score": 9}], "bad": []}
+    _web_setup(monkeypatch, tmp_path, gem)
+    scenes = [{"narration": "Hoàn thuế bị từ chối", "query": "hoàn thuế"}, {"narration": "Hóa đơn đầu vào", "query": "hóa đơn"}]
+    ph = newslook.Photos({**video.DEFAULTS, "web_images": True}, tmp_path, "", None, [], "Hoàn thuế", ["thuế"])
+    ph.prepare(scenes, "k")
+    assert 0 not in ph.assigned and 1 in ph.assigned                                        # điểm liên quan 4/10 → bỏ, không chọn bừa
+    assert "score" in seen["p"] and "TUYỆT ĐỐI đừng chọn bừa" in seen["p"] and "bàn phím" in seen["p"] and "nước ngoài" in seen["p"] and "thuế" in seen["p"]
+
+
+@pytest.mark.skipif(not HAS_TOOLS, reason="cần pillow + imageio-ffmpeg")
+def test_clip_note_reports_when_ai_could_not_pick_photos(client, monkeypatch, tmp_path):
+    _fake_tts(monkeypatch)
+    db.set_setting("newsagent", {"gemini_key": "k"})
+    calls = []
+
+    def gem(prompt, cfg, images=None, timeout=90):
+        calls.append(images is not None)
+        if images is not None:
+            raise RuntimeError("quota exceeded")
+        return AI
+    monkeypatch.setattr(newsagent, "gemini_json", gem)
+    monkeypatch.setattr(newslook, "article_images", lambda url, limit=12: ["https://cdn.baochi.vn/1.jpg"])
+    monkeypatch.setattr(newslook, "_fetch_image", lambda url, ref, dest, *a, **k: _img(dest, "photo") or True)
+    v = client.post("/api/videos", json={"text": ARTICLE, "seconds": 30, "look": "news", "article_url": "https://baochi.vn/b"}).json()
+    client.post(f"/api/videos/{v['id']}/render")
+    d = db.video_get(v["id"])
+    assert d["status"] == "done" and "AI chưa chọn được ảnh" in d["error"] and "quota" in d["error"] and True in calls

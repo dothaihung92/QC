@@ -34,13 +34,14 @@ QUY TẮC:
 - TRUNG THỰC: giữ nguyên số tiền, tỷ lệ, ngày tháng, số hiệu văn bản, tên cơ quan/người như bài gốc. Không thêm số liệu, không thêm điều bài không nói.
 - Con số / số tiền / tỷ lệ viết bằng chữ số như bài gốc (vd "10.000 tỷ đồng", "30%", "50 ngày") để hiện nổi bật trên màn hình; ngày tháng viết "ngày 12 tháng 11" (không dùng dấu /).
 - "keyword": từ khóa TIẾNG ANH 2–4 từ để tìm ảnh minh họa (văn phòng thuế, tiền, hóa đơn, họp quốc hội, doanh nghiệp...), ảnh không chứa chữ; mỗi cảnh một từ khóa KHÁC nhau.
-- "query": cụm TÌM ẢNH bằng TIẾNG VIỆT 3–6 từ cho đúng ý của cảnh (vd "cơ quan thuế hoàn thuế", "hóa đơn điện tử", "kế toán làm việc văn phòng"), không chứa con số hay tên riêng quá hiếm; mỗi cảnh một cụm KHÁC nhau.
+- "topic_terms": 3–6 TỪ KHÓA CHỦ ĐỀ cốt lõi của cả bài bằng tiếng Việt (vd ["thuế", "bảo hiểm xã hội", "doanh nghiệp"]).
+- "query": cụm TÌM ẢNH bằng TIẾNG VIỆT 3–6 từ cho đúng ý của cảnh, BẮT BUỘC chứa ít nhất 1 từ khóa chủ đề ở "topic_terms" (vd "cơ quan thuế hoàn thuế", "hóa đơn điện tử doanh nghiệp", "sổ bảo hiểm xã hội"), không chứa con số hay tên riêng quá hiếm; mỗi cảnh một cụm KHÁC nhau. Tuyệt đối không dùng từ chung chung dễ ra ảnh lạc đề (sách, bàn phím, tiền mã hóa...).
 - "hl": 1–3 cụm từ viết NGUYÊN VĂN như trong "narration" cần nhấn mạnh trên màn hình (con số, hành động chính, vd "từ chối hoàn", "10.000 tỷ đồng").
 - "headline": 1–2 câu (tối đa 40 từ) tóm tắt tin để làm dòng đầu bài đăng Facebook, có con số chính, trung thực, không emoji, không giật tít sai sự thật.
 - "hashtags": 3–4 hashtag không dấu viết liền dạng CamelCase (vd #HoanThue #HoaDonDauVao).
 - Không tự thêm cảnh giới thiệu công ty hay kêu gọi liên hệ (phần mềm tự thêm cảnh cuối).
 {brand}
-Trả về JSON: {{"title": "tiêu đề ngắn của clip", "headline": "...", "hashtags": ["#..."],
+Trả về JSON: {{"title": "tiêu đề ngắn của clip", "headline": "...", "hashtags": ["#..."], "topic_terms": ["..."],
  "scenes": [{{"narration": "...", "keyword": "english stock photo keywords", "query": "cụm tìm ảnh tiếng Việt", "hl": ["cụm nhấn mạnh"]}}]}}
 
 BÀI VIẾT:
@@ -125,7 +126,8 @@ def make_script(text: str, seconds: int, cfg: dict) -> dict:
     tags = [str(t) for t in (out.get("hashtags") or []) if str(t).strip()][:4]
     title = str(out.get("title", "")).strip()[:200]
     headline = str(out.get("headline", "")).strip() or title
-    return {"title": title, "format": "news", "format_name": "Tin nhanh (ảnh + chữ nhấn mạnh)",
+    topic = [str(t).strip() for t in (out.get("topic_terms") or []) if str(t).strip()][:6]
+    return {"title": title, "format": "news", "format_name": "Tin nhanh (ảnh + chữ nhấn mạnh)", "topic": topic,
             "description": compose_caption(headline, tags, cfg)[:2000], "scenes": scenes}
 
 
@@ -581,8 +583,10 @@ class Photos:
     """Kho ảnh của clip: mọi cảnh đều phải có ảnh. Thứ tự: ảnh trong bài → ảnh AI (nếu bật) → Pexels (nhiều từ khóa, ảnh khác nhau)
     → dùng lại ảnh đã có nhưng CẮT Ở CHỖ KHÁC → ảnh đại diện của bài → (cuối cùng) ô con số."""
 
-    def __init__(self, cfg: dict, work: Path, gkey: str, article, pool: list, title: str = ""):
+    def __init__(self, cfg: dict, work: Path, gkey: str, article, pool: list, title: str = "", topic: list = None):
         self.cfg, self.work, self.gkey, self.article, self.title = cfg, work, gkey, article, title
+        self.topic = list(topic) if topic else imgsearch.topic_from_title(title)
+        self.ai_error = ""
         self.pool, self.gallery, self.seen, self.uses = list(pool), list(pool), set(), {}
         self.pexels_ok = self.pexels_fail = self.web_ok = self.web_fail = 0
         self.web_cache, self.web_used, self.hashes = {}, set(), []
@@ -604,12 +608,15 @@ class Photos:
             for i, sc in enumerate(scenes):
                 if i < len(self.pool) and not vkey:
                     continue                                              # đã có ảnh trong bài cho cảnh này, không cần AI chọn
-                q = imgsearch.scene_query(sc, self.title)
+                q = imgsearch.scene_query(sc, self.title, self.topic)
                 if q and q not in self.web_cache:
-                    self.web_cache[q] = imgsearch.search(q, self.cfg, 6)
-                for k, c in enumerate((self.web_cache.get(q) or [])[:4]):
-                    if not BAD_TITLE.search(c.get("title", "") or ""):
-                        jobs.append((i, k, c))
+                    self.web_cache[q] = imgsearch.search(q, self.cfg, 8)
+                res = [c for c in (self.web_cache.get(q) or []) if not BAD_TITLE.search(c.get("title", "") or "")]
+                good = [c for c in res if imgsearch.relevant_meta(c, self.topic)]          # tiêu đề / địa chỉ phải nhắc tới chủ đề bài
+                if len(good) < 2 and vkey:                                                  # có AI xem ảnh: cho thêm vài kết quả chưa rõ tiêu đề
+                    good += [c for c in res if c not in good][:2]
+                for k, c in enumerate(good[:4]):
+                    jobs.append((i, k, c))
             jobs = jobs[:36]
 
             def get(job):
@@ -669,17 +676,21 @@ class Photos:
         listing = "\n".join(f"- Ảnh {k + 1}: {'ảnh trong bài báo' if c['src'] == 'article' else 'tìm trên web cho cảnh ' + str(c['scene'] + 1)} ({c['label'].replace('ẢNH: ', '')})"
                             for k, c in enumerate(cands[:40]))
         scn = "\n".join(f"- Cảnh {i + 1}: {sc.get('narration', '')}" for i, sc in enumerate(scenes))
-        prompt = (f'Bạn chọn ẢNH MINH HỌA cho clip tin ngắn về: "{self.title}".\nCÁC CẢNH (lời đọc):\n{scn}\n\nẢNH ỨNG VIÊN (gửi kèm theo đúng thứ tự):\n{listing}\n\n'
-                  'YÊU CẦU:\n- Chọn cho MỖI CẢNH một ảnh hợp nhất với nội dung cảnh: ảnh chụp thật, rõ, liên quan chủ đề thuế / kế toán / doanh nghiệp / bảo hiểm / hóa đơn / '
-                  'quan chức phát biểu / văn phòng / giao dịch / tiền...\n- Mỗi ảnh chỉ dùng TỐI ĐA MỘT lần. Cảnh nào không có ảnh phù hợp thì để null — đừng chọn bừa.\n'
+        prompt = (f'Bạn chọn ẢNH MINH HỌA cho clip tin ngắn của một công ty dịch vụ kế toán – thuế Việt Nam. Chủ đề bài: "{self.title}" '
+                  f'(từ khóa: {", ".join(self.topic) or "—"}).\nCÁC CẢNH (lời đọc):\n{scn}\n\nẢNH ỨNG VIÊN (gửi kèm theo đúng thứ tự):\n{listing}\n\n'
+                  'YÊU CẦU:\n- Chọn cho MỖI CẢNH một ảnh LIÊN QUAN TRỰC TIẾP tới nội dung cảnh và chủ đề bài (ở Việt Nam): ảnh chụp thật, rõ — cơ quan thuế, người nộp thuế, hóa đơn, '
+                  'sổ / thẻ bảo hiểm xã hội, doanh nghiệp, kế toán làm việc, quan chức Việt Nam phát biểu về chính sách, hội nghị, giao dịch, tiền đồng...\n'
+                  '- Cho điểm "score" 0–10 độ liên quan của ảnh với cảnh. CHỈ chọn khi score ≥ 7. Cảnh nào không có ảnh liên quan thì để image = null — TUYỆT ĐỐI đừng chọn bừa.\n- Mỗi ảnh chỉ dùng TỐI ĐA MỘT lần.\n'
                   '- Ưu tiên ảnh đa dạng (không chọn nhiều ảnh gần giống nhau) và ảnh trong bài báo khi nó hợp với cảnh.\n'
                   '- Đưa vào "bad" mọi ảnh KHÔNG DÙNG ĐƯỢC: mã QR, poster / banner / ảnh bìa nhiều chữ, logo, biểu tượng, hoạt hình / clipart / tranh vẽ, bản vẽ kỹ thuật / CAD, '
-                  'ảnh chụp màn hình, ảnh mờ / vỡ, ảnh KHÔNG LIÊN QUAN chủ đề (sản phẩm, điện thoại, thú cưng, thể thao...).\n'
-                  'Trả về JSON: {"scenes": [{"n": 1, "image": 3}], "bad": [2, 5]} (image = số thứ tự ảnh bắt đầu từ 1, hoặc null).')
+                  'ảnh chụp màn hình, ảnh mờ / vỡ, ảnh KHÔNG LIÊN QUAN chủ đề (bàn phím, máy tính, sách vở chung chung, điện thoại, thú cưng, thể thao, tiền mã hóa, '
+                  'chính trị gia / người nổi tiếng nước ngoài, quảng cáo sản phẩm...).\n'
+                  'Trả về JSON: {"scenes": [{"n": 1, "image": 3, "score": 9}], "bad": [2, 5]} (image = số thứ tự ảnh bắt đầu từ 1, hoặc null).')
         try:
             out = newsagent.gemini_json(prompt, newsagent.get_config(), images=thumbs, timeout=180)
         except Exception as e:  # noqa: BLE001
-            V._log(f"AI chọn ảnh lỗi, dùng cách chọn đơn giản — {str(e)[:100]}")
+            self.ai_error = str(e)[:140]
+            V._log(f"AI chọn ảnh lỗi, chỉ dùng ảnh khớp từ khóa chủ đề — {self.ai_error}")
             return None
         bad = {int(x) - 1 for x in (out.get("bad") or []) if str(x).lstrip("-").isdigit() and 1 <= int(x) <= len(thumbs)}
         assign, used = {}, set()
@@ -687,6 +698,8 @@ class Photos:
             try:
                 n, k = int(it.get("n")) - 1, it.get("image")
                 k = int(k) - 1 if k is not None else None
+                if k is not None and float(it.get("score", 10)) < 7:
+                    k = None                                                    # AI tự chấm không đủ liên quan → bỏ
             except (TypeError, ValueError):
                 continue
             if k is not None and 0 <= n < len(scenes) and 0 <= k < len(cands) and k not in used and k not in bad and n not in assign:
@@ -696,13 +709,13 @@ class Photos:
 
     def _web(self, i: int, sc: dict):
         """Tìm ảnh trên web (Google / Bing) cùng chủ đề cảnh, khác mọi ảnh đã dùng. Trả (đường dẫn, nhãn) hoặc None."""
-        q = imgsearch.scene_query(sc, self.title)
+        q = imgsearch.scene_query(sc, self.title, self.topic)
         if not q:
             return None
         if q not in self.web_cache:
             self.web_cache[q] = imgsearch.search(q, self.cfg, 10)
         tries = 0
-        for c in self.web_cache[q]:
+        for c in [c for c in self.web_cache[q] if imgsearch.relevant_meta(c, self.topic)]:
             if c["url"] in self.web_used or tries >= 6:
                 continue
             tries += 1
@@ -834,7 +847,7 @@ def render(video_id: int):
     if cta_text or phone:                                         # cảnh cuối tự thêm: thẻ liên hệ + lời kêu gọi
         spoken = (cta_text.rstrip(". ") + ". " if cta_text else "") + (f"Liên hệ số điện thoại {phone}." if phone else "")
         items.append(({"narration": spoken.strip(), "type": "cta", "hl": [], "keyword": "", "visual": "", "headline": ""}, True))
-    photos = Photos(cfg, work, gkey, article, pool, v["title"])
+    photos = Photos(cfg, work, gkey, article, pool, v["title"], opts.get("topic"))
     if (cfg.get("web_images", True) or pool) and scenes:
         step("AI chọn ảnh cho từng cảnh")
         photos.prepare(scenes, newsagent.get_config().get("gemini_key", ""))
@@ -892,6 +905,8 @@ def render(video_id: int):
         why = V.pexels_last["err"] or "không tìm được ảnh phù hợp"
         notes.append(f"{photos.pexels_fail} cảnh không lấy được ảnh Pexels ({why}) — đã dùng lại ảnh khác của bài (cắt chỗ khác)."
                      if photos.gallery else f"{photos.pexels_fail} cảnh không lấy được ảnh Pexels ({why}) nên hiện ô con số.")
+    if photos.ai_error:
+        notes.append(f"AI chưa chọn được ảnh ({photos.ai_error}) nên chỉ dùng ảnh có tiêu đề khớp chủ đề bài.")
     note = " ".join(notes)
     db.video_update(video_id, status="done", path=str(out), duration=round(length, 1), progress="", error=note)
     db.log("video", f"Đã dựng clip tin nhanh #{video_id}: {v['title']} ({length:.0f}s)")

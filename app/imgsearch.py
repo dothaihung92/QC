@@ -112,11 +112,38 @@ def similar(a: int, b: int, tol: int = 8) -> bool:
 _STOP = set("và của là có cho các một những được trong với này để khi đã sẽ bị cũng như từ đến tại về theo năm tháng ngày không còn hơn nhiều rất đang vì nên thì mà".split())
 
 
-def scene_query(sc: dict, title: str = "") -> str:
-    """Cụm tìm ảnh tiếng Việt: AI viết sẵn ("query") hoặc rút từ lời đọc (bỏ số và từ nối) + chủ đề của clip."""
+def norm(t: str) -> str:
+    import unicodedata
+    t = unicodedata.normalize("NFD", (t or "").lower().replace("đ", "d"))
+    return re.sub(r"\s+", " ", "".join(c for c in t if unicodedata.category(c) != "Mn")).strip()
+
+
+def topic_from_title(title: str) -> list:
+    """Không có từ khóa chủ đề từ AI: lấy các từ có nghĩa trong tiêu đề clip."""
+    return list(dict.fromkeys(w for w in re.findall(r"[\w]+", title or "") if w.lower() not in _STOP and len(w) > 2 and not re.search(r"\d", w)))[:5]
+
+
+def anchor_query(q: str, topic: list) -> str:
+    """Cụm tìm ảnh luôn phải chứa từ khóa chủ đề của bài (vd "thuế", "bảo hiểm xã hội") — nếu không tìm kiếm sẽ ra ảnh lạc đề (bàn phím, sách, người nước ngoài...)."""
+    nq = norm(q)
+    if topic and not any(norm(t) in nq for t in topic):
+        return f"{topic[0]} {q}".strip()[:100]
+    return q
+
+
+def relevant_meta(item: dict, topic: list) -> bool:
+    """Tiêu đề / địa chỉ của kết quả có nhắc tới chủ đề bài không? (lọc nhanh trước khi tải ảnh)"""
+    if not topic:
+        return True
+    blob = norm(f"{item.get('title', '')} {urlparse(item.get('page') or '').path} {urlparse(item.get('url') or '').path}".replace("-", " ").replace("_", " "))
+    return any(norm(t) in blob for t in topic)
+
+
+def scene_query(sc: dict, title: str = "", topic: list = None) -> str:
+    """Cụm tìm ảnh tiếng Việt: AI viết sẵn ("query") hoặc rút từ lời đọc (bỏ số và từ nối) + chủ đề; luôn gắn từ khóa chủ đề của bài."""
     q = (sc.get("query") or "").strip()
-    if q:
-        return q[:90]
-    words = [w for w in re.findall(r"[\w]+", sc.get("narration", "")) if not re.search(r"\d", w) and w.lower() not in _STOP and len(w) > 2]
-    topic = [w for w in re.findall(r"[\w]+", title or "") if w.lower() not in _STOP and len(w) > 2][:3]
-    return " ".join(dict.fromkeys([*words[:5], *topic]))[:90]
+    if not q:
+        words = [w for w in re.findall(r"[\w]+", sc.get("narration", "")) if not re.search(r"\d", w) and w.lower() not in _STOP and len(w) > 2]
+        tw = [w for w in re.findall(r"[\w]+", title or "") if w.lower() not in _STOP and len(w) > 2][:3]
+        q = " ".join(dict.fromkeys([*words[:4], *tw]))
+    return anchor_query(q, topic if topic is not None else topic_from_title(title))[:100]
